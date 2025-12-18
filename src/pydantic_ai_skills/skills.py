@@ -1,6 +1,7 @@
 """Anthropic Agent Skills for pydantic-ai."""
 
-from typing import Any, Callable, Dict, List, Optional
+import re
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
@@ -94,7 +95,7 @@ class DataExtractionSkill(Skill):
             },
             "data_type": {
                 "type": "string",
-                "description": "The type of data to extract (e.g., 'email', 'phone', 'date')",
+                "description": "The type of data to extract (e.g., 'email', 'phone', 'url')",
             },
         }
     )
@@ -109,8 +110,6 @@ class DataExtractionSkill(Skill):
         Returns:
             List of extracted data items
         """
-        import re
-
         if data_type == "email":
             pattern = r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"
             return re.findall(pattern, text)
