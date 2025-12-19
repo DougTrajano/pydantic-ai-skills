@@ -379,6 +379,7 @@ class SkillsToolset(FunctionToolset):
         validate: bool = True,
         toolset_id: str = 'skills',
         script_timeout: int = 30,
+        python_executable: str | Path | None = None,
     ) -> None:
         """Initialize the skills toolset.
 
@@ -388,12 +389,15 @@ class SkillsToolset(FunctionToolset):
             validate: Validate skill structure and metadata on load.
             toolset_id: Unique identifier for this toolset.
             script_timeout: Timeout in seconds for script execution (default: 30).
+            python_executable: Path to Python executable for running scripts.
+                If None, uses sys.executable (default).
         """
         super().__init__(id=toolset_id)
 
         self._directories = [Path(d) for d in directories]
         self._validate = validate
         self._script_timeout = script_timeout
+        self._python_executable = str(python_executable) if python_executable else sys.executable
         self._skills: dict[str, Skill] = {}
 
         if auto_discover:
@@ -584,7 +588,7 @@ class SkillsToolset(FunctionToolset):
                 return 'Error: Script path escapes skill directory.'
 
             # Build command
-            cmd = [sys.executable, str(script.path)]
+            cmd = [self._python_executable, str(script.path)]
             if args:
                 cmd.extend(args)
 
