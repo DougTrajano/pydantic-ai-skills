@@ -11,12 +11,12 @@ This package implements [Anthropic's Agent Skills framework](https://platform.cl
 
 ## Features
 
-✅ **Progressive Disclosure** - Load skill information only when needed, reducing token usage
-✅ **Anthropic-Compatible** - Skills are structurally compatible with Anthropic's Agent Skills
-✅ **Type-Safe** - Built with Python dataclasses and type hints
-✅ **Validation** - Automatic validation of skill metadata and structure
-✅ **Multiple Directories** - Load skills from multiple sources
-✅ **Security** - Path traversal prevention and safe script execution
+- **Progressive Disclosure** - Load skill information only when needed, reducing token usage
+- **Anthropic-Compatible** - Skills are structurally compatible with Anthropic's Agent Skills
+- **Type-Safe** - Built with Python dataclasses and type hints
+- **Validation** - Automatic validation of skill metadata and structure
+- **Multiple Directories** - Load skills from multiple sources
+- **Security** - Path traversal prevention and safe script execution
 
 Full documentation available at: [https://dougtrajano.github.io/pydantic-ai-skills](https://dougtrajano.github.io/pydantic-ai-skills)
 
@@ -242,7 +242,7 @@ If you do not add this to your agent's system prompt, the agent can still use th
 - [Agent Skills Cookbook](https://github.com/anthropics/claude-cookbooks/tree/main/skills)
 - [Introducing Agent Skills | Claude](https://www.claude.com/blog/skills)
 - [Using skills with Deep Agents](https://blog.langchain.com/using-skills-with-deep-agents/)
-- [vstorm-co/pydantic-deepagents: Python Deep Agent framework built on top of Pydantic-AI designed to help you quickly build production-grade autonomous agents with planning, filesystem operations, subagent delegation, and skills.](https://github.com/vstorm-co/pydantic-deepagents)
+- [vstorm-co/pydantic-deepagents](https://github.com/vstorm-co/pydantic-deepagents)
 
 ## Acknowledgments
 
@@ -252,7 +252,7 @@ If you do not add this to your agent's system prompt, the agent can still use th
 
 ## Contributing
 
-Contributions are welcome! Please see TBD.
+Contributions are welcome! Please see [Contributing - Pydantic AI - Agent Skills](https://dougtrajano.github.io/pydantic-ai-skills/contributing/).
 
 ## License
 
