@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pydantic-ai-skills"
-version = "0.1.0"
+version = "0.1.1"
 description = "A lightweight agent skill implementation for Pydantic AI"
 authors = [
     { name = "Douglas Trajano", email = "douglas.trajano@outlook.com" },
