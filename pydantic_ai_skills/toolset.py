@@ -18,12 +18,12 @@ from __future__ import annotations
 
 import logging
 import re
-import subprocess
 import sys
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+import anyio
 import yaml
 from pydantic_ai import RunContext
 from pydantic_ai.toolsets import FunctionToolset
@@ -50,14 +50,12 @@ RESERVED_WORDS = {'anthropic', 'claude'}
 
 def _validate_skill_metadata(
     frontmatter: dict[str, Any],
-    skill_path: Path,
     instructions: str,
 ) -> list[str]:
     """Validate skill metadata against Anthropic's requirements.
 
     Args:
         frontmatter: Parsed YAML frontmatter.
-        skill_path: Path to the skill directory.
         instructions: The skill instructions content.
 
     Returns:
@@ -290,7 +288,7 @@ def discover_skills(
 
                 # Validate metadata (log warnings)
                 if validate:
-                    validation_warnings = _validate_skill_metadata(frontmatter, skill_folder, instructions)
+                    validation_warnings = _validate_skill_metadata(frontmatter, instructions)
                     for warning in validation_warnings:
                         logger.warning('Skill "%s" at %s: %s', name, skill_folder, warning)
 
@@ -311,7 +309,8 @@ def discover_skills(
                 skills.append(skill)
                 logger.debug('Discovered skill: %s at %s', name, skill_folder)
 
-            except SkillValidationError:
+            except SkillValidationError as e:
+                logger.exception('Skill validation error in %s: %s', skill_file, e)
                 raise
             except OSError as e:
                 logger.warning('Failed to load skill from %s: %s', skill_file, e)
@@ -420,7 +419,7 @@ class SkillsToolset(FunctionToolset):
         """
 
         @self.tool
-        async def list_skills(ctx: RunContext[Any]) -> str:
+        async def list_skills(_ctx: RunContext[Any]) -> str:
             """List all available skills with their descriptions.
 
             Only use this tool if the available skills are not in your system prompt.
@@ -590,29 +589,36 @@ class SkillsToolset(FunctionToolset):
             logger.info('Running script: %s with args: %s', script_name, args)
 
             try:
-                result = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=self._script_timeout,
-                    cwd=str(skill.path),
-                    check=False,  # We handle return codes manually
-                )
+                # Use anyio.run_process for async-compatible execution
+                result = None
+                with anyio.move_on_after(self._script_timeout) as scope:
+                    result = await anyio.run_process(
+                        cmd,
+                        check=False,  # We handle return codes manually
+                        cwd=str(skill.path),
+                    )
 
-                output = result.stdout
+                # Check if timeout was reached
+                if scope.cancelled_caught:
+                    logger.error('Script %s timed out after %d seconds', script_name, self._script_timeout)
+                    raise SkillScriptExecutionError(
+                        f"Script '{script_name}' timed out after {self._script_timeout} seconds"
+                    )
+
+                # At this point, result should be set (timeout check passed)
+                assert result is not None
+
+                # Decode output from bytes to string
+                output = result.stdout.decode('utf-8', errors='replace')
                 if result.stderr:
-                    output += f'\n\nStderr:\n{result.stderr}'
+                    stderr = result.stderr.decode('utf-8', errors='replace')
+                    output += f'\n\nStderr:\n{stderr}'
 
                 if result.returncode != 0:
                     output += f'\n\nScript exited with code {result.returncode}'
 
                 return output.strip() or '(no output)'
 
-            except subprocess.TimeoutExpired as exc:
-                logger.error('Script %s timed out after %d seconds', script_name, self._script_timeout)
-                raise SkillScriptExecutionError(
-                    f"Script '{script_name}' timed out after {self._script_timeout} seconds"
-                ) from exc
             except OSError as e:
                 logger.error('Failed to execute script %s: %s', script_name, e)
                 raise SkillScriptExecutionError(f"Failed to execute script '{script_name}': {e}") from e

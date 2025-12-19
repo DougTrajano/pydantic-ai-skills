@@ -82,7 +82,7 @@ description: |
 # Content
 """
 
-    frontmatter, instructions = parse_skill_md(content)
+    frontmatter, _ = parse_skill_md(content)
 
     assert 'multiline' in frontmatter['description']
     assert 'description for testing' in frontmatter['description']
@@ -106,7 +106,7 @@ metadata:
 # Complex Skill
 """
 
-    frontmatter, instructions = parse_skill_md(content)
+    frontmatter, _ = parse_skill_md(content)
 
     assert frontmatter['name'] == 'complex-skill'
     assert frontmatter['tags'] == ['testing', 'example']

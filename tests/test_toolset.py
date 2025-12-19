@@ -229,9 +229,8 @@ def test_get_skills_system_prompt(sample_skills_dir: Path) -> None:
     assert 'read_skill_resource' in prompt
     assert 'run_skill_script' in prompt
 
-    # Should mention resources and scripts (in some form)
-    assert 'FORMS.md' in prompt or 'REFERENCE.md' in prompt
-    assert 'hello' in prompt or 'echo' in prompt
+    # Should include progressive disclosure guidance
+    assert 'Progressive disclosure' in prompt or 'progressive disclosure' in prompt
 
 
 def test_get_skills_system_prompt_empty() -> None:

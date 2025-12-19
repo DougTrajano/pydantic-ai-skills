@@ -1,7 +1,5 @@
 """Tests for validation functionality."""
 
-from pathlib import Path
-
 from pydantic_ai_skills.toolset import _validate_skill_metadata
 
 
@@ -11,7 +9,7 @@ def test_validate_skill_metadata_valid() -> None:
         'name': 'test-skill',
         'description': 'A valid test skill',
     }
-    warnings = _validate_skill_metadata(frontmatter, Path('/tmp/skill'), 'Content here.')
+    warnings = _validate_skill_metadata(frontmatter, 'Content here.')
     assert len(warnings) == 0
 
 
@@ -21,7 +19,7 @@ def test_validate_skill_metadata_name_too_long() -> None:
         'name': 'a' * 65,
         'description': 'Test',
     }
-    warnings = _validate_skill_metadata(frontmatter, Path('/tmp/skill'), 'Content')
+    warnings = _validate_skill_metadata(frontmatter, 'Content')
 
     assert len(warnings) == 1
     assert '64 characters' in warnings[0]
@@ -33,7 +31,7 @@ def test_validate_skill_metadata_invalid_name_format() -> None:
         'name': 'Invalid_Name_With_Underscores',
         'description': 'Test',
     }
-    warnings = _validate_skill_metadata(frontmatter, Path('/tmp/skill'), 'Content')
+    warnings = _validate_skill_metadata(frontmatter, 'Content')
 
     assert len(warnings) >= 1
     assert any('lowercase letters, numbers, and hyphens' in w for w in warnings)
@@ -45,7 +43,7 @@ def test_validate_skill_metadata_reserved_word() -> None:
         'name': 'anthropic-helper',
         'description': 'Test',
     }
-    warnings = _validate_skill_metadata(frontmatter, Path('/tmp/skill'), 'Content')
+    warnings = _validate_skill_metadata(frontmatter, 'Content')
 
     assert len(warnings) >= 1
     assert any('reserved word' in w for w in warnings)
@@ -57,7 +55,7 @@ def test_validate_skill_metadata_description_too_long() -> None:
         'name': 'test-skill',
         'description': 'x' * 1025,
     }
-    warnings = _validate_skill_metadata(frontmatter, Path('/tmp/skill'), 'Content')
+    warnings = _validate_skill_metadata(frontmatter, 'Content')
 
     assert len(warnings) >= 1
     assert any('1024 characters' in w for w in warnings)
@@ -72,7 +70,7 @@ def test_validate_skill_metadata_instructions_too_long() -> None:
     # Create content with 501 lines
     instructions = '\n'.join([f'Line {i}' for i in range(501)])
 
-    warnings = _validate_skill_metadata(frontmatter, Path('/tmp/skill'), instructions)
+    warnings = _validate_skill_metadata(frontmatter, instructions)
 
     assert len(warnings) >= 1
     assert any('500 lines' in w for w in warnings)
@@ -86,7 +84,7 @@ def test_validate_skill_metadata_multiple_issues() -> None:
     }
     instructions = '\n'.join([f'Line {i}' for i in range(501)])  # Too many lines
 
-    warnings = _validate_skill_metadata(frontmatter, Path('/tmp/skill'), instructions)
+    warnings = _validate_skill_metadata(frontmatter, instructions)
 
     # Should have warnings for name, description, and instructions
     assert len(warnings) >= 3
@@ -104,7 +102,7 @@ def test_validate_skill_metadata_good_naming_conventions() -> None:
 
     for name in good_names:
         frontmatter = {'name': name, 'description': 'Test'}
-        warnings = _validate_skill_metadata(frontmatter, Path('/tmp/skill'), 'Content')
+        warnings = _validate_skill_metadata(frontmatter, 'Content')
         assert len(warnings) == 0, f"Name '{name}' should be valid"
 
 
@@ -120,5 +118,5 @@ def test_validate_skill_metadata_bad_naming_conventions() -> None:
 
     for name in bad_names:
         frontmatter = {'name': name, 'description': 'Test'}
-        warnings = _validate_skill_metadata(frontmatter, Path('/tmp/skill'), 'Content')
+        warnings = _validate_skill_metadata(frontmatter, 'Content')
         assert len(warnings) > 0, f"Name '{name}' should trigger warnings"
