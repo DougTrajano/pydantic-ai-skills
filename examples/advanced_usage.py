@@ -47,18 +47,18 @@ def add_today_date() -> str:
 
 
 @agent.tool_plain(retries=2)
-async def fetch_url(url: str, method: str = 'GET', timeout: int = 15) -> str:
+async def fetch_url(url: str, method: str = 'GET', httpx_timeout: int = 15) -> str:
     """Fetch the content of a URL.
 
     Args:
         url (str): The URL to fetch.
         method (str): The HTTP method to use (default is 'GET').
-        timeout (int): The timeout for the request in seconds (default is 15).
+        httpx_timeout (int): The timeout for the request in seconds (default is 15).
 
     Returns:
         str: The content of the URL.
     """
-    async with httpx.AsyncClient(timeout=timeout) as client:
+    async with httpx.AsyncClient(timeout=httpx_timeout) as client:
         response = await client.request(method, url)
         response.raise_for_status()
         return response.text

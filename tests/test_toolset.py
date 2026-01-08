@@ -253,28 +253,3 @@ async def test_get_instructions_empty() -> None:
     mock_ctx = Mock()
     prompt = await toolset.get_instructions(mock_ctx)
     assert prompt is None
-
-
-# TODO: Re-implement refresh functionality
-# def test_toolset_refresh(sample_skills_dir: Path) -> None:
-#     """Test refreshing skills."""
-#     toolset = SkillsToolset(directories=[sample_skills_dir])
-#
-#     initial_count = len(toolset.skills)
-#
-#     # Add a new skill
-#     new_skill_dir = sample_skills_dir / 'skill-four'
-#     new_skill_dir.mkdir()
-#     (new_skill_dir / 'SKILL.md').write_text("""---
-# name: skill-four
-# description: Fourth skill added after initialization
-# ---
-#
-# New skill content.
-# """)
-#
-#     # Refresh
-#     toolset.refresh()
-#
-#     assert len(toolset.skills) == initial_count + 1
-#     assert 'skill-four' in toolset.skills
