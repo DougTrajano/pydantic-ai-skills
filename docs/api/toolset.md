@@ -2,21 +2,9 @@
 
 ::: pydantic_ai_skills.toolset.SkillsToolset
 options:
-members: - **init** - get_skills_system_prompt - get_skill - refresh - skills
+members: - **init** - get_instructions - get_skill - skills
 show_source: true
 heading_level: 2
-
-## Helper Functions
-
-::: pydantic_ai_skills.toolset.discover_skills
-options:
-show_source: true
-heading_level: 3
-
-::: pydantic_ai_skills.toolset.parse_skill_md
-options:
-show_source: true
-heading_level: 3
 
 ## Usage Examples
 
@@ -31,34 +19,33 @@ toolset = SkillsToolset(directories=["./skills"])
 # Advanced initialization
 toolset = SkillsToolset(
     directories=["./skills", "./shared"],
-    auto_discover=True,
     validate=True,
-    toolset_id="my-skills",
-    script_timeout=60
+    max_depth=3,
+    id="my-skills"
 )
 ```
 
-### Get Skills System Prompt
+### Get Skills Instructions
 
 ```python
-from pydantic_ai import Agent
+from pydantic_ai import Agent, RunContext
 from pydantic_ai_skills import SkillsToolset
 
 toolset = SkillsToolset(directories=["./skills"])
 
 agent = Agent(
-    model='openai:gpt-4o',
+    model='openai:gpt-5.2',
+    instructions="You are a helpful assistant.",
     toolsets=[toolset]
 )
 
-@agent.system_prompt
-async def add_skills():
-    return toolset.get_skills_system_prompt()
+@agent.instructions
+async def add_skills(ctx: RunContext) -> str | None:
+    """Add skills instructions to the agent's context."""
+    return await toolset.get_instructions(ctx)
 ```
 
-**Important**: The system prompt function can be either synchronous or asynchronous as current Pydantic AI implementation.
-
-**What the system prompt contains**:
+**What the instructions contain**:
 
 - List of all available skills with their names and descriptions
 - Instructions on how to use the four skill tools (`load_skill`, `read_skill_resource`, `run_skill_script`, `list_skills`)
@@ -78,58 +65,6 @@ skill = toolset.get_skill("arxiv-search")
 print(f"Name: {skill.name}")
 print(f"Description: {skill.metadata.description}")
 print(f"Scripts: {[s.name for s in skill.scripts]}")
-```
-
-### Refresh Skills
-
-```python
-# Initial load
-toolset = SkillsToolset(directories=["./skills"])
-print(f"Loaded {len(toolset.skills)} skills")
-
-# ... Add or modify skills in ./skills/ ...
-
-# Reload skills
-toolset.refresh()
-print(f"Now have {len(toolset.skills)} skills")
-```
-
-### Discover Skills Manually
-
-```python
-from pydantic_ai_skills import discover_skills
-
-skills = discover_skills(
-    directories=["./skills"],
-    validate=True
-)
-
-for skill in skills:
-    print(f"{skill.name}: {skill.metadata.description}")
-```
-
-### Parse SKILL.md
-
-```python
-from pydantic_ai_skills import parse_skill_md
-
-content = """---
-name: my-skill
-description: My skill description
-version: 1.0.0
----
-
-# My Skill
-
-Instructions go here...
-"""
-
-frontmatter, instructions = parse_skill_md(content)
-
-print(f"Name: {frontmatter['name']}")
-print(f"Description: {frontmatter['description']}")
-print(f"Version: {frontmatter['version']}")
-print(f"Instructions: {instructions}")
 ```
 
 ## Tools Provided

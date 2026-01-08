@@ -20,7 +20,7 @@ Think of skills as packages that extend your agent's capabilities without hardco
 ## Quick Example
 
 ```python
-from pydantic_ai import Agent
+from pydantic_ai import Agent, RunContext
 from pydantic_ai_skills import SkillsToolset
 
 # Initialize Skills Toolset with skill directories
@@ -28,15 +28,16 @@ skills_toolset = SkillsToolset(directories=["./skills"])
 
 # Create agent with skills
 agent = Agent(
-    model='openai:gpt-4o',
+    model='openai:gpt-5.2',
     instructions="You are a helpful research assistant.",
     toolsets=[skills_toolset]
 )
 
-# Add skills system prompt
-@agent.system_prompt
-async def add_skills_to_system_prompt() -> str:
-    return skills_toolset.get_skills_system_prompt()
+# Add skills instructions to agent
+@agent.instructions
+async def add_skills(ctx: RunContext) -> str | None:
+    """Add skills instructions to the agent's context."""
+    return await skills_toolset.get_instructions(ctx)
 
 # Use agent - skills tools are automatically available
 result = await agent.run(

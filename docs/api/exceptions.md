@@ -97,7 +97,7 @@ toolset = SkillsToolset(
     script_timeout=10  # 10 second timeout
 )
 
-agent = Agent(model='openai:gpt-4o', toolsets=[toolset])
+agent = Agent(model='openai:gpt-5.2', toolsets=[toolset])
 
 # The agent will receive an error if script times out or fails
 result = await agent.run("Run the long-running-script")

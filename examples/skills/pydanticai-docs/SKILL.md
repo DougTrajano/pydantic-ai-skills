@@ -22,12 +22,9 @@ Agents are the primary interface for interacting with LLMs. They contain:
 
 ### Models
 
-Supported models include:
+Pydantic AI supports multiple LLM providers via model identifiers.
 
-- OpenAI: `openai:gpt-4o`, `openai:gpt-5`
-- Anthropic: `anthropic:claude-sonnet-4-5`
-- Google: `google:gemini-2.0-flash`
-- Groq, Azure, Together AI, DeepSeek, Grok, and more
+All models that supports tool-calling can be used with pydantic-ai-skills.
 
 ### Tools
 
@@ -48,7 +45,7 @@ Collections of tools that can be registered with agents:
 
 ### 1. Fetch Full Documentation
 
-For comprehensive information, fetch the complete Pydantic AI documentation: <https://ai.pydantic.dev/llms-full.txt>
+For comprehensive information, fetch the complete Pydantic AI documentation: <https://ai.pydantic.dev/llms.txt>
 
 This contains complete documentation including agents, tools, dependencies, models, and API reference.
 
@@ -59,7 +56,7 @@ This contains complete documentation including agents, tools, dependencies, mode
 ```python
 from pydantic_ai import Agent
 
-agent = Agent('openai:gpt-4o')
+agent = Agent('openai:gpt-5.2')
 result = agent.run_sync('What is the capital of France?')
 print(result.output)
 ```
@@ -69,7 +66,7 @@ print(result.output)
 ```python
 from pydantic_ai import Agent, RunContext
 
-agent = Agent('openai:gpt-4o', deps_type=str)
+agent = Agent('openai:gpt-5.2', deps_type=str)
 
 @agent.tool
 def get_user_name(ctx: RunContext[str]) -> str:
@@ -90,7 +87,7 @@ class CityInfo(BaseModel):
     country: str
     population: int
 
-agent = Agent('openai:gpt-4o', output_type=CityInfo)
+agent = Agent('openai:gpt-5.2', output_type=CityInfo)
 result = agent.run_sync('Tell me about Paris')
 print(result.output)  # CityInfo(name='Paris', country='France', population=...)
 ```
@@ -106,7 +103,7 @@ class MyDeps:
     api_key: str
     user_id: int
 
-agent = Agent('openai:gpt-4o', deps_type=MyDeps)
+agent = Agent('openai:gpt-5.2', deps_type=MyDeps)
 
 @agent.tool
 async def fetch_data(ctx: RunContext[MyDeps]) -> str:
@@ -127,7 +124,7 @@ def search(query: str) -> str:
     """Search for information."""
     return f"Results for: {query}"
 
-agent = Agent('openai:gpt-4o', toolsets=[toolset])
+agent = Agent('openai:gpt-5.2', toolsets=[toolset])
 ```
 
 #### Async Execution
@@ -136,7 +133,7 @@ agent = Agent('openai:gpt-4o', toolsets=[toolset])
 import asyncio
 from pydantic_ai import Agent
 
-agent = Agent('openai:gpt-4o')
+agent = Agent('openai:gpt-5.2')
 
 async def main():
     result = await agent.run('Hello!')
@@ -150,7 +147,7 @@ asyncio.run(main())
 ```python
 from pydantic_ai import Agent
 
-agent = Agent('openai:gpt-4o')
+agent = Agent('openai:gpt-5.2')
 
 async with agent.run_stream('Tell me a story') as response:
     async for text in response.stream():

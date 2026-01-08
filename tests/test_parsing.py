@@ -2,8 +2,8 @@
 
 import pytest
 
+from pydantic_ai_skills.directory import _parse_skill_md as parse_skill_md
 from pydantic_ai_skills.exceptions import SkillValidationError
-from pydantic_ai_skills.toolset import parse_skill_md
 
 
 def test_parse_skill_md_with_frontmatter() -> None:

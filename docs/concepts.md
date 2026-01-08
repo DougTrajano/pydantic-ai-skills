@@ -63,7 +63,7 @@ tags: [papers, arxiv, academic]
 
 The toolset implements **progressive disclosure** - exposing information only when needed:
 
-1. **Initial**: Skill names and descriptions are shown in the system prompt via `get_skills_system_prompt()`
+1. **Initial**: Skill names and descriptions are added to agent's instructions via `@agent.instructions` decorator calling `get_instructions(ctx)`
 2. **Loading**: Agent calls `load_skill(name)` to get full instructions when needed
 3. **Resources**: Agent calls `read_skill_resource()` for additional documentation
 4. **Execution**: Agent calls `run_skill_script()` to execute scripts
@@ -85,7 +85,7 @@ Lists all available skills with their descriptions.
 
 **Returns**: Formatted markdown with skill names and descriptions
 
-**When to use**: Optional - skills are already listed in the system prompt via `get_skills_system_prompt()`. Use only if the agent needs to re-check available skills dynamically.
+**When to use**: Optional - skills are already listed in the agent's instructions via `get_instructions(ctx)`. Use only if the agent needs to re-check available skills dynamically.
 
 ### 2. load_skill(name)
 
@@ -137,18 +137,17 @@ from pydantic_ai_skills import SkillsToolset
 
 toolset = SkillsToolset(
     directories=["./skills", "./shared-skills"],
-    auto_discover=True,      # Auto-discover skills on init
     validate=True,           # Validate skill structure
-    toolset_id="skills",     # Unique identifier
-    script_timeout=30        # Script execution timeout (seconds)
+    max_depth=3,             # Maximum depth for skill discovery
+    id="skills"              # Unique identifier
 )
 ```
 
 ### Key Methods
 
-- `get_skills_system_prompt()` - Get system prompt text
+- `get_instructions(ctx)` - Get instructions text (automatically injected into agent)
 - `get_skill(name)` - Get a specific skill object
-- `refresh()` - Re-scan directories for skills
+- `refresh()` - Re-scan directories for skills (if using SkillsDirectory instances)
 
 ### Properties
 
@@ -156,18 +155,16 @@ toolset = SkillsToolset(
 
 ## Skill Discovery
 
-Skills are discovered by scanning directories for `SKILL.md` files:
+Skills are discovered by scanning directories for `SKILL.md` files using the `SkillsDirectory` class:
 
 ```python
-from pydantic_ai_skills import discover_skills
+from pydantic_ai_skills import SkillsDirectory
 
-skills = discover_skills(
-    directories=["./skills"],
-    validate=True
-)
+skill_dir = SkillsDirectory(path="./skills", validate=True)
+all_skills = skill_dir.get_skills()
 
-for skill in skills:
-    print(f"{skill.name}: {skill.metadata.description}")
+for name, skill in all_skills.items():
+    print(f"{name}: {skill.metadata.description}")
 ```
 
 ## Type Safety

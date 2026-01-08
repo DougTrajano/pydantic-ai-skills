@@ -7,7 +7,7 @@ for research tasks.
 import asyncio
 from pathlib import Path
 
-from pydantic_ai import Agent
+from pydantic_ai import Agent, RunContext
 
 from pydantic_ai_skills import SkillsToolset
 
@@ -22,15 +22,16 @@ async def main() -> None:
 
     # Create agent with skills
     agent = Agent(
-        model='openai:gpt-4o',
+        model='openai:gpt-5.2',
         instructions='You are a helpful research assistant.',
         toolsets=[skills_toolset],
     )
 
-    # Add skills system prompt (includes skill descriptions and usage)
-    @agent.system_prompt
-    async def add_skills_prompt() -> str:
-        return skills_toolset.get_skills_system_prompt()
+    # Add skills instructions to agent (includes skill names and descriptions)
+    @agent.instructions
+    async def add_skills(ctx: RunContext) -> str | None:
+        """Add skills instructions to the agent's context."""
+        return await skills_toolset.get_instructions(ctx)
 
     user_prompt = 'What are the main features of Pydantic AI framework?'
 

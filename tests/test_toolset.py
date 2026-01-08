@@ -148,6 +148,7 @@ async def test_read_skill_resource_tool(sample_skills_dir: Path) -> None:
 
     # Test that skill-two has the expected resources
     skill = toolset.get_skill('skill-two')
+    assert skill.resources is not None
     assert len(skill.resources) == 2
 
     resource_names = [r.name for r in skill.resources]
@@ -156,8 +157,9 @@ async def test_read_skill_resource_tool(sample_skills_dir: Path) -> None:
 
     # Check that resources can be read
     for resource in skill.resources:
-        assert resource.path.exists()
-        assert resource.path.is_file()
+        resource_path = Path(resource.uri)
+        assert resource_path.exists()
+        assert resource_path.is_file()
 
 
 @pytest.mark.asyncio
@@ -167,10 +169,11 @@ async def test_read_skill_resource_not_found(sample_skills_dir: Path) -> None:
 
     # Test skill with no resources
     skill_one = toolset.get_skill('skill-one')
-    assert len(skill_one.resources) == 0
+    assert skill_one.resources is None or len(skill_one.resources) == 0
 
     # Test skill with resources
     skill_two = toolset.get_skill('skill-two')
+    assert skill_two.resources is not None
     resource_names = [r.name for r in skill_two.resources]
     assert 'NONEXISTENT.md' not in resource_names
 
@@ -182,6 +185,7 @@ async def test_run_skill_script_tool(sample_skills_dir: Path) -> None:
 
     # Test that skill-three has scripts
     skill = toolset.get_skill('skill-three')
+    assert skill.scripts is not None
     assert len(skill.scripts) == 2
 
     script_names = [s.name for s in skill.scripts]
@@ -190,9 +194,10 @@ async def test_run_skill_script_tool(sample_skills_dir: Path) -> None:
 
     # Check that scripts can be found
     for script in skill.scripts:
-        assert script.path.exists()
-        assert script.path.is_file()
-        assert script.path.suffix == '.py'
+        script_path = Path(script.uri)
+        assert script_path.exists()
+        assert script_path.is_file()
+        assert script_path.suffix == '.py'
 
 
 @pytest.mark.asyncio
@@ -202,19 +207,27 @@ async def test_run_skill_script_not_found(sample_skills_dir: Path) -> None:
 
     # Test skill with no scripts
     skill_one = toolset.get_skill('skill-one')
-    assert len(skill_one.scripts) == 0
+    assert skill_one.scripts is None or len(skill_one.scripts) == 0
 
     # Test skill with scripts
     skill_three = toolset.get_skill('skill-three')
+    assert skill_three.scripts is not None
     script_names = [s.name for s in skill_three.scripts]
     assert 'nonexistent' not in script_names
 
 
-def test_get_skills_system_prompt(sample_skills_dir: Path) -> None:
-    """Test generating the system prompt."""
+@pytest.mark.asyncio
+async def test_get_instructions(sample_skills_dir: Path) -> None:
+    """Test generating the system prompt via get_instructions."""
+    from unittest.mock import Mock
+
     toolset = SkillsToolset(directories=[sample_skills_dir])
 
-    prompt = toolset.get_skills_system_prompt()
+    # Create a mock context (get_instructions doesn't use ctx, but requires it)
+    mock_ctx = Mock()
+
+    prompt = await toolset.get_instructions(mock_ctx)
+    assert prompt is not None
 
     # Should include all skill names and descriptions
     assert 'skill-one' in prompt
@@ -229,37 +242,39 @@ def test_get_skills_system_prompt(sample_skills_dir: Path) -> None:
     assert 'read_skill_resource' in prompt
     assert 'run_skill_script' in prompt
 
-    # Should include progressive disclosure guidance
-    assert 'Progressive disclosure' in prompt or 'progressive disclosure' in prompt
 
-
-def test_get_skills_system_prompt_empty() -> None:
+@pytest.mark.asyncio
+async def test_get_instructions_empty() -> None:
     """Test system prompt with no skills."""
-    toolset = SkillsToolset(directories=[], auto_discover=False)
+    from unittest.mock import Mock
 
-    prompt = toolset.get_skills_system_prompt()
-    assert prompt == ''
+    toolset = SkillsToolset(skills=[], directories=[])
+
+    mock_ctx = Mock()
+    prompt = await toolset.get_instructions(mock_ctx)
+    assert prompt is None
 
 
-def test_toolset_refresh(sample_skills_dir: Path) -> None:
-    """Test refreshing skills."""
-    toolset = SkillsToolset(directories=[sample_skills_dir])
-
-    initial_count = len(toolset.skills)
-
-    # Add a new skill
-    new_skill_dir = sample_skills_dir / 'skill-four'
-    new_skill_dir.mkdir()
-    (new_skill_dir / 'SKILL.md').write_text("""---
-name: skill-four
-description: Fourth skill added after initialization
----
-
-New skill content.
-""")
-
-    # Refresh
-    toolset.refresh()
-
-    assert len(toolset.skills) == initial_count + 1
-    assert 'skill-four' in toolset.skills
+# TODO: Re-implement refresh functionality
+# def test_toolset_refresh(sample_skills_dir: Path) -> None:
+#     """Test refreshing skills."""
+#     toolset = SkillsToolset(directories=[sample_skills_dir])
+#
+#     initial_count = len(toolset.skills)
+#
+#     # Add a new skill
+#     new_skill_dir = sample_skills_dir / 'skill-four'
+#     new_skill_dir.mkdir()
+#     (new_skill_dir / 'SKILL.md').write_text("""---
+# name: skill-four
+# description: Fourth skill added after initialization
+# ---
+#
+# New skill content.
+# """)
+#
+#     # Refresh
+#     toolset.refresh()
+#
+#     assert len(toolset.skills) == initial_count + 1
+#     assert 'skill-four' in toolset.skills

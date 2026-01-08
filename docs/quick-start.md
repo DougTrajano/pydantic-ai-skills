@@ -30,7 +30,7 @@ https://ai.pydantic.dev/llms-full.txt
 ```python
 from pydantic_ai import Agent
 
-agent = Agent('openai:gpt-4o')
+agent = Agent('openai:gpt-5.2')
 result = agent.run_sync('Your question')
 ```
 ````
@@ -49,7 +49,7 @@ Create `agent.py`:
 
 ```python
 import asyncio
-from pydantic_ai import Agent
+from pydantic_ai import Agent, RunContext
 from pydantic_ai_skills import SkillsToolset
 
 async def main():
@@ -58,15 +58,16 @@ async def main():
 
     # Create agent
     agent = Agent(
-        model='openai:gpt-4o',
+        model='openai:gpt-5.2',
         instructions="You are a helpful assistant.",
         toolsets=[skills_toolset]
     )
 
-    # Add skills to system prompt
-    @agent.system_prompt
-    async def add_skills():
-        return skills_toolset.get_skills_system_prompt()
+    # Add skills instructions to agent
+    @agent.instructions
+    async def add_skills(ctx: RunContext) -> str | None:
+        """Add skills instructions to the agent's context."""
+        return await skills_toolset.get_instructions(ctx)
 
     # Run the agent
     result = await agent.run("How do I create a Pydantic AI agent with tools?")
@@ -100,7 +101,7 @@ When you run the agent:
    - `load_skill(name)` - Loads a specific skill's instructions
    - `read_skill_resource(skill_name, resource_name)` - Reads additional files
    - `run_skill_script(skill_name, script_name, args)` - Executes scripts
-3. **System Prompt**: Adds skills overview to help the agent discover capabilities
+3. **Instructions Addition**: Skills overview is added to agent via `get_instructions(ctx)` decorator
 4. **Agent Execution**: Agent uses tools to discover, load, and apply skills as needed
 
 ## Add a Script-Based Skill
@@ -192,14 +193,15 @@ async def main():
     skills_toolset = SkillsToolset(directories=["./examples/skills"])
 
     agent = Agent(
-        model='openai:gpt-4o',
+        model='openai:gpt-5.2',
         instructions="You are a research assistant specializing in academic papers.",
         toolsets=[skills_toolset]
     )
 
-    @agent.system_prompt
-    async def add_skills():
-        return skills_toolset.get_skills_system_prompt()
+    @agent.instructions
+    async def add_skills(ctx: RunContext) -> str | None:
+        """Add skills instructions to the agent's context."""
+        return await skills_toolset.get_instructions(ctx)
 
     result = await agent.run(
         "Find the 5 most recent papers on transformer architectures"
@@ -221,7 +223,16 @@ from pydantic_ai_skills import SkillsToolset
 
 async def main():
     toolset = SkillsToolset(directories=["./skills"])
-    agent = Agent(model='openai:gpt-4o', toolsets=[toolset])
+    agent = Agent(
+        model='openai:gpt-5.2',
+        instructions="You are a helpful assistant.",
+        toolsets=[toolset]
+    )
+
+    @agent.instructions
+    async def add_skills(ctx: RunContext) -> str | None:
+        """Add skills instructions to the agent's context."""
+        return await toolset.get_instructions(ctx)
 
     # Use agent
     result = await agent.run("What skills are available?")
@@ -229,8 +240,19 @@ async def main():
 
     # ... User adds new skill to ./skills/ ...
 
-    # Refresh to pick up new skills
-    toolset.refresh()
+    # To pick up new skills, recreate the toolset and agent
+    toolset = SkillsToolset(directories=["./skills"])
+    agent = Agent(
+        model='openai:gpt-5.2',
+        instructions="You are a helpful assistant.",
+        toolsets=[toolset]
+    )
+
+    @agent.instructions
+    async def add_skills_again(ctx: RunContext) -> str | None:
+        """Add skills instructions to the agent's context."""
+        return await toolset.get_instructions(ctx)
+
     print(f"\nReloaded. Now have {len(toolset.skills)} skills")
 
     result = await agent.run("What skills are available now?")
@@ -240,7 +262,7 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-> Note: Refreshing does not change existing agent systems prompts. Recreate the agent to fully apply new skills.
+> **Note:** To pick up new skills after modifying the filesystem, you'll need to recreate the `SkillsToolset` instance or restart your application.
 
 ### Programmatic Skill Access
 
@@ -302,14 +324,15 @@ from pydantic_ai_skills import SkillsToolset
 
 skills_toolset = SkillsToolset(directories=["./skills"])
 agent = Agent(
-    model='openai:gpt-4o',
+    model='openai:gpt-5.2',
     instructions="You are a data analysis assistant.",
     toolsets=[skills_toolset]
 )
 
-@agent.system_prompt
-async def add_skills():
-    return skills_toolset.get_skills_system_prompt()
+@agent.instructions
+async def add_skills(ctx: RunContext) -> str | None:
+    """Add skills instructions to the agent's context."""
+    return await skills_toolset.get_instructions(ctx)
 
 # Cell 2: Explore skills
 for name, skill in skills_toolset.skills.items():

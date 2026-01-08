@@ -381,21 +381,22 @@ Test with a real agent:
 
 ```python
 import asyncio
-from pydantic_ai import Agent
+from pydantic_ai import Agent, RunContext
 from pydantic_ai_skills import SkillsToolset
 
 async def test_skill():
     toolset = SkillsToolset(directories=["./skills"])
 
     agent = Agent(
-        model='openai:gpt-4o',
+        model='openai:gpt-5.2',
         instructions="You are a test assistant.",
         toolsets=[toolset]
     )
 
-    @agent.system_prompt
-    async def add_skills():
-        return toolset.get_skills_system_prompt()
+    @agent.instructions
+    async def add_skills(ctx: RunContext) -> str | None:
+        """Add skills instructions to the agent's context."""
+        return await toolset.get_instructions(ctx)
 
     result = await agent.run("Test my-skill with input: test data")
     print(result.output)

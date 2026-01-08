@@ -5,25 +5,28 @@ Agent Skills within the Pydantic AI ecosystem. Agent Skills are modular collecti
 of instructions, scripts, tools, and resources that enable AI agents to progressively
 discover, load, and execute specialized capabilities for domain-specific tasks.
 
+Key components:
+- [`SkillsToolset`][pydantic_ai_skills.SkillsToolset]: Main toolset for integrating skills with agents
+- [`Skill`][pydantic_ai_skills.Skill]: Data class representing a loaded skill with resource/script methods
+- [`LocalSkill`][pydantic_ai_skills.LocalSkill]: Filesystem-based skill implementation
+- [`SkillsDirectory`][pydantic_ai_skills.SkillsDirectory]: Filesystem-based skill discovery and management
+- [`SkillScriptExecutor`][pydantic_ai_skills.SkillScriptExecutor]: Protocol for executing skill scripts
+
 Example:
     ```python
     from pydantic_ai import Agent
     from pydantic_ai_skills import SkillsToolset
 
-    # Initialize Skills Toolset with one or more skill directories
+    # Initialize Skills Toolset with skill directories
     skills_toolset = SkillsToolset(directories=["./skills"])
 
     # Create agent with skills as a toolset
+    # Skills instructions are automatically injected via get_instructions()
     agent = Agent(
-        model='openai:gpt-4o',
+        model='openai:gpt-5.2',
         instructions="You are a helpful research assistant.",
         toolsets=[skills_toolset]
     )
-
-    # Add skills system prompt to agent
-    @agent.system_prompt
-    def add_skills_to_system_prompt() -> str:
-        return skills_toolset.get_skills_system_prompt()
 
     # Use agent - skills tools are available for the agent to call
     result = await agent.run(
@@ -33,21 +36,35 @@ Example:
     ```
 """
 
+from pydantic_ai_skills.directory import SkillsDirectory, _discover_skills, _parse_skill_md
 from pydantic_ai_skills.exceptions import (
     SkillException,
     SkillNotFoundError,
     SkillResourceLoadError,
+    SkillResourceNotFoundError,
     SkillScriptExecutionError,
     SkillValidationError,
 )
-from pydantic_ai_skills.toolset import SkillsToolset, discover_skills, parse_skill_md
-from pydantic_ai_skills.types import Skill, SkillMetadata, SkillResource, SkillScript
+from pydantic_ai_skills.local import CallableSkillScriptExecutor, LocalSkill, LocalSkillScriptExecutor
+from pydantic_ai_skills.toolset import SkillsToolset
+from pydantic_ai_skills.types import Skill, SkillMetadata, SkillResource, SkillScript, SkillScriptExecutor
+
+# Expose internal functions for backward compatibility
+discover_skills = _discover_skills
+parse_skill_md = _parse_skill_md
 
 __all__ = [
     # Main toolset
     'SkillsToolset',
+    # Directory discovery
+    'SkillsDirectory',
+    # Executors
+    'SkillScriptExecutor',
+    'LocalSkillScriptExecutor',
+    'CallableSkillScriptExecutor',
     # Types
     'Skill',
+    'LocalSkill',
     'SkillMetadata',
     'SkillResource',
     'SkillScript',
@@ -55,6 +72,7 @@ __all__ = [
     'SkillException',
     'SkillNotFoundError',
     'SkillResourceLoadError',
+    'SkillResourceNotFoundError',
     'SkillScriptExecutionError',
     'SkillValidationError',
     # Utility functions

@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from pydantic_ai_skills.toolset import discover_skills
+from pydantic_ai_skills.directory import _discover_skills as discover_skills
 
 
 def test_discover_skills_single_skill(tmp_path: Path) -> None:
@@ -21,7 +21,7 @@ description: A test skill
 Instructions here.
 """)
 
-    skills = discover_skills([tmp_path], validate=True)
+    skills = discover_skills(tmp_path, validate=True)
 
     assert len(skills) == 1
     assert skills[0].name == 'test-skill'
@@ -53,7 +53,7 @@ description: Second skill
 Content 2.
 """)
 
-    skills = discover_skills([tmp_path], validate=True)
+    skills = discover_skills(tmp_path, validate=True)
 
     assert len(skills) == 2
     skill_names = {s.name for s in skills}
@@ -76,9 +76,10 @@ See FORMS.md for details.
     (skill_dir / 'FORMS.md').write_text('# Forms\n\nForm documentation.')
     (skill_dir / 'REFERENCE.md').write_text('# Reference\n\nAPI reference.')
 
-    skills = discover_skills([tmp_path], validate=True)
+    skills = discover_skills(tmp_path, validate=True)
 
     assert len(skills) == 1
+    assert skills[0].resources is not None
     assert len(skills[0].resources) == 2
     resource_names = {r.name for r in skills[0].resources}
     assert resource_names == {'FORMS.md', 'REFERENCE.md'}
@@ -102,9 +103,10 @@ Use the search script.
     (scripts_dir / 'search.py').write_text('#!/usr/bin/env python3\nprint("searching")')
     (scripts_dir / 'process.py').write_text('#!/usr/bin/env python3\nprint("processing")')
 
-    skills = discover_skills([tmp_path], validate=True)
+    skills = discover_skills(tmp_path, validate=True)
 
     assert len(skills) == 1
+    assert skills[0].scripts is not None
     assert len(skills[0].scripts) == 2
     script_names = {s.name for s in skills[0].scripts}
     assert script_names == {'search', 'process'}
@@ -123,7 +125,7 @@ description: Nested skill
 Content.
 """)
 
-    skills = discover_skills([tmp_path], validate=True)
+    skills = discover_skills(tmp_path, validate=True)
 
     assert len(skills) == 1
     assert skills[0].name == 'nested-skill'
@@ -142,7 +144,7 @@ Content.
 """)
 
     # With validation, should skip this skill (log warning)
-    skills = discover_skills([tmp_path], validate=True)
+    skills = discover_skills(tmp_path, validate=True)
     assert len(skills) == 0
 
 
@@ -159,7 +161,7 @@ Content.
 """)
 
     # Without validation, uses folder name
-    skills = discover_skills([tmp_path], validate=False)
+    skills = discover_skills(tmp_path, validate=False)
     assert len(skills) == 1
     assert skills[0].name == 'test-skill'  # Uses folder name
 
@@ -169,7 +171,7 @@ def test_discover_skills_nonexistent_directory(tmp_path: Path) -> None:
     nonexistent = tmp_path / 'does-not-exist'
 
     # Should not raise, just log warning
-    skills = discover_skills([nonexistent], validate=True)
+    skills = discover_skills(nonexistent, validate=True)
     assert len(skills) == 0
 
 
@@ -195,9 +197,10 @@ Content.
     nested_dir.mkdir()
     (nested_dir / 'data.csv').write_text('col1,col2')
 
-    skills = discover_skills([tmp_path], validate=True)
+    skills = discover_skills(tmp_path, validate=True)
 
     assert len(skills) == 1
+    assert skills[0].resources is not None
     assert len(skills[0].resources) == 3
 
     resource_names = {r.name for r in skills[0].resources}
