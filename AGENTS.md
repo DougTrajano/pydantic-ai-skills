@@ -2,121 +2,105 @@
 
 ## Project Overview
 
-This is a Python library implementing [Anthropic's Agent Skills framework](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview) for Pydantic AI. Skills are modular collections of instructions, scripts, and resources that extend AI agent capabilities through progressive disclosure (load-on-demand to reduce token usage).
+Python library implementing [Anthropic's Agent Skills framework](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview) for Pydantic AI. Skills are modular collections of instructions, scripts, and resources that extend AI agent capabilities through **progressive disclosure** (load-on-demand to reduce token usage).
 
-## Architecture
+## Core Architecture
 
-**Core Components** in [pydantic_ai_skills/](pydantic_ai_skills/):
+**3-Layer Skill System:**
 
-- [toolset.py](pydantic_ai_skills/toolset.py): `SkillsToolset` extends Pydantic AI's `FunctionToolset`, auto-registers 4 tools: `list_skills`, `load_skill`, `read_skill_resource`, `run_skill_script`
-- [types.py](pydantic_ai_skills/types.py): Dataclass definitions (`Skill`, `SkillMetadata`, `SkillResource`, `SkillScript`)
-- [exceptions.py](pydantic_ai_skills/exceptions.py): Hierarchy with base `SkillException` and specific subclasses
+1. **Discovery Layer** ([directory.py](../pydantic_ai_skills/directory.py)): `SkillsDirectory` scans filesystem for skills, validates YAML frontmatter in SKILL.md files
+2. **Type Layer** ([types.py](../pydantic_ai_skills/types.py)): Dataclasses (`Skill`, `SkillResource`, `SkillScript`) with inheritance for file vs. programmatic variants
+3. **Integration Layer** ([toolset.py](../pydantic_ai_skills/toolset.py)): `SkillsToolset` extends Pydantic AI's `FunctionToolset`, auto-registers 4 tools: `list_skills`, `load_skill`, `read_skill_resource`, `run_skill_script`
 
-**Skill Structure** (filesystem-based):
+**Dual Skill Modes:**
 
-```markdown
-skill-name/
-├── SKILL.md          # Required: YAML frontmatter + markdown instructions
-├── FORMS.md          # Optional: form-filling guides
-├── REFERENCE.md      # Optional: API reference
-└── scripts/          # Optional: executable Python scripts
-    └── script_name.py
-```
+- **Filesystem skills**: Directory with SKILL.md + optional scripts/, resources (see [examples/skills/arxiv-search/](../examples/skills/arxiv-search/))
+- **Programmatic skills**: Python-defined via decorators with callable resources/scripts (see [examples/programatic_skills.py](../examples/programatic_skills.py))
 
-## Code Conventions
+## Critical Patterns
 
-**Naming (Anthropic conventions enforced via validation warnings):**
+### Tool Registration (toolset.py)
 
-- Skill names: lowercase, hyphens only (e.g., `arxiv-search`, `web-research`)
-- Pattern: `^[a-z0-9-]+$`, max 64 chars
-- Avoid reserved words: `anthropic`, `claude`
-
-**Style:**
-
-- Single quotes for strings (configured in `ruff`)
-- Google docstring convention
-- Type hints required (Python 3.10+)
-- Line length: 120 chars
-
-**Tool Registration Pattern** (see [toolset.py#L410-L450](pydantic_ai_skills/toolset.py#L410-L450)):
+Tools are registered using Pydantic AI's `@self.tool` decorator. **Every tool function MUST accept `ctx: RunContext[Any]` as first parameter** (protocol requirement), even if unused:
 
 ```python
 @self.tool
-async def tool_name(ctx: RunContext[Any], param: str) -> str:
-    """Docstring becomes tool description for the LLM."""
-    _ = ctx  # Required by Pydantic AI toolset protocol
-    # implementation
+async def load_skill(ctx: RunContext[Any], skill_name: str) -> str:
+    """Load full instructions for a skill."""
+    _ = ctx  # Required by protocol, suppress unused warning
+    skill = self.get_skill(skill_name)
+    return LOAD_SKILL_TEMPLATE.format(...)
 ```
 
-## Development Commands
+### Skill Naming Conventions (directory.py#L35-L36)
+
+Anthropic enforces strict validation (warnings, not errors):
+
+- Pattern: `^[a-z0-9-]+$` (lowercase, hyphens only)
+- Max 64 chars, no reserved words (`anthropic`, `claude`)
+- Example: `arxiv-search`, `web-research` ✓ | `ArxivSearch`, `claude_helper` ✗
+
+### YAML Frontmatter Parsing (toolset.py#L94-L121)
+
+Uses regex `^---\s*\n(.*?)^---\s*\n` with `DOTALL|MULTILINE` flags to extract frontmatter, then `yaml.safe_load()`. Critical fields:
+
+- `name` (required): Skill identifier
+- `description` (required, ≤1024 chars): Used in tool selection
+
+### Security Measures
+
+- **Path traversal prevention**: `_is_safe_path()` checks before any file read
+- **Script timeout**: Default 30s, configurable via `script_timeout` param
+- **Async execution**: Scripts run via `anyio.run_process` (not `subprocess`)
+
+## Development Workflow
+
+### Testing (pytest.ini)
 
 ```bash
-# Install with test dependencies
-pip install -e ".[test]"
-
-# Run tests with coverage (asyncio_mode=auto configured)
-pytest
-
-# Run specific test file
-pytest tests/test_toolset.py -v
-
-# Lint and format
-ruff check pydantic_ai_skills/
-ruff format pydantic_ai_skills/
-
-# Build docs locally
-pip install -e ".[docs]"
-mkdocs serve
+pytest                     # Full suite with coverage
+pytest tests/test_toolset.py -v  # Specific test file
 ```
 
-## Testing Patterns
+- `pytest-asyncio` in auto mode - **no `@pytest.mark.asyncio` needed**
+- Fixtures use `tmp_path` to create temporary skill directories
+- Coverage reports to `htmlcov/` and terminal
 
-Tests use `pytest` with `pytest-asyncio` (auto mode - no `@pytest.mark.asyncio` needed):
+### Code Style (pyproject.toml)
 
-- Create temp skill directories via `tmp_path` fixture
-- Test SKILL.md parsing with various frontmatter scenarios
-- Script execution tests mock subprocess calls
-
-Example fixture pattern from [test_toolset.py](tests/test_toolset.py):
-
-```python
-@pytest.fixture
-def sample_skills_dir(tmp_path: Path) -> Path:
-    skill_dir = tmp_path / 'skill-name'
-    skill_dir.mkdir()
-    (skill_dir / 'SKILL.md').write_text("""---
-name: skill-name
-description: Test skill
----
-# Instructions here
-""")
-    return tmp_path
+```bash
+ruff check pydantic_ai_skills/   # Lint
+ruff format pydantic_ai_skills/  # Format
 ```
 
-## Key Implementation Details
+- **Single quotes** for strings (enforced by ruff)
+- **Google docstring** convention (D-series rules)
+- Line length: 120 chars
+- Max complexity: 15 (mccabe)
 
-**YAML Frontmatter Parsing** ([toolset.py#L94-L121](pydantic_ai_skills/toolset.py#L94-L121)):
+### Running Examples
 
-- Uses `yaml.safe_load` via PyYAML
-- Pattern: `^---\s*\n(.*?)^---\s*\n` with DOTALL|MULTILINE
-- Raises `SkillValidationError` on parse failure
+```bash
+# Basic usage with filesystem skills
+python examples/basic_usage.py
 
-**Security:**
+# Programmatic skills with HR analytics
+python examples/programatic_skills.py
+```
 
-- Path traversal prevention via `_is_safe_path()` before any file read
-- Script timeout configurable (default 30s) via `script_timeout` param
-- Uses `anyio.run_process` for async script execution
+Examples expect skill-specific dependencies (e.g., `arxiv` package). Install on-demand as needed per skill.
 
-**Progressive Disclosure Flow:**
+## Key Files Reference
 
-1. Agent receives skill list via `get_skills_system_prompt()`
-2. Agent calls `load_skill(name)` to get full instructions
-3. Optionally calls `read_skill_resource()` for additional docs
-4. Executes `run_skill_script()` with args when needed
+- [toolset.py](../pydantic_ai_skills/toolset.py): Main integration point - start here for tool logic
+- [types.py](../pydantic_ai_skills/types.py): Data structures - understand `SkillResource.load()` and `SkillScript.execute()` methods
+- [directory.py](../pydantic_ai_skills/directory.py): Filesystem scanning - see `_validate_skill_metadata()` for Anthropic rules
+- [exceptions.py](../pydantic_ai_skills/exceptions.py): Exception hierarchy - all inherit from `SkillException`
+- [test_toolset.py](../tests/test_toolset.py): Test patterns - see `sample_skills_dir` fixture for skill structure
 
 ## Creating New Skills
 
-Reference examples in [examples/skills/](examples/skills/). Minimum viable skill:
+**Filesystem skill minimum (examples/skills/arxiv-search/):**
 
 ```markdown
 ---
@@ -125,8 +109,27 @@ description: Brief description (max 1024 chars)
 ---
 
 # Instructions
-
 When to use, how to use, example invocations...
 ```
 
-For skills with scripts, document args in SKILL.md and place Python files in `scripts/` subdirectory.
+**With scripts (scripts/ subdirectory):**
+
+- Python files executed via subprocess
+- Document args in SKILL.md
+- Use `run_skill_script(skill_name, script_name, args)` from agent
+
+**Programmatic skill (see examples/programatic_skills.py):**
+
+- Create `Skill` instance with metadata
+- Use `@skill.resource` decorator for dynamic content
+- Use `@skill.script` decorator for executable functions
+- Both decorators support `takes_ctx=True` for RunContext access
+
+## Progressive Disclosure Flow
+
+1. Agent receives skill list via `get_instructions()` in system prompt
+2. Agent calls `load_skill(name)` to get full SKILL.md content
+3. Optionally calls `read_skill_resource(skill_name, resource)` for FORMS.md, REFERENCE.md
+4. Executes `run_skill_script(skill_name, script, args)` when needed
+
+This pattern keeps initial context small - agents discover capabilities incrementally.

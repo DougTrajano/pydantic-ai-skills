@@ -4,13 +4,15 @@ Understanding the key concepts behind pydantic-ai-skills will help you build bet
 
 ## Skills
 
-A **skill** is a modular package that extends an agent's capabilities. Each skill is a directory containing:
+A **skill** is a modular package that extends an agent's capabilities. Skills can be created in two ways:
+
+### File-Based Skills
+
+Each skill is a directory containing:
 
 - `SKILL.md` - Required file with metadata and instructions
 - `scripts/` - Optional directory with executable Python scripts
 - `resources/` - Optional directory with additional documentation or data files
-
-### Skill Structure
 
 ```markdown
 my-skill/
@@ -21,6 +23,10 @@ my-skill/
 ├── reference.md
 └── data.json
 ```
+
+### Programmatic Skills
+
+Skills can also be created programmatically in Python code using the `Skill` class with decorators for resources and scripts. This enables dynamic content generation and dependency access. See [Programmatic Skills](programmatic-skills.md) for details.
 
 ## SKILL.md Format
 

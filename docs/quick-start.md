@@ -158,6 +158,39 @@ except Exception as e:
 
 ## Advanced Examples
 
+### Programmatic Skills
+
+Create skills directly in Python code for dynamic capabilities:
+
+```python
+from pydantic_ai import Agent, RunContext
+from pydantic_ai.toolsets.skills import Skill, SkillsToolset
+
+# Create a programmatic skill
+my_skill = Skill(
+    name='data-processor',
+    description='Process and analyze data',
+    content='Use this skill for data analysis tasks.'
+)
+
+# Add dynamic resources and scripts
+@my_skill.resource
+def get_schema() -> str:
+    """Get current data schema."""
+    return "Available fields: id, name, value, timestamp"
+
+@my_skill.script
+async def process_data(ctx: RunContext[MyDeps], query: str) -> str:
+    """Process data based on query."""
+    results = await ctx.deps.process(query)
+    return f"Processed {len(results)} records"
+
+# Use with toolset
+skills_toolset = SkillsToolset(skills=[my_skill])
+```
+
+Learn more in the [Programmatic Skills](programmatic-skills.md) guide.
+
 ### Multiple Skill Directories
 
 Load skills from multiple locations:

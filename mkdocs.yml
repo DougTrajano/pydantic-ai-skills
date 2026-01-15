@@ -16,6 +16,7 @@ nav:
   - User Guide:
       - Core Concepts: concepts.md
       - Creating Skills: creating-skills.md
+      - Programmatic Skills: programmatic-skills.md
   - API Reference:
       - api/toolset.md
       - api/types.md
