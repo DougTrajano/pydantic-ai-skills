@@ -1,5 +1,7 @@
 """Tests for pydantic-ai-skills types."""
 
+from pathlib import Path
+
 from pydantic_ai_skills.types import Skill, SkillResource, SkillScript
 
 
@@ -39,17 +41,18 @@ def test_skill_resource_creation() -> None:
     assert resource.uri is None
 
 
-def test_skill_script_creation() -> None:
+def test_skill_script_creation(tmp_path: Path) -> None:
     """Test creating SkillScript with URI (file-based)."""
+    script_path = tmp_path / 'skill' / 'scripts' / 'test_script.py'
     script = SkillScript(
         name='test_script',
-        uri='/tmp/skill/scripts/test_script.py',
+        uri=str(script_path),
         skill_name='test-skill',
         function=None,
         function_schema=None,
     )
 
     assert script.name == 'test_script'
-    assert script.uri == '/tmp/skill/scripts/test_script.py'
+    assert script.uri == str(script_path)
     assert script.skill_name == 'test-skill'
     assert script.function is None
