@@ -8,7 +8,7 @@ heading_level: 2
 
 ## Usage Examples
 
-### Initialize Toolset
+### Initialize with File-Based Skills
 
 ```python
 from pydantic_ai_skills import SkillsToolset
@@ -23,6 +23,49 @@ toolset = SkillsToolset(
     max_depth=3,
     id="my-skills"
 )
+```
+
+### Initialize with Programmatic Skills
+
+```python
+from pydantic_ai import RunContext
+from pydantic_ai.toolsets.skills import Skill, SkillsToolset
+
+# Create programmatic skill
+my_skill = Skill(
+    name='custom-skill',
+    description='Custom programmatic skill',
+    content='Instructions for this skill...'
+)
+
+@my_skill.script
+async def custom_action(ctx: RunContext[MyDeps]) -> str:
+    """Perform a custom action."""
+    return await ctx.deps.do_something()
+
+# Initialize toolset with programmatic skill
+toolset = SkillsToolset(skills=[my_skill])
+```
+
+### Mix File-Based and Programmatic Skills
+
+```python
+from pydantic_ai.toolsets.skills import Skill, SkillsToolset
+
+# Create programmatic skills
+programmatic_skill = Skill(
+    name='runtime-skill',
+    description='Created at runtime',
+    content='Dynamic skill content...'
+)
+
+# Combine both types
+toolset = SkillsToolset(
+    directories=["./skills"],      # File-based skills
+    skills=[programmatic_skill]    # Programmatic skills
+)
+
+print(f"Total skills: {len(toolset.skills)}")
 ```
 
 ### Get Skills Instructions
@@ -132,4 +175,5 @@ Executes a skill script.
 
 - [Types Reference](types.md) - Type definitions
 - [Exceptions Reference](exceptions.md) - Exception classes
-- [Creating Skills](../creating-skills.md) - How to create skills
+- [Creating Skills](../creating-skills.md) - How to create file-based skills
+- [Programmatic Skills](../programmatic-skills.md) - How to create programmatic skills

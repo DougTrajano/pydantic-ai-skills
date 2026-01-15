@@ -100,6 +100,7 @@ We strongly recommend that you use Skills only from trusted sources: those you c
 - [Installation](installation.md) - Get started with pydantic-ai-skills
 - [Quick Start](quick-start.md) - Build your first skill-enabled agent
 - [Creating Skills](creating-skills.md) - Learn how to create custom skills
+- [Programmatic Skills](programmatic-skills.md) - Create skills in Python code
 - [API Reference](api/toolset.md) - Detailed API documentation
 
 ## References

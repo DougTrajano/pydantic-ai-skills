@@ -1,10 +1,13 @@
 # Creating Skills
 
-This guide covers everything you need to know to create effective skills for your Pydantic AI agents.
+This guide covers everything you need to know to create effective **file-based skills** for your Pydantic AI agents.
+
+!!! tip "Programmatic Skills"
+    Skills can also be created programmatically in Python code using the `Skill` class. See [Programmatic Skills](programmatic-skills.md) for creating skills with dynamic resources, dependency access, and Python decorators.
 
 ## Basic Skill Structure
 
-Every skill must have at minimum:
+Every file-based skill must have at minimum:
 
 ```markdown
 my-skill/

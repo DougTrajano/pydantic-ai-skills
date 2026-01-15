@@ -7,10 +7,10 @@ discover, load, and execute specialized capabilities for domain-specific tasks.
 
 Key components:
 - [`SkillsToolset`][pydantic_ai_skills.SkillsToolset]: Main toolset for integrating skills with agents
-- [`Skill`][pydantic_ai_skills.Skill]: Data class representing a loaded skill with resource/script methods
-- [`LocalSkill`][pydantic_ai_skills.LocalSkill]: Filesystem-based skill implementation
+- [`Skill`][pydantic_ai_skills.Skill]: Data class representing a skill with resources and scripts
 - [`SkillsDirectory`][pydantic_ai_skills.SkillsDirectory]: Filesystem-based skill discovery and management
-- [`SkillScriptExecutor`][pydantic_ai_skills.SkillScriptExecutor]: Protocol for executing skill scripts
+- [`LocalSkillScriptExecutor`][pydantic_ai_skills.LocalSkillScriptExecutor]: Execute scripts via subprocess
+- [`CallableSkillScriptExecutor`][pydantic_ai_skills.CallableSkillScriptExecutor]: Wrap callables as script executors
 
 Example:
     ```python
@@ -45,9 +45,9 @@ from pydantic_ai_skills.exceptions import (
     SkillScriptExecutionError,
     SkillValidationError,
 )
-from pydantic_ai_skills.local import CallableSkillScriptExecutor, LocalSkill, LocalSkillScriptExecutor
+from pydantic_ai_skills.local import CallableSkillScriptExecutor, LocalSkillScriptExecutor
 from pydantic_ai_skills.toolset import SkillsToolset
-from pydantic_ai_skills.types import Skill, SkillMetadata, SkillResource, SkillScript, SkillScriptExecutor
+from pydantic_ai_skills.types import Skill, SkillResource, SkillScript
 
 # Expose internal functions for backward compatibility
 discover_skills = _discover_skills
@@ -59,13 +59,10 @@ __all__ = [
     # Directory discovery
     'SkillsDirectory',
     # Executors
-    'SkillScriptExecutor',
     'LocalSkillScriptExecutor',
     'CallableSkillScriptExecutor',
     # Types
     'Skill',
-    'LocalSkill',
-    'SkillMetadata',
     'SkillResource',
     'SkillScript',
     # Exceptions

@@ -89,7 +89,7 @@ def test_toolset_get_skill(sample_skills_dir: Path) -> None:
 
     skill = toolset.get_skill('skill-one')
     assert skill.name == 'skill-one'
-    assert skill.metadata.description == 'First test skill for basic operations'
+    assert skill.description == 'First test skill for basic operations'
 
 
 def test_toolset_get_skill_not_found(sample_skills_dir: Path) -> None:
@@ -112,9 +112,9 @@ async def test_list_skills_tool(sample_skills_dir: Path) -> None:
     assert 'skill-three' in toolset.skills
 
     # Verify descriptions
-    assert toolset.skills['skill-one'].metadata.description == 'First test skill for basic operations'
-    assert toolset.skills['skill-two'].metadata.description == 'Second test skill with resources'
-    assert toolset.skills['skill-three'].metadata.description == 'Third test skill with executable scripts'
+    assert toolset.skills['skill-one'].description == 'First test skill for basic operations'
+    assert toolset.skills['skill-two'].description == 'Second test skill with resources'
+    assert toolset.skills['skill-three'].description == 'Third test skill with executable scripts'
 
 
 @pytest.mark.asyncio
@@ -127,7 +127,7 @@ async def test_load_skill_tool(sample_skills_dir: Path) -> None:
     skill = toolset.get_skill('skill-one')
     assert skill is not None
     assert skill.name == 'skill-one'
-    assert 'First test skill for basic operations' in skill.metadata.description
+    assert 'First test skill for basic operations' in skill.description
     assert 'Use this skill for basic operations' in skill.content
 
 
