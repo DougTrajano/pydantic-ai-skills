@@ -4,7 +4,7 @@ A standardized, composable framework for building and managing Agent Skills with
 
 **Agent Skills** are modular collections of instructions, scripts, tools, and resources that enable AI agents to progressively discover, load, and execute specialized capabilities for domain-specific tasks.
 
-This package implements [Anthropic's Agent Skills framework](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview) for Pydantic AI using a tool-calling approach, maintaining full compatibility with Anthropic's skill structure while adapting the loading mechanism for Pydantic AI's architecture.
+This package implements the [Agent Skills specification](https://agentskills.io/) for Pydantic AI using a tool-calling approach, maintaining full compatibility with the specification while adapting the loading mechanism for Pydantic AI's architecture. It is also compatible with [Anthropic's Agent Skills framework](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview).
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -21,7 +21,9 @@ This package implements [Anthropic's Agent Skills framework](https://platform.cl
 
 Full documentation available at: [https://dougtrajano.github.io/pydantic-ai-skills](https://dougtrajano.github.io/pydantic-ai-skills)
 
-> This project was highly inspired by [pydantic-deepagents](https://github.com/vstorm-co/pydantic-deepagents), which provided foundational ideas and patterns for agent skill implementation and progressive disclosure in the Pydantic AI. We gratefully acknowledge their work and contributions to the community.
+> **🚀 Native Integration in Pydantic AI**
+>
+> We're collaborating with the Pydantic AI team to introduce Agent Skills natively into the platform. Follow the progress in [PR #3780](https://github.com/pydantic/pydantic-ai/pull/3780).
 
 ## Installation
 
@@ -259,6 +261,8 @@ We strongly recommend that you use Skills only from trusted sources: those you c
 - **Anthropic** - For the Agent Skills framework and documentation.
 - **Pydantic AI Team** - For the excellent agent framework.
 - **Community** - For feedback and contributions.
+
+> This project was highly inspired by [pydantic-deepagents](https://github.com/vstorm-co/pydantic-deepagents), which provided foundational ideas and patterns for agent skill implementation and progressive disclosure in the Pydantic AI. We gratefully acknowledge their work and contributions to the community.
 
 ## Contributing
 
