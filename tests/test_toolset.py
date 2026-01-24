@@ -240,8 +240,8 @@ async def test_get_instructions(sample_skills_dir: Path) -> None:
 
     # Should include usage instructions
     assert 'load_skill' in prompt
-    assert 'read_skill_resource' in prompt
-    assert 'run_skill_script' in prompt
+    # read_skill_resource and run_skill_script are mentioned in load_skill context, not in overview
+    assert 'Use skill resources and scripts as needed' in prompt
 
 
 @pytest.mark.asyncio

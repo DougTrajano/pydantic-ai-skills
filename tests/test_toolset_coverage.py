@@ -137,8 +137,8 @@ async def test_toolset_script_with_description() -> None:
     toolset = SkillsToolset(skills=[skill])
     instructions = await toolset.get_instructions(None)
 
-    # Check that description appears in instructions
-    assert 'Custom script description' in instructions or 'execute' in instructions
+    # Check that skill appears in instructions (script descriptions are in skill details, not overview)
+    assert 'test-skill' in instructions
 
 
 def test_toolset_skills_property() -> None:
