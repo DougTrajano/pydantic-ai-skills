@@ -240,8 +240,8 @@ async def test_get_instructions(sample_skills_dir: Path) -> None:
 
     # Should include usage instructions
     assert 'load_skill' in prompt
-    assert 'read_skill_resource' in prompt
-    assert 'run_skill_script' in prompt
+    # read_skill_resource and run_skill_script are mentioned in load_skill context, not in overview
+    assert 'Use any additional skill resources and scripts as needed' in prompt
 
 
 @pytest.mark.asyncio
@@ -254,3 +254,219 @@ async def test_get_instructions_empty() -> None:
     mock_ctx = Mock()
     prompt = await toolset.get_instructions(mock_ctx)
     assert prompt is None
+
+
+# Tests for exclude_tools feature
+
+
+def test_exclude_tools_single_string_set(sample_skills_dir: Path) -> None:
+    """Test that tools are correctly excluded when specified as a set."""
+    toolset = SkillsToolset(
+        directories=[sample_skills_dir],
+        exclude_tools={'run_skill_script'},
+    )
+
+    # Verify skills are still loaded
+    assert len(toolset.skills) == 3
+
+    # Check that run_skill_script is not registered
+    # We can verify this by checking internal tool registration
+    tool_names = set(toolset.tools.keys())
+    assert 'list_skills' in tool_names
+    assert 'load_skill' in tool_names
+    assert 'read_skill_resource' in tool_names
+    assert 'run_skill_script' not in tool_names
+
+
+def test_exclude_tools_multiple_tools(sample_skills_dir: Path) -> None:
+    """Test excluding multiple tools."""
+    toolset = SkillsToolset(
+        directories=[sample_skills_dir],
+        exclude_tools={'run_skill_script', 'read_skill_resource'},
+    )
+
+    # Verify skills are still loaded
+    assert len(toolset.skills) == 3
+
+    # Check that specified tools are not registered
+    tool_names = set(toolset.tools.keys())
+    assert 'list_skills' in tool_names
+    assert 'load_skill' in tool_names
+    assert 'read_skill_resource' not in tool_names
+    assert 'run_skill_script' not in tool_names
+
+
+def test_exclude_tools_as_list(sample_skills_dir: Path) -> None:
+    """Test that exclude_tools accepts lists in addition to sets."""
+    toolset = SkillsToolset(
+        directories=[sample_skills_dir],
+        exclude_tools=['list_skills', 'load_skill'],
+    )
+
+    # Check that specified tools are not registered
+    tool_names = set(toolset.tools.keys())
+    assert 'list_skills' not in tool_names
+    assert 'load_skill' not in tool_names
+    assert 'read_skill_resource' in tool_names
+    assert 'run_skill_script' in tool_names
+
+
+def test_exclude_tools_invalid_tool_name(sample_skills_dir: Path) -> None:
+    """Test that invalid tool names raise ValueError."""
+    with pytest.raises(ValueError, match='Unknown tools.*invalid_tool'):
+        SkillsToolset(
+            directories=[sample_skills_dir],
+            exclude_tools={'invalid_tool'},
+        )
+
+
+def test_exclude_tools_multiple_invalid_names(sample_skills_dir: Path) -> None:
+    """Test ValueError with multiple invalid tool names."""
+    with pytest.raises(ValueError, match='Unknown tools'):
+        SkillsToolset(
+            directories=[sample_skills_dir],
+            exclude_tools={'fake_tool', 'another_fake', 'run_skill_script'},
+        )
+
+
+def test_exclude_tools_load_skill_warning(sample_skills_dir: Path) -> None:
+    """Test that a warning is emitted when load_skill is excluded."""
+    import warnings
+
+    with warnings.catch_warnings(record=True) as warning_list:
+        warnings.simplefilter('always')
+        SkillsToolset(
+            directories=[sample_skills_dir],
+            exclude_tools={'load_skill'},
+        )
+
+        # Find the warning about load_skill being excluded
+        load_skill_warnings = [w for w in warning_list if "'load_skill' is a critical tool" in str(w.message)]
+        assert len(load_skill_warnings) == 1
+        assert issubclass(load_skill_warnings[0].category, UserWarning)
+
+
+def test_exclude_tools_no_warning_for_other_tools(sample_skills_dir: Path) -> None:
+    """Test that no warning is emitted when other tools are excluded."""
+    import warnings
+
+    with warnings.catch_warnings(record=True) as warning_list:
+        warnings.simplefilter('always')
+        SkillsToolset(
+            directories=[sample_skills_dir],
+            exclude_tools={'run_skill_script'},
+        )
+
+        # Filter out the default skills directory warning if it exists
+        relevant_warnings = [
+            w for w in warning_list if 'critical tool' in str(w.message) or 'load_skill' in str(w.message)
+        ]
+        assert len(relevant_warnings) == 0
+
+
+def test_exclude_tools_empty_set(sample_skills_dir: Path) -> None:
+    """Test that an empty exclude_tools set registers all tools."""
+    toolset = SkillsToolset(
+        directories=[sample_skills_dir],
+        exclude_tools=set(),
+    )
+
+    # All tools should be registered
+    tool_names = set(toolset.tools.keys())
+    assert 'list_skills' in tool_names
+    assert 'load_skill' in tool_names
+    assert 'read_skill_resource' in tool_names
+    assert 'run_skill_script' in tool_names
+
+
+def test_exclude_tools_empty_list(sample_skills_dir: Path) -> None:
+    """Test that an empty exclude_tools list registers all tools."""
+    toolset = SkillsToolset(
+        directories=[sample_skills_dir],
+        exclude_tools=[],
+    )
+
+    # All tools should be registered
+    tool_names = set(toolset.tools.keys())
+    assert 'list_skills' in tool_names
+    assert 'load_skill' in tool_names
+    assert 'read_skill_resource' in tool_names
+    assert 'run_skill_script' in tool_names
+
+
+def test_exclude_tools_none(sample_skills_dir: Path) -> None:
+    """Test that None (default) registers all tools."""
+    toolset = SkillsToolset(
+        directories=[sample_skills_dir],
+        exclude_tools=None,
+    )
+
+    # All tools should be registered
+    tool_names = set(toolset.tools.keys())
+    assert 'list_skills' in tool_names
+    assert 'load_skill' in tool_names
+    assert 'read_skill_resource' in tool_names
+    assert 'run_skill_script' in tool_names
+
+
+def test_exclude_tools_exclude_all(sample_skills_dir: Path) -> None:
+    """Test excluding all tools."""
+    toolset = SkillsToolset(
+        directories=[sample_skills_dir],
+        exclude_tools={'list_skills', 'load_skill', 'read_skill_resource', 'run_skill_script'},
+    )
+
+    # No tools should be registered
+    tool_names = set(toolset.tools.keys())
+    assert len(tool_names) == 0
+    assert 'list_skills' not in tool_names
+    assert 'load_skill' not in tool_names
+    assert 'read_skill_resource' not in tool_names
+    assert 'run_skill_script' not in tool_names
+
+
+def test_exclude_tools_skills_still_loaded(sample_skills_dir: Path) -> None:
+    """Test that skills are still loaded when tools are excluded."""
+    toolset = SkillsToolset(
+        directories=[sample_skills_dir],
+        exclude_tools={'run_skill_script', 'read_skill_resource'},
+    )
+
+    # Skills should still be loaded and accessible
+    assert len(toolset.skills) == 3
+    assert 'skill-one' in toolset.skills
+    assert 'skill-two' in toolset.skills
+    assert 'skill-three' in toolset.skills
+
+    # get_skill should still work
+    skill = toolset.get_skill('skill-one')
+    assert skill.name == 'skill-one'
+
+
+def test_exclude_tools_programmatic_skills(sample_skills_dir: Path) -> None:
+    """Test exclude_tools with programmatic skills."""
+    from pydantic_ai_skills import Skill
+
+    custom_skill = Skill(name='custom-skill', description='Custom skill', content='Content')
+
+    toolset = SkillsToolset(
+        skills=[custom_skill],
+        exclude_tools={'run_skill_script'},
+    )
+
+    # Custom skill should be loaded
+    assert 'custom-skill' in toolset.skills
+
+    # run_skill_script should be excluded
+    tool_names = set(toolset.tools.keys())
+    assert 'run_skill_script' not in tool_names
+    assert 'list_skills' in tool_names
+
+
+def test_exclude_tools_mixed_valid_invalid(sample_skills_dir: Path) -> None:
+    """Test that invalid tool names in a mixed set raise ValueError."""
+    with pytest.raises(ValueError, match='Unknown tools'):
+        SkillsToolset(
+            directories=[sample_skills_dir],
+            exclude_tools={'run_skill_script', 'invalid_tool', 'load_skill'},
+        )

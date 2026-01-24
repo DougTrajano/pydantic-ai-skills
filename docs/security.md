@@ -360,6 +360,86 @@ When using the long_operation script:
 """
 ```
 
+## Tool Access Control
+
+### Restricting Available Tools
+
+For additional security or to limit agent capabilities, you can exclude specific skill tools from being available to agents using the `exclude_tools` parameter:
+
+```python
+from pydantic_ai import Agent
+from pydantic_ai.toolsets.skills import SkillsToolset
+
+# Disable script execution only
+toolset = SkillsToolset(
+    directories=["./skills"],
+    exclude_tools={'run_skill_script'}
+)
+
+# Disable multiple tools
+toolset = SkillsToolset(
+    directories=["./skills"],
+    exclude_tools={'run_skill_script', 'read_skill_resource'}
+)
+
+agent = Agent(
+    model='openai:gpt-4o',
+    toolsets=[toolset]
+)
+```
+
+### Available Tool Names
+
+The following tools can be excluded:
+
+- **`list_skills`**: List all available skills
+- **`load_skill`**: Load full skill instructions
+- **`read_skill_resource`**: Access skill resource files or invoke callable resources
+- **`run_skill_script`**: Execute skill scripts
+
+### Common Exclusion Patterns
+
+**Prevent arbitrary code execution:**
+
+```python
+# Only allow reading skills and resources, no script execution
+toolset = SkillsToolset(
+    directories=["./skills"],
+    exclude_tools={'run_skill_script'}
+)
+```
+
+**Limit to skill discovery only:**
+
+```python
+# Agents can only list and load skills, but cannot access resources or run scripts
+toolset = SkillsToolset(
+    directories=["./skills"],
+    exclude_tools={'read_skill_resource', 'run_skill_script'}
+)
+```
+
+**Restrict resource access:**
+
+```python
+# Scripts can run, but agents cannot access resource files
+toolset = SkillsToolset(
+    directories=["./skills"],
+    exclude_tools={'read_skill_resource'}
+)
+```
+
+### Important Notes
+
+!!! warning "Excluding load_skill"
+    Excluding `load_skill` severely limits skill functionality and will emit a warning. Agents need this tool to effectively discover and understand how to use skills. Only exclude this if you have pre-loaded all skill instructions into the agent's context.
+
+**Best Practice:** Only exclude tools you intentionally want to restrict. For example:
+
+- Exclude `run_skill_script` if you want to prevent agents from executing arbitrary code
+- Exclude `read_skill_resource` if you want to limit resource access for sensitive data
+- Keep `list_skills` and `load_skill` enabled for normal skill discovery workflows
+
 ## Dependency Management
 
 ### Secure Dependency Injection
