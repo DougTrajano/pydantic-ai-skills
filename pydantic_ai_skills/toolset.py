@@ -74,7 +74,7 @@ LOAD_SKILL_TEMPLATE = """<skill>
 class SkillsToolset(FunctionToolset):
     """Pydantic AI toolset for automatic skill discovery and integration.
 
-    See [skills docs](../skills/overview.md) for more information.
+    See [skills docs](../creating-skills.md) for more information.
 
     This is the primary interface for integrating skills with Pydantic AI agents.
     It manages skills directly and provides tools for skill interaction.
