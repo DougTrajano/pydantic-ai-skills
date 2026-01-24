@@ -90,13 +90,3 @@ quote-style = "single"
 
 [tool.ruff.lint.per-file-ignores]
 "examples/**/*.py" = ["D101", "D103"]
-
-[tool.sonar]
-project-key="DougTrajano_pydantic-ai-skills"
-organization="dougtrajano"
-
-sources = "pydantic_ai_skills"
-tests = "tests"
-
-# exclude this file from duplication checks
-cpd-exclusions = "**/pydantic_ai_skills/types.py"
