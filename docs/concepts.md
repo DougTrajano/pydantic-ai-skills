@@ -2,17 +2,17 @@
 
 Understanding the key concepts behind pydantic-ai-skills will help you build better agent systems.
 
-## Skills
+## Skill Structure
 
-A **skill** is a modular package that extends an agent's capabilities. Skills can be created in two ways:
+Skills are modular packages that extend agent capabilities. You can create them in two ways:
 
 ### File-Based Skills
 
-Each skill is a directory containing:
+A directory containing:
 
-- `SKILL.md` - Required file with metadata and instructions
-- `scripts/` - Optional directory with executable Python scripts
-- `resources/` - Optional directory with additional documentation or data files
+- `SKILL.md` - Metadata (YAML frontmatter) and instructions (required)
+- `scripts/` - Optional executable Python scripts
+- `resources/` - Optional additional documentation or data
 
 ```markdown
 my-skill/
@@ -26,33 +26,26 @@ my-skill/
 
 ### Programmatic Skills
 
-Skills can also be created programmatically in Python code using the `Skill` class with decorators for resources and scripts. This enables dynamic content generation and dependency access. See [Programmatic Skills](programmatic-skills.md) for details.
+Alternatively, define skills directly in Python using the `Skill` class with decorators for dynamic resources and scripts. This enables dependency injection and runtime configuration. See [Programmatic Skills](programmatic-skills.md) for details.
 
 ## SKILL.md Format
 
-The `SKILL.md` file uses **YAML frontmatter** for metadata and **Markdown** for instructions.
+Each `SKILL.md` file has **YAML frontmatter** (metadata) followed by **Markdown** (instructions).
 
-### Minimal Example
+**Minimal example:**
 
-````markdown
+```yaml
 ---
 name: my-skill
 description: A brief description of what this skill does
 ---
+```
 
-# My Skill
+**Required fields:**
+- `name` - Unique identifier (lowercase, hyphens, ≤64 chars)
+- `description` - Brief summary (≤1024 chars, appears in listings)
 
-Detailed instructions for the agent on how to use this skill...
-
-### Required Fields
-
-- `name` - Unique identifier for the skill
-- `description` - Brief description (shown in skill listings)
-
-### Optional Fields
-
-You can add any additional metadata:
-
+**Optional fields:**
 ```yaml
 ---
 name: arxiv-search
@@ -60,10 +53,8 @@ description: Search arXiv for research papers
 version: 1.0.0
 author: Your Name
 category: research
-tags: [papers, arxiv, academic]
 ---
 ```
-````
 
 ## Progressive Disclosure
 
@@ -76,75 +67,28 @@ The toolset implements **progressive disclosure** - exposing information only wh
 
 This approach:
 
-- Reduces initial context size
-- Lets agents discover capabilities dynamically
-- Improves token efficiency
-- Scales to many skills
+Skills use **progressive disclosure** to minimize context:
 
-## The Four Tools
+1. **Discovery**: Skill names/descriptions are added to instructions via `get_instructions()`
+2. **Loading**: Agent calls `load_skill(name)` for full instructions when needed
+3. **Resources**: Agent calls `read_skill_resource()` for additional files
+4. **Execution**: Agent calls `run_skill_script()` to execute code
 
-The `SkillsToolset` provides four tools to agents:
-
-### 1. list_skills()
-
-Lists all available skills with their descriptions.
-
+This reduces token usage, enables dynamic capability discovery, and scales to many skills.
 **Returns**: Formatted markdown with skill names and descriptions
 
 **When to use**: Optional - skills are already listed in the agent's instructions via `get_instructions(ctx)`. Use only if the agent needs to re-check available skills dynamically.
 
 ### 2. load_skill(name)
 
-Loads the complete instructions for a specific skill.
+Lo# The Four Tools
 
-**Parameters**:
-
-- `skill_name` (str) - Name of the skill to load
-
-**Returns**: Full SKILL.md content including detailed instructions
-
-**When to use**: When the agent needs detailed instructions for using a skill
-
-### 3. read_skill_resource(skill_name, resource_name)
-
-Reads additional resource files from a skill.
-
-**Parameters**:
-
-- `skill_name` (str) - Name of the skill
-- `resource_name` (str) - Resource filename (e.g., "FORMS.md")
-
-**Returns**: Content of the resource file
-
-**When to use**: When a skill references additional documentation or data files
-
-### 4. run_skill_script(skill_name, script_name, args)
-
-Executes a Python script from a skill.
-
-**Parameters**:
-
-- `skill_name` (str) - Name of the skill
-- `script_name` (str) - Script name without .py extension
-- `args` (list[str], optional) - Command-line arguments
-
-**Returns**: Script output (stdout and stderr combined)
-
-**When to use**: When a skill needs to execute custom code
-
-## SkillsToolset
-
-The `SkillsToolset` class is the main interface for integrating skills with Pydantic AI agents.
-
-### Initialization
-
-```python
-from pydantic_ai_skills import SkillsToolset
-
-toolset = SkillsToolset(
-    directories=["./skills", "./shared-skills"],
-    validate=True,           # Validate skill structure
-    max_depth=3,             # Maximum depth for skill discovery
+| Tool | Purpose |
+|------|---------|
+| `list_skills()` | List all available skills (usually redundant with `get_instructions()`) |
+| `load_skill(name)` | Load complete instructions for a skill |
+| `read_skill_resource(skill_name, resource_name)` | Read additional files (e.g., forms, reference docs) |
+| `run_skill_script(skill_name, script_name, args)` | Execute Python scripts defined in the skill |covery
     id="skills"              # Unique identifier
 )
 ```

@@ -109,7 +109,7 @@ Use the search script.
     assert skills[0].scripts is not None
     assert len(skills[0].scripts) == 2
     script_names = {s.name for s in skills[0].scripts}
-    assert script_names == {'search', 'process'}
+    assert script_names == {'scripts/search.py', 'scripts/process.py'}
 
 
 def test_discover_skills_nested_directories(tmp_path: Path) -> None:

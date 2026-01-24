@@ -17,6 +17,9 @@ nav:
       - Core Concepts: concepts.md
       - Creating Skills: creating-skills.md
       - Programmatic Skills: programmatic-skills.md
+      - Advanced Features: advanced.md
+      - Implementation Patterns: patterns.md
+  - Security & Deployment: security.md
   - API Reference:
       - api/toolset.md
       - api/types.md

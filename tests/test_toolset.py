@@ -189,8 +189,9 @@ async def test_run_skill_script_tool(sample_skills_dir: Path) -> None:
     assert len(skill.scripts) == 2
 
     script_names = [s.name for s in skill.scripts]
-    assert 'hello' in script_names
-    assert 'echo' in script_names
+    # Scripts are now stored with relative paths
+    assert 'scripts/hello.py' in script_names
+    assert 'scripts/echo.py' in script_names
 
     # Check that scripts can be found
     for script in skill.scripts:

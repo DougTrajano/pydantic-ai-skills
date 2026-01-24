@@ -1,6 +1,7 @@
 """Example of using Pydantic AI with multiple skills directories and tools."""
 
 import datetime
+from pathlib import Path
 
 import httpx
 import uvicorn
@@ -15,9 +16,8 @@ from pydantic_ai_skills import SkillsToolset
 load_dotenv()
 
 # Initialize Skills Toolset with the skills directory
-skills_toolset = SkillsToolset(
-    directories=['./skills', './anthropic-skills']  # Add paths to your skills directories
-)
+script_dir = Path(__file__).parent
+skills_toolset = SkillsToolset(directories=[str(script_dir / 'skills'), str(script_dir / 'anthropic-skills')])
 
 fs_toolset = FileSystemToolset.create_default('./tmp', mode='rw')
 
@@ -41,7 +41,7 @@ async def add_skills(ctx: RunContext) -> str | None:
 
 
 @agent.instructions
-def add_today_date() -> str:
+async def add_today_date() -> str:
     """Add today's date to the agent's context."""
     return f'The date is {datetime.datetime.now().strftime("%B %d, %Y")}.'
 

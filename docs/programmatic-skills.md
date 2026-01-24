@@ -1,11 +1,6 @@
 # Programmatic Skills
 
-While most skills are created as filesystem directories with `SKILL.md` files, pydantic-ai-skills also supports creating skills programmatically in Python code. This is useful for:
-
-- Dynamic skills that need access to runtime dependencies
-- Skills that generate content on-demand
-- Skills integrated with existing Python libraries
-- Advanced use cases requiring custom logic
+Create skills directly in Python code for dynamic capabilities that require runtime dependencies, custom logic, or configuration-based generation.
 
 ## Overview
 
@@ -387,6 +382,115 @@ async def my_script(ctx: RunContext[MyDeps], arg: str) -> str:
     return f'Processed: {arg}'
 ```
 
+## Advanced: Using @toolset.skill() Decorator
+
+For concise skill definition directly on a `SkillsToolset`, use the `@toolset.skill()` decorator:
+
+```python
+from pydantic_ai import Agent, RunContext
+from pydantic_ai.toolsets.skills import SkillsToolset
+
+skills = SkillsToolset()
+
+@skills.skill(
+    name='analytics',
+    license='MIT',
+    metadata={'version': '1.0.0'}
+)
+def analytics_skill() -> str:
+    """Analyze application data."""
+    return """# Analytics Skill
+
+Provides analytics and reporting capabilities."""
+
+# Add resources and scripts
+@analytics_skill.resource
+async def metrics(ctx: RunContext[AppDeps]) -> str:
+    """Current system metrics."""
+    return await ctx.deps.get_metrics()
+
+@analytics_skill.script
+async def report(ctx: RunContext[AppDeps], period: str = 'week') -> str:
+    """Generate report for period."""
+    return await ctx.deps.database.generate_report(period)
+
+# Create agent with decorator-defined skill
+agent = Agent(
+    model='openai:gpt-4o',
+    toolsets=[skills],
+    deps=AppDeps(...)
+)
+```
+
+See [Advanced Features](advanced.md) for full decorator documentation.
+
+## Mixing Skill Types
+
+Combine file-based and programmatic skills in a single toolset:
+
+```python
+from pydantic_ai.toolsets.skills import SkillsToolset
+
+skills = SkillsToolset(directories=['./skills'])
+
+@skills.skill()
+def runtime_config() -> str:
+    return "Access runtime configuration"
+
+@runtime_config.resource
+async def env_info(ctx: RunContext[AppDeps]) -> str:
+    return f"Environment: {ctx.deps.environment}"
+
+agent = Agent(model='openai:gpt-4o', toolsets=[skills])
+```
+
+## Parameter Types for Resources and Scripts
+
+### Simple Typed Parameters
+
+```python
+@skill.resource
+def get_config(setting: str) -> str:
+    """Get configuration value."""
+    return f"Value: {config[setting]}"
+
+@skill.script
+def calculator(expression: str) -> str:
+    """Calculate expression using Python's numexpr library.
+
+    Expression should be a single line mathematical expression
+    that solves the problem.
+
+    Examples:
+        "37593 * 67" for "37593 times 67"
+        "37593**(1/5)" for "37593^(1/5)"
+    """
+    import math
+    import numexpr
+
+    local_dict = {'pi': math.pi, 'e': math.e}
+    return str(
+        numexpr.evaluate(
+            expression.strip(),
+            global_dict={},  # restrict access to globals
+            local_dict=local_dict,  # add common mathematical functions
+        )
+    )
+```
+
+### With RunContext and Multiple Parameters
+
+```python
+@skill.resource
+async def fetch_data(
+    ctx: RunContext[AppDeps],
+    dataset: str,
+    filters: dict | None = None
+) -> str:
+    """Fetch data with optional filters."""
+    return await ctx.deps.database.fetch(dataset, filters)
+```
+
 ## Best Practices
 
 ### Resource Guidelines
@@ -395,21 +499,22 @@ async def my_script(ctx: RunContext[MyDeps], arg: str) -> str:
 - Keep resources **focused and concise** - return only what's needed
 - Make resources **idempotent** - safe to call multiple times
 - Use **clear names** that describe what the resource provides
+- Document parameters in docstrings for LLM understanding
 
 ### Script Guidelines
 
 - Use scripts for **actions and computations** that transform data or state
 - **Validate inputs** and provide clear error messages
 - Keep scripts **stateless** when possible - prefer passing data via dependencies
-- Use **meaningful return values** - structured data (dicts) or formatted text
+- Use **meaningful return values** - structured data or formatted text
 - Document **parameters clearly** in docstrings for better LLM understanding
 
 ### Dependency Management
 
-- Use `deps_type` parameter when creating the agent to specify dependency type
 - Access dependencies via `ctx.deps` in resources and scripts
 - Keep dependencies **minimal and focused** for the skill's purpose
 - Consider **lazy loading** expensive resources (databases, large datasets)
+- Use TypedDict for dependency type safety
 
 ### Testing Programmatic Skills
 
@@ -447,6 +552,31 @@ async def test_script(skill):
     assert result == 'processed: test'
 ```
 
+## When to Use Which Approach
+
+### Use Programmatic Skills When You Need:
+
+- **Dynamic Content**: Generate resources based on runtime state
+- **Dependency Access**: Leverage shared dependencies (databases, APIs)
+- **Type Safety**: IDE autocomplete and type checking
+- **Complex Logic**: Sophisticated algorithms in Python
+- **Direct Testing**: Unit test resources and scripts
+
+### Use File-Based Skills When You Need:
+
+- **Simplicity**: Quick creation without code
+- **Portability**: Share skills as standalone directories
+- **Version Control**: Track instruction changes easily
+- **Non-Python Scripts**: Execute scripts in other languages
+- **Separation**: Keep instructions separate from application code
+
+### Use Decorator Pattern (@toolset.skill()) When You Need:
+
+- **Inline Definition**: Define skills at agent initialization
+- **Runtime Generation**: Create skills based on configuration
+- **Conciseness**: Minimal boilerplate for simple skills
+- **Integrated Approach**: Skills bundled with agent logic
+
 ## Advantages Over File-Based Skills
 
 **Use programmatic skills when you need:**
@@ -468,6 +598,7 @@ async def test_script(skill):
 ## See Also
 
 - [Creating Skills](creating-skills.md) - File-based skill creation
-- [Concepts](concepts.md) - Core concepts and architecture
+- [Advanced Features](advanced.md) - Decorator patterns and dependency injection
+- [Implementation Patterns](patterns.md) - Common design patterns
 - [API Reference](api/types.md) - Detailed API documentation for `Skill`, `SkillResource`, and `SkillScript`
 - [Examples](https://github.com/dougtrajano/pydantic-ai-skills/tree/main/examples) - More examples in the repository
