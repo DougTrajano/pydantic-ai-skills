@@ -94,4 +94,4 @@ quote-style = "single"
 [tool.sonar]
 sources = "pydantic_ai_skills"
 tests = "tests"
-exclusions = "pydantic_ai_skills/types.py"
+cpd-exclusions = "pydantic_ai_skills/types.py"
