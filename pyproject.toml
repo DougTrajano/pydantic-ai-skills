@@ -92,7 +92,7 @@ quote-style = "single"
 "examples/**/*.py" = ["D101", "D103"]
 
 [tool.sonar]
-projectKey="DougTrajano_pydantic-ai-skills"
+project-key="DougTrajano_pydantic-ai-skills"
 organization="dougtrajano"
 
 sources = "pydantic_ai_skills"
