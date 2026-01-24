@@ -90,3 +90,8 @@ quote-style = "single"
 
 [tool.ruff.lint.per-file-ignores]
 "examples/**/*.py" = ["D101", "D103"]
+
+[tool.sonarqube]
+sonarqube.sources = "pydantic_ai_skills"
+sonarqube.tests = "tests"
+sonarqube.exclusions = "pydantic_ai_skills/types.py"
