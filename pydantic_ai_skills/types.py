@@ -4,10 +4,10 @@ This module contains dataclass-based type definitions for skills,
 their resources, and scripts.
 
 Data classes:
-- [`Skill`][pydantic_ai.toolsets.skills.Skill]: A skill instance with metadata, content, resources, and scripts
-- [`SkillResource`][pydantic_ai.toolsets.skills.SkillResource]: A resource file or callable within a skill
-- [`SkillScript`][pydantic_ai.toolsets.skills.SkillScript]: An executable script within a skill
-- [`SkillWrapper`][pydantic_ai.toolsets.skills.SkillWrapper]: Generic wrapper for decorator-based skill creation
+- [`Skill`][pydantic_ai_skills.Skill]: A skill instance with metadata, content, resources, and scripts
+- [`SkillResource`][pydantic_ai_skills.SkillResource]: A resource file or callable within a skill
+- [`SkillScript`][pydantic_ai_skills.SkillScript]: An executable script within a skill
+- [`SkillWrapper`][pydantic_ai_skills.SkillWrapper]: Generic wrapper for decorator-based skill creation
 """
 
 from __future__ import annotations

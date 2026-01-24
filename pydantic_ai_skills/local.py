@@ -8,10 +8,10 @@ This module provides:
 - Factory functions for creating file-based resources and scripts
 
 Implementations:
-- [`LocalSkillScriptExecutor`][pydantic_ai.toolsets.skills.LocalSkillScriptExecutor]: Execute scripts using local Python subprocess
-- [`CallableSkillScriptExecutor`][pydantic_ai.toolsets.skills.CallableSkillScriptExecutor]: Wrap a callable in the executor interface
-- [`FileBasedSkillResource`][pydantic_ai.toolsets.skills.FileBasedSkillResource]: File-based resource with disk loading
-- [`FileBasedSkillScript`][pydantic_ai.toolsets.skills.FileBasedSkillScript]: File-based script with subprocess execution
+- [`LocalSkillScriptExecutor`][pydantic_ai_skills.LocalSkillScriptExecutor]: Execute scripts using local Python subprocess
+- [`CallableSkillScriptExecutor`][pydantic_ai_skills.CallableSkillScriptExecutor]: Wrap a callable in the executor interface
+- [`FileBasedSkillResource`][pydantic_ai_skills.FileBasedSkillResource]: File-based resource with disk loading
+- [`FileBasedSkillScript`][pydantic_ai_skills.FileBasedSkillScript]: File-based script with subprocess execution
 """
 
 from __future__ import annotations

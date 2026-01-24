@@ -1,6 +1,6 @@
 """Filesystem-based skill discovery and management.
 
-This module provides [`SkillsDirectory`][pydantic_ai.toolsets.skills.SkillsDirectory]
+This module provides [`SkillsDirectory`][pydantic_ai_skills.SkillsDirectory]
 for discovering and loading skills from a filesystem directory.
 
 Supports nested skill directories with configurable depth limits and provides

@@ -1,6 +1,6 @@
 """Skills toolset implementation.
 
-This module provides the main [`SkillsToolset`][pydantic_ai.toolsets.skills.SkillsToolset]
+This module provides the main [`SkillsToolset`][pydantic_ai_skills.SkillsToolset]
 class that integrates skill discovery and management with Pydantic AI agents.
 
 The toolset provides four main tools for agents:
