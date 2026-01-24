@@ -193,7 +193,7 @@ class SkillsToolset(FunctionToolset):
 
         # Validate and initialize exclude_tools
         valid_tools = {'list_skills', 'load_skill', 'read_skill_resource', 'run_skill_script'}
-        self._exclude_tools: set[str] = set(exclude_tools or set())
+        self._exclude_tools: set[str] = set(exclude_tools or [])
         invalid = self._exclude_tools - valid_tools
         if invalid:
             raise ValueError(f'Unknown tools: {invalid}. Valid: {valid_tools}')
