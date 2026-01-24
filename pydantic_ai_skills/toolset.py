@@ -460,7 +460,7 @@ class SkillsToolset(FunctionToolset):
         """Register the read_skill_resource tool."""
 
         @self.tool
-        async def read_skill_resource(  # pyright: ignore[reportUnusedFunction]  #noqa: D417
+        async def read_skill_resource(  # pyright: ignore[reportUnusedFunction]  # noqa: D417
             ctx: RunContext[Any],
             skill_name: str,
             resource_name: str,
