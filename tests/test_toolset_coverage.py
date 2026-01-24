@@ -274,7 +274,8 @@ With script
     # Verify skill and script are registered
     assert 'test-skill' in toolset.skills
     assert len(toolset.skills['test-skill'].scripts) == 1
-    assert toolset.skills['test-skill'].scripts[0].name == 'test_script'
+    # Script name should be relative path with .py extension
+    assert toolset.skills['test-skill'].scripts[0].name == 'scripts/test_script.py'
 
 
 def test_toolset_validate_parameter() -> None:

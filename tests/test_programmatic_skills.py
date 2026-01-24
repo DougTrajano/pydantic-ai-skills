@@ -228,19 +228,18 @@ def test_toolset_no_skills_or_directories_warning(tmp_path) -> None:
         os.chdir(original_dir)
 
 
-def test_skill_deprecated_extra_property() -> None:
-    """Test deprecated extra property."""
+def test_skill_metadata_property() -> None:
+    """Test skill metadata property."""
     skill = Skill(
         name='test-skill',
         description='Test',
         content='Content',
-        metadata={'version': '1.0.0'},
+        metadata={'version': '1.0.0', 'author': 'Test Author'},
     )
 
-    with pytest.warns(DeprecationWarning, match='The `extra` attribute is deprecated'):
-        extra = skill.extra
-
-    assert extra == {'version': '1.0.0'}
+    # metadata attribute exists and contains the data
+    assert skill.metadata == {'version': '1.0.0', 'author': 'Test Author'}
+    assert skill.metadata['version'] == '1.0.0'
 
 
 def test_skill_resource_validation_no_content_or_function() -> None:

@@ -6,6 +6,13 @@ Searches the arXiv preprint repository for research papers.
 
 import argparse
 
+try:
+    import arxiv
+except ImportError as exc:
+    raise ImportError(
+        "The 'arxiv' package is required to run this script. Please install it using 'pip install arxiv'."
+    ) from exc
+
 
 def query_arxiv(query: str, max_papers: int = 10) -> str:
     """Query arXiv for papers based on the provided search query.
@@ -21,13 +28,12 @@ def query_arxiv(query: str, max_papers: int = 10) -> str:
         The formatted search results or an error message.
     """
     try:
-        import arxiv
-    except ImportError:
-        return 'Error: arxiv package not installed. Install with: pip install arxiv'
-
-    try:
         client = arxiv.Client()
-        search = arxiv.Search(query=query, max_results=max_papers, sort_by=arxiv.SortCriterion.Relevance)
+        search = arxiv.Search(
+            query=query,
+            max_results=max_papers,
+            sort_by=arxiv.SortCriterion.Relevance,
+        )
         results = '\n\n'.join(
             [
                 f'Title: {paper.title}\nSummary: {paper.summary}\nURL: {paper.entry_id}'
@@ -42,7 +48,12 @@ def query_arxiv(query: str, max_papers: int = 10) -> str:
 def main() -> None:
     """Main function to parse arguments and perform arXiv search."""
     parser = argparse.ArgumentParser(description='Search arXiv for research papers')
-    parser.add_argument('query', type=str, help='Search query string')
+    parser.add_argument(
+        '--query',
+        type=str,
+        required=True,
+        help='Search query string',
+    )
     parser.add_argument(
         '--max-papers',
         type=int,

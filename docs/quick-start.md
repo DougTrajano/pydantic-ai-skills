@@ -93,16 +93,12 @@ The agent will use the pydanticai-docs skill to answer your question!
 
 ## How It Works
 
-When you run the agent:
+When you initialize the skills toolset:
 
-1. **Toolset Initialization**: Scans `./skills/` and discovers available skills
-2. **Tool Registration**: Registers four core tools:
-   - `list_skills()` - Lists all available skills
-   - `load_skill(name)` - Loads a specific skill's instructions
-   - `read_skill_resource(skill_name, resource_name)` - Reads additional files
-   - `run_skill_script(skill_name, script_name, args)` - Executes scripts
-3. **Instructions Addition**: Skills overview is added to agent via `get_instructions(ctx)` decorator
-4. **Agent Execution**: Agent uses tools to discover, load, and apply skills as needed
+1. **Discovery**: Scans `./skills/` for skill directories with `SKILL.md` files
+2. **Registration**: Registers four tools (`list_skills`, `load_skill`, `read_skill_resource`, `run_skill_script`)
+3. **Instructions**: Skills overview is added to the agent via `@agent.instructions`
+4. **Execution**: Agent discovers, loads, and uses skills as needed
 
 ## Add a Script-Based Skill
 
@@ -348,34 +344,6 @@ research_skills = [
 print(f"Found {len(research_skills)} research skills")
 ```
 
-### Jupyter Notebook Usage
-
-```python
-# Cell 1: Setup
-from pydantic_ai import Agent
-from pydantic_ai_skills import SkillsToolset
-
-skills_toolset = SkillsToolset(directories=["./skills"])
-agent = Agent(
-    model='openai:gpt-5.2',
-    instructions="You are a data analysis assistant.",
-    toolsets=[skills_toolset]
-)
-
-@agent.instructions
-async def add_skills(ctx: RunContext) -> str | None:
-    """Add skills instructions to the agent's context."""
-    return await skills_toolset.get_instructions(ctx)
-
-# Cell 2: Explore skills
-for name, skill in skills_toolset.skills.items():
-    print(f"{name}: {skill.metadata.description}")
-
-# Cell 3: Use agent
-result = await agent.run("Analyze the data in data.csv")
-print(result.output)
-```
-
 ## Example Skills
 
 The repository includes several example skills in `examples/skills/`:
@@ -397,18 +365,6 @@ The repository includes several example skills in `examples/skills/`:
 - **Type**: Documentation reference skill
 - **Features**: Quick access to Pydantic AI documentation
 - **Location**: `examples/skills/pydanticai-docs/`
-
-## Try the Examples
-
-```bash
-git clone https://github.com/dougtrajano/pydantic-ai-skills.git
-cd pydantic-ai-skills
-pip install -e .
-pip install jupyter
-
-# Run the example notebook
-jupyter notebook examples/test_notebook.ipynb
-```
 
 ## Next Steps
 

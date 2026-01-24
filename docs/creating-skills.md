@@ -1,9 +1,9 @@
 # Creating Skills
 
-This guide covers everything you need to know to create effective **file-based skills** for your Pydantic AI agents.
+This guide covers creating effective **file-based skills** for Pydantic AI agents.
 
 !!! tip "Programmatic Skills"
-    Skills can also be created programmatically in Python code using the `Skill` class. See [Programmatic Skills](programmatic-skills.md) for creating skills with dynamic resources, dependency access, and Python decorators.
+    Skills can also be created in Python code using the `Skill` class. See [Programmatic Skills](programmatic-skills.md) for dynamic resources and dependency injection.
 
 ## Basic Skill Structure
 
@@ -41,53 +41,29 @@ Instructions for the agent on how to use this skill...
 
 ### Naming Conventions
 
-Following Anthropic's skill naming conventions (logged as warnings if violated):
+Follow Anthropic's skill naming conventions:
 
-**Name Requirements:**
+- **Name**: lowercase, hyphens only, ≤64 chars (no "anthropic" or "claude")
+- **Description**: ≤1024 chars, clear and concise
 
-- Use only lowercase letters, numbers, and hyphens
-- Maximum 64 characters
-- Avoid reserved words like "anthropic" or "claude"
+**Valid**: `arxiv-search`, `web-research`, `data-analyzer`
+**Invalid**: `ArxivSearch`, `arxiv_search`, `very-long-skill-name-exceeds-limit`
 
-**Description Requirements:**
-
-- Maximum 1024 characters
-- Clear and concise summary of functionality
-
-**Example Good Names:**
-
-- `arxiv-search` ✅
-- `web-research` ✅
-- `data-analyzer` ✅
-
-**Example Bad Names:**
-
-- `ArxivSearch` ❌ (uppercase)
-- `arxiv_search` ❌ (underscores)
-- `my-super-amazing-incredible-skill-that-does-everything` ❌ (too long)
-
-**Validation:**
-The toolset validates skills on load and logs warnings for violations. Skills with warnings will still load, but you should fix the issues for better compatibility.
-
-**Instruction Length:**
-Skills with instructions exceeding 500 lines will trigger a warning suggesting you split content into separate resource files. This follows Anthropic's recommendations for keeping skills focused and manageable.
+The toolset logs warnings for violations but skills will still load.
 
 ### Best Practices for Instructions
 
 **✅ Do:**
-
 - Use clear, action-oriented language
 - Provide specific examples
-- Break down complex workflows into steps
+- Break down complex workflows
 - Specify when to use the skill
-- Include example inputs/outputs
 
 **❌ Don't:**
-
-- Write vague or ambiguous instructions
-- Assume the agent knows implicit context
-- Create circular dependencies between skills
-- Include sensitive information (API keys, passwords)
+- Write vague instructions
+- Assume implicit context
+- Create circular skill dependencies
+- Include API keys or sensitive data
 
 ### Example: Well-Written Instructions
 
@@ -204,21 +180,291 @@ if __name__ == "__main__":
 ### Script Best Practices
 
 **✅ Do:**
-
-- Provide clear usage messages
 - Validate input arguments
-- Use JSON for structured output
+- Return structured output (JSON preferred)
 - Handle errors gracefully
-- Keep scripts focused on one task
 - Document expected inputs/outputs in SKILL.md
+- Use timeouts for external calls
 
 **❌ Don't:**
-
 - Make network calls without timeouts
 - Write to files outside the skill directory
 - Require interactive input
 - Use environment-specific paths
-- Leave debugging print statements
+
+### Script Argument Handling
+
+When agents call scripts via `run_skill_script()`, arguments are converted to command-line flags:
+
+```python
+# Agent calls:
+run_skill_script(
+    skill_name='data-analyzer',
+    script_name='analyze',
+    args={'query': 'SELECT * FROM users', 'limit': '100', 'format': 'json'}
+)
+
+# Your script receives command-line arguments:
+# python analyze.py --query "SELECT * FROM users" --limit 100 --format json
+```
+
+**Argument Mapping Rules:**
+
+- Dictionary keys become flag names: `--key value`
+- String values are passed as-is
+- Numeric values are converted to strings
+- Boolean `True` becomes flag without value: `--flag`
+- Boolean `False` omits the flag entirely
+- Lists become multiple flag occurrences: `--item a --item b`
+
+**Example Script with Arguments:**
+
+```python
+#!/usr/bin/env python3
+"""Data analyzer script with argument handling."""
+
+import sys
+import argparse
+import json
+
+def main():
+    parser = argparse.ArgumentParser(description='Analyze data')
+    parser.add_argument('--query', required=True, help='SQL query to execute')
+    parser.add_argument('--limit', type=int, default=100, help='Result limit')
+    parser.add_argument('--format', choices=['json', 'csv'], default='json')
+    parser.add_argument('--explain', action='store_true', help='Show execution plan')
+
+    args = parser.parse_args()
+
+    try:
+        # Execute query (example)
+        results = execute_query(args.query, args.limit)
+
+        # Format output
+        if args.format == 'json':
+            output = json.dumps(results, indent=2)
+        else:
+            output = convert_to_csv(results)
+
+        print(output)
+        sys.exit(0)
+
+    except Exception as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(1)
+
+def execute_query(query, limit):
+    # Your implementation here
+    return [{"id": 1, "name": "test"}]
+
+def convert_to_csv(data):
+    # Your CSV conversion here
+    return "id,name\n1,test"
+
+if __name__ == "__main__":
+    main()
+```
+
+### Parsing and Output Formats
+
+**JSON Output (Recommended):**
+
+```python
+import json
+
+result = {
+    "success": True,
+    "data": [
+        {"id": 1, "value": 100},
+        {"id": 2, "value": 200}
+    ],
+    "count": 2,
+    "metadata": {"query": "user_data", "timestamp": "2025-01-23"}
+}
+
+print(json.dumps(result, indent=2))
+```
+
+**Plain Text Output:**
+
+```python
+output = """Analysis Results
+================
+
+Total records: 42
+Average value: 123.45
+Range: [10, 456]
+
+Top 3 results:
+1. Item A - 456
+2. Item B - 234
+3. Item C - 189
+"""
+print(output)
+```
+
+**CSV Output:**
+
+```python
+import csv
+import sys
+
+data = [
+    {"id": 1, "name": "Alice", "score": 95},
+    {"id": 2, "name": "Bob", "score": 87}
+]
+
+writer = csv.DictWriter(sys.stdout, fieldnames=['id', 'name', 'score'])
+writer.writeheader()
+writer.writerows(data)
+```
+
+### Error Handling in Scripts
+
+**Communicate Errors Clearly:**
+
+```python
+#!/usr/bin/env python3
+"""Example error handling."""
+
+import sys
+import json
+
+def main():
+    try:
+        # Validate inputs first
+        data = validate_input(sys.argv[1:])
+
+        # Perform operation
+        result = process(data)
+
+        # Output results
+        print(json.dumps({"status": "success", "result": result}))
+
+    except ValueError as e:
+        # Input validation error
+        print(json.dumps({
+            "status": "error",
+            "type": "validation_error",
+            "message": str(e)
+        }), file=sys.stderr)
+        sys.exit(1)
+
+    except TimeoutError as e:
+        # Operation timeout
+        print(json.dumps({
+            "status": "error",
+            "type": "timeout",
+            "message": "Operation exceeded time limit"
+        }), file=sys.stderr)
+        sys.exit(2)
+
+    except Exception as e:
+        # Unexpected error
+        print(json.dumps({
+            "status": "error",
+            "type": "internal_error",
+            "message": str(e)
+        }), file=sys.stderr)
+        sys.exit(3)
+
+def validate_input(args):
+    if not args:
+        raise ValueError("Missing required arguments")
+    return args[0]
+
+def process(data):
+    return f"Processed: {data}"
+
+if __name__ == "__main__":
+    main()
+```
+
+**Document Exit Codes:**
+
+In your `SKILL.md`, document what exit codes mean:
+
+```markdown
+## Script: analyze
+
+Executes data analysis with exit codes:
+
+- **0**: Success
+- **1**: Validation error (bad input)
+- **2**: Timeout (operation too slow)
+- **3**: System error (unexpected failure)
+
+### Examples
+
+```python
+# Successful analysis
+run_skill_script('data-skill', 'analyze', {'query': 'SELECT count(*) FROM users'})
+# Returns: {"count": 42, "time_ms": 123}
+
+# Invalid input (exits with code 1)
+run_skill_script('data-skill', 'analyze', {'query': 'INVALID SQL'})
+# Returns: ERROR: Syntax error in SQL query
+```
+```
+
+### Timeout Management
+
+Scripts have a default **30-second timeout**. Design scripts accordingly:
+
+```python
+#!/usr/bin/env python3
+"""Long-running operation with timeout awareness."""
+
+import sys
+import time
+
+def main():
+    operation = sys.argv[1] if len(sys.argv) > 1 else 'quick'
+
+    try:
+        if operation == 'quick':
+            result = quick_operation()  # < 1 second
+        elif operation == 'medium':
+            result = medium_operation()  # ~5 seconds
+        elif operation == 'bulk':
+            result = bulk_operation()  # Could take 20+ seconds, with checkpoints
+        else:
+            raise ValueError(f"Unknown operation: {operation}")
+
+        print(result)
+
+    except Exception as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(1)
+
+def quick_operation():
+    return "Quick result"
+
+def medium_operation():
+    time.sleep(5)
+    return "Medium result"
+
+def bulk_operation():
+    """Bulk operation with progress checkpoints."""
+    results = []
+
+    # Process in chunks with time checks
+    for chunk in range(10):
+        # Check if we're approaching timeout (leave 5s buffer)
+        current_time = time.time()
+        if current_time > start_time + 25:
+            return f"Partial: processed {chunk}/10 chunks before timeout"
+
+        # Process chunk
+        results.append(f"chunk_{chunk}")
+        time.sleep(2)
+
+    return f"Complete: {len(results)} chunks processed"
+
+if __name__ == "__main__":
+    start_time = time.time()
+    main()
+```
 
 ## Adding Resources
 

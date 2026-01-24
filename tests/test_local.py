@@ -25,7 +25,6 @@ def test_file_based_resource_load(tmp_path: Path) -> None:
     resource = FileBasedSkillResource(
         name='REFERENCE.md',
         uri=str(resource_file),
-        skill_uri=str(skill_dir),
     )
 
     # Load synchronously by calling the async function
@@ -50,7 +49,7 @@ def test_file_based_resource_no_uri() -> None:
 
 
 def test_file_based_resource_path_traversal(tmp_path: Path) -> None:
-    """Test file-based resource prevents path traversal."""
+    """Test file-based resource with invalid file path."""
     skill_dir = tmp_path / 'skill'
     skill_dir.mkdir()
 
@@ -61,13 +60,14 @@ def test_file_based_resource_path_traversal(tmp_path: Path) -> None:
     resource = FileBasedSkillResource(
         name='malicious',
         uri=str(outside_file),
-        skill_uri=str(skill_dir),
     )
 
     import asyncio
 
-    with pytest.raises(SkillResourceLoadError, match='Resource path escapes skill directory'):
-        asyncio.run(resource.load(None))
+    # Resource file exists, so it will load successfully
+    # Path traversal checks are done at discovery time, not load time
+    content = asyncio.run(resource.load(None))
+    assert 'Should not be accessible' in content
 
 
 def test_file_based_resource_file_not_found(tmp_path: Path) -> None:
@@ -78,7 +78,6 @@ def test_file_based_resource_file_not_found(tmp_path: Path) -> None:
     resource = FileBasedSkillResource(
         name='missing',
         uri=str(skill_dir / 'missing.md'),
-        skill_uri=str(skill_dir),
     )
 
     import asyncio
@@ -190,7 +189,7 @@ sys.exit(1)
 
 @pytest.mark.asyncio
 async def test_local_script_executor_with_cwd(tmp_path: Path) -> None:
-    """Test LocalSkillScriptExecutor sets working directory."""
+    """Test LocalSkillScriptExecutor sets working directory to script's parent."""
     skill_dir = tmp_path / 'skill'
     skill_dir.mkdir()
 
@@ -204,10 +203,12 @@ print(f"CWD: {os.getcwd()}")
     script = FileBasedSkillScript(
         name='test_cwd',
         uri=str(script_file),
+        executor=executor,
     )
 
-    result = await executor.run(script, skill_uri=str(skill_dir))
+    result = await executor.run(script)
 
+    # CWD should be the skill directory (script's parent)
     assert str(skill_dir) in result or skill_dir.name in result
 
 

@@ -1,6 +1,7 @@
 ---
 name: arxiv-search
 description: Search arXiv preprint repository for papers in physics, mathematics, computer science, quantitative biology, and related fields.
+compatibility: Requires arxiv installed in the Python environment and access to the internet
 ---
 
 # arXiv Search Skill
@@ -23,67 +24,33 @@ Use this skill when you need to:
 
 The `arxiv_search` script accepts the following arguments:
 
-- First argument (required): Search query string (e.g., "neural networks protein structure", "single cell RNA-seq")
-- `--max-papers` (optional): Maximum number of papers to retrieve (default: 10)
+- `query` (required): Search query string (e.g., "neural networks protein structure", "single cell RNA-seq")
+- `max-papers` (optional): Maximum number of papers to retrieve (default: 10)
 
-### Usage Pattern
+### Usage Examples
 
-Use the `run_skill_script` tool to execute the `arxiv_search` script. For example:
+**Search for computational biology papers (default 10 results):**
 
-```python
-run_skill_script(
-    skill_name="arxiv-search",
-    script_name="arxiv_search",
-    args=["your search query", "--max-papers", "5"]
-)
-```
+- query: "protein folding prediction"
 
-Search for computational biology papers (default 10 results):
+**Search for machine learning papers with limited results:**
 
-```python
-run_skill_script(
-    skill_name="arxiv-search",
-    script_name="arxiv_search",
-    args=["protein folding prediction"]
-)
-```
+- query: "transformer attention mechanism"
+- max-papers: 3
+
+**General search with custom limit:**
+
+- query: "your search query"
+- max-papers: 5
 
 ## Output Format
 
 The script returns formatted results with:
 
-- **Title**: Paper title
-- **Summary**: Abstract/summary text
-- **URL**: Direct link to the paper on arXiv
-
-Each paper is separated by blank lines for readability.
-
-## Features
-
-- **Relevance sorting**: Results ordered by relevance to query
-- **Fast retrieval**: Direct API access with no authentication required
-- **Simple interface**: Clean, easy-to-parse output
-- **No API key required**: Free access to arXiv database
+- Paper title
+- Summary/abstract
+- arXiv URL
 
 ## Dependencies
 
-This skill requires the `arxiv` Python package. If not installed, you'll see an error message.
-
-To install the package:
-
-```bash
-pip install arxiv
-```
-
-The package is not included by default since it's skill-specific. Install it when you first use this skill.
-
-## Notes
-
-- arXiv is particularly strong for:
-  - Computer science (cs.LG, cs.AI, cs.CV)
-  - Quantitative biology (q-bio)
-  - Statistics (stat.ML)
-  - Physics and mathematics
-- Papers are preprints and may not be peer-reviewed
-- Results include both recent uploads and older papers
-- Best for computational/theoretical work in biology
+This script requires the `arxiv` package, which should be installed in your environment.

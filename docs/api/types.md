@@ -6,29 +6,207 @@ Type definitions for pydantic-ai-skills.
 
 The package uses dataclasses for type-safe skill representation:
 
-- `Skill` - Complete skill with all components (file-based or programmatic)
-- `SkillResource` - Resource file or callable within a skill
-- `SkillScript` - Executable script (file-based or callable) within a skill
+- `Skill` - Complete skill with metadata, resources, and scripts
+- `SkillResource` - Resource file (content) or callable resource within a skill
+- `SkillScript` - Executable script (file or callable function) within a skill
+- `SkillWrapper` - Generic decorator return type for `@toolset.skill()` supporting attachment of resources and scripts
 
 !!! info "File-Based vs Programmatic"
-    While these types support both file-based skills (loaded from directories) and programmatic skills (created in Python code), the API reference below focuses on programmatic usage. For file-based skills, see [Creating Skills](../creating-skills.md). For programmatic skills, see [Programmatic Skills](../programmatic-skills.md).
+    These types support both file-based skills (loaded from directories) and programmatic skills (created in Python code). For file-based skills, see [Creating Skills](../creating-skills.md). For programmatic skills, see [Programmatic Skills](../programmatic-skills.md). For advanced patterns, see [Advanced Features](../advanced.md).
 
-## Type Definitions
+## Skill Class
 
 ::: pydantic_ai_skills.types.Skill
     options:
       show_source: true
       heading_level: 3
 
+### Key Attributes
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `name` | `str` | Unique skill identifier. Pattern: `^[a-z0-9]+(-[a-z0-9]+)*$`, max 64 chars. |
+| `description` | `str` | Brief description of the skill. Max 1024 characters. |
+| `content` | `str` | Main skill instructions in markdown format. |
+| `resources` | `list[SkillResource] \| None` | Additional resources (documentation, schemas, data). |
+| `scripts` | `list[SkillScript] \| None` | Executable scripts (file-based or callable functions). |
+| `uri` | `str \| None` | Base URI/path. Set for file-based skills, None for programmatic. |
+| `metadata` | `dict[str, Any] \| None` | Custom metadata (version, author, license, compatibility, etc.). |
+
+### Methods
+
+| Method | Description |
+|--------|-------------|
+| `@resource` | Decorator to attach a callable resource to the skill. |
+| `@script` | Decorator to attach a callable script to the skill. |
+
+## SkillResource Class
+
 ::: pydantic_ai_skills.types.SkillResource
     options:
       show_source: true
       heading_level: 3
 
+### Key Attributes
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `name` | `str` | Resource identifier within the skill. |
+| `description` | `str \| None` | Optional description of the resource. |
+| `content` | `str \| None` | Static content (for static resources or file-based). |
+| `function` | `Callable \| None` | Callable function (for programmatic dynamic resources). |
+| `takes_ctx` | `bool` | Whether function accepts `RunContext` as first parameter. Auto-detected. |
+| `function_schema` | `FunctionSchema \| None` | JSON schema for function parameters (Pydantic AI generated). |
+| `uri` | `str \| None` | File URI for file-based resources. |
+
+### File-Based Variants
+
+`FileSkillResource` - Loads resource content from file:
+- Auto-detects file type by extension
+- Supports: `.md`, `.json`, `.yaml`, `.yml`, `.csv`, `.xml`, `.txt`
+- JSON/YAML files are parsed; others returned as text
+- Automatically validates path traversal safety
+
+## SkillScript Class
+
 ::: pydantic_ai_skills.types.SkillScript
     options:
       show_source: true
       heading_level: 3
+
+### Key Attributes
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `name` | `str` | Script identifier within the skill. |
+| `description` | `str \| None` | Optional description of what the script does. |
+| `function` | `Callable \| None` | Callable Python function (for programmatic scripts). |
+| `takes_ctx` | `bool` | Whether function accepts `RunContext` as first parameter. Auto-detected. |
+| `function_schema` | `FunctionSchema \| None` | JSON schema for function parameters. |
+| `uri` | `str \| None` | File URI for file-based scripts. |
+| `skill_name` | `str \| None` | Parent skill name (auto-set for file-based scripts). |
+
+### File-Based Variants
+
+`LocalSkillScriptExecutor` - Executes file-based scripts:
+- Runs Python scripts via subprocess
+- Converts dict arguments to CLI flags: `{"query": "test"}` → `--query test`
+- Combines stdout/stderr
+- Default timeout: 30 seconds
+- Execution directory: script's parent folder
+
+`CallableSkillScriptExecutor` - Executes callable functions:
+- Runs Python functions directly
+- Passes dict arguments as function kwargs
+- Supports async functions
+- Receives RunContext for dependency access
+
+## SkillWrapper[T] Class
+
+Generic type returned by `@toolset.skill()` decorator that enables type-safe dependency injection and attachment of resources/scripts.
+
+**Generic Parameter**: `T` - The dependency type available in `RunContext[T]`
+
+### Decorators
+
+```python
+@skill.resource
+def my_resource() -> str:
+    """Attach a callable resource."""
+    return "..."
+
+@skill.resource
+async def context_resource(ctx: RunContext[MyDeps]) -> str:
+    """Resource with access to dependencies."""
+    return str(ctx.deps)
+
+@skill.script
+def my_script() -> str:
+    """Attach a callable script."""
+    return "..."
+
+@skill.script
+async def context_script(ctx: RunContext[MyDeps], param: str) -> str:
+    """Script with dependencies and parameters."""
+    return f"Executed with {param}"
+```
+
+## Utility Functions
+
+### normalize_skill_name()
+
+```python
+def normalize_skill_name(name: str) -> str:
+    """Convert a name to valid skill name format.
+
+    Rules:
+    - Convert underscores to hyphens
+    - Convert to lowercase
+    - Ensure matches ^[a-z0-9]+(-[a-z0-9]+)*$
+
+    Args:
+        name: Input string (e.g., "MySkillName", "my_skill_name")
+
+    Returns:
+        Normalized skill name (e.g., "my-skill-name")
+    """
+```
+
+## Type Structures
+
+### Skill Structure
+
+```
+Skill
+├── name: str                              # Unique identifier (lowercase, hyphens only)
+├── description: str                       # Brief description (max 1024 chars)
+├── content: str                           # Main instructions (markdown)
+├── resources: list[SkillResource] | None  # Additional resources
+├── scripts: list[SkillScript] | None      # Executable scripts
+├── uri: str | None                        # Base path (file-based: set, programmatic: None)
+└── metadata: dict[str, Any] | None        # Custom fields (version, author, license, etc.)
+```
+
+### SkillResource Structure
+
+```
+SkillResource
+├── name: str                      # Resource identifier
+├── description: str | None        # Optional description
+├── content: str | None            # Static content
+├── function: Callable | None      # Callable (for dynamic resources)
+├── takes_ctx: bool                # Requires RunContext
+├── function_schema: FunctionSchema| None
+└── uri: str | None                # File path (file-based only)
+```
+
+### SkillScript Structure
+
+```
+SkillScript
+├── name: str                      # Script identifier
+├── description: str | None        # Optional description
+├── function: Callable | None      # Callable (for programmatic)
+├── takes_ctx: bool                # Requires RunContext
+├── function_schema: FunctionSchema| None
+├── uri: str | None                # File path (file-based only)
+└── skill_name: str | None         # Parent skill (file-based only)
+```
+
+## Common Metadata Fields
+
+When creating skills, these metadata fields are commonly used:
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `version` | `str` | Semantic version (e.g., "1.0.0") |
+| `author` | `str` | Creator/maintainer |
+| `license` | `str` | License identifier (e.g., "Apache-2.0") |
+| `compatibility` | `str` | Environment requirements |
+| `tags` | `list[str]` | Categorization tags |
+| `requires` | `dict[str, str]` | External dependencies |
+| `deprecated` | `bool` | Whether skill is deprecated |
+| `deprecation_message` | `str` | Explanation if deprecated |
 
 ## Usage Examples
 
@@ -197,7 +375,8 @@ Created in Python code:
 
 ## See Also
 
-- [SkillsToolset](toolset.md) - Main toolset API
-- [Exceptions](exceptions.md) - Exception classes
-- [Creating Skills](../creating-skills.md) - How to create file-based skills
-- [Programmatic Skills](../programmatic-skills.md) - How to create programmatic skills
+- [SkillsToolset](toolset.md) - Main toolset API and initialization
+- [Exceptions](exceptions.md) - Exception classes and error handling
+- [Advanced Features](../advanced.md) - Decorator patterns and custom executors
+- [Creating Skills](../creating-skills.md) - File-based skill creation guide
+- [Programmatic Skills](../programmatic-skills.md) - Programmatic skill creation guide
