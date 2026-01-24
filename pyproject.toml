@@ -94,4 +94,6 @@ quote-style = "single"
 [tool.sonar]
 sources = "pydantic_ai_skills"
 tests = "tests"
-cpd-exclusions = "pydantic_ai_skills/types.py"
+
+# exclude this file from duplication checks
+cpd-exclusions = "**/pydantic_ai_skills/types.py"
