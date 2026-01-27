@@ -2,6 +2,16 @@
 
 Advanced patterns and features for sophisticated skill systems.
 
+**View the complete example:** [advanced_usage.py](../examples/advanced_usage.py)
+
+## Video Tutorial
+
+Watch the Advanced Usage Tutorial for in-depth demonstrations of advanced skill integration patterns and decorator techniques:
+
+<video controls style="max-width:100%; border-radius:8px">
+  <source src="../assets/advanced_usage.mp4" type="video/mp4">
+</video>
+
 ## Skill Decorator Pattern
 
 ### @toolset.skill() Decorator

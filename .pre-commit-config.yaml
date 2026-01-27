@@ -5,6 +5,7 @@ repos:
       - id: check-added-large-files
         args:
           - "--maxkb=1024"
+        exclude: ^docs/assets/(basic_usage|advanced_usage|programmatic_skills)\.mp4$
       - id: check-docstring-first
       - id: check-executables-have-shebangs
       - id: check-merge-conflict

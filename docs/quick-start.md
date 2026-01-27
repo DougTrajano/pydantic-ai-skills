@@ -2,7 +2,37 @@
 
 This guide walks you through creating and using agents with skills support, from basic to advanced usage.
 
+## Video Tutorials
+
+For a visual walkthrough of the basics, check out the video tutorials:
+
+### Basic Usage
+
+Learn how to create your first skill and initialize an agent with the SkillsToolset:
+
+<video controls style="max-width:100%; border-radius:8px">
+  <source src="../assets/basic_usage.mp4" type="video/mp4">
+</video>
+
+### Advanced Usage
+
+Explore advanced patterns and skill integration techniques:
+
+<video controls style="max-width:100%; border-radius:8px">
+  <source src="../assets/advanced_usage.mp4" type="video/mp4">
+</video>
+
+### Programmatic Skills
+
+Create skills dynamically using Python decorators:
+
+<video controls style="max-width:100%; border-radius:8px">
+  <source src="../assets/programmatic_skills.mp4" type="video/mp4">
+</video>
+
 ## Basic Usage
+
+**View the complete example:** [basic_usage.py](../examples/basic_usage.py)
 
 ### 1. Create Your First Skill
 

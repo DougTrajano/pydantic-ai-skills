@@ -2,6 +2,16 @@
 
 Create skills directly in Python code for dynamic capabilities that require runtime dependencies, custom logic, or configuration-based generation.
 
+**View the complete example:** [programatic_skills.py](../examples/programatic_skills.py)
+
+## Video Tutorial
+
+Learn how to create programmatic skills by watching the Programmatic Skills Tutorial, which demonstrates creating skills with decorators and dynamic resources:
+
+<video controls style="max-width:100%; border-radius:8px">
+  <source src="../assets/programmatic_skills.mp4" type="video/mp4">
+</video>
+
 ## Overview
 
 Programmatic skills let you:

@@ -90,3 +90,6 @@ quote-style = "single"
 
 [tool.ruff.lint.per-file-ignores]
 "examples/**/*.py" = ["D101", "D103"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["pydantic_ai_skills"]

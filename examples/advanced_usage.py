@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from langchain_community.tools import DuckDuckGoSearchRun
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.ext.langchain import tool_from_langchain
-from pydantic_ai_filesystem_sandbox import FileSystemToolset
+from pydantic_ai_filesystem_sandbox import FileSystemToolset, Mount, Sandbox, SandboxConfig
 
 from pydantic_ai_skills import SkillsToolset
 
@@ -19,7 +19,9 @@ load_dotenv()
 script_dir = Path(__file__).parent
 skills_toolset = SkillsToolset(directories=[str(script_dir / 'skills'), str(script_dir / 'anthropic-skills')])
 
-fs_toolset = FileSystemToolset.create_default('./tmp', mode='rw')
+config = SandboxConfig(mounts=[Mount(host_path=script_dir / 'tmp', mount_point='/', mode='rw')])
+sandbox = Sandbox(config)
+fs_toolset = FileSystemToolset(sandbox)
 
 search = DuckDuckGoSearchRun()
 search_tool = tool_from_langchain(search)

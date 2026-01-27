@@ -37,6 +37,34 @@ For development:
 pip install pydantic-ai-skills[test]  # Includes pytest and coverage tools
 ```
 
+## Video Tutorials
+
+Learn how to use pydantic-ai-skills through these video tutorials:
+
+### Basic Usage
+
+Get started with your first skill and agent:
+
+<video controls style="max-width:100%; border-radius:8px">
+  <source src="docs/assets/basic_usage.mp4" type="video/mp4">
+</video>
+
+### Advanced Usage
+
+Master advanced integration patterns:
+
+<video controls style="max-width:100%; border-radius:8px">
+  <source src="docs/assets/advanced_usage.mp4" type="video/mp4">
+</video>
+
+### Programmatic Skills
+
+Create dynamic skills with Python:
+
+<video controls style="max-width:100%; border-radius:8px">
+  <source src="docs/assets/programmatic_skills.mp4" type="video/mp4">
+</video>
+
 ## Quick Start
 
 ```python
