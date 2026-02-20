@@ -170,7 +170,7 @@ def _discover_resources(skill_folder: Path) -> list[SkillResource]:
                     continue
 
                 rel_path = resource_file.relative_to(skill_folder)
-                name = str(rel_path)
+                name = rel_path.as_posix()
                 resources.append(
                     create_file_based_resource(
                         name=name,
@@ -245,7 +245,7 @@ def _discover_scripts(
         rel_path = py_file.relative_to(skill_folder)
         scripts.append(
             create_file_based_script(
-                name=str(rel_path),
+                name = rel_path.as_posix(),
                 uri=str(resolved_path),
                 skill_name=skill_name,
                 executor=executor,
