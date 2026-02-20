@@ -21,10 +21,6 @@ This package implements the [Agent Skills specification](https://agentskills.io/
 
 Full documentation available at: [https://dougtrajano.github.io/pydantic-ai-skills](https://dougtrajano.github.io/pydantic-ai-skills)
 
-> **🚀 Native Integration in Pydantic AI**
->
-> We're collaborating with the Pydantic AI team to introduce Agent Skills natively into the platform. Follow the progress in [PR #3780](https://github.com/pydantic/pydantic-ai/pull/3780).
-
 ## Installation
 
 ```bash
