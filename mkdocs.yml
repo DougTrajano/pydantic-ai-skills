@@ -141,6 +141,15 @@ watch:
 plugins:
   - search
   - tooltips
-  - search
   - section-index
   - git-revision-date-localized
+  - llmstxt:
+      full_output: llms-full.txt
+      markdown_description: |
+        A lightweight Python library implementing Anthropic's Agent Skills framework for Pydantic AI.
+        Skills are modular collections of instructions, scripts, and resources that extend AI agent
+        capabilities through progressive disclosure (load-on-demand to reduce token usage).
+      sections:
+        Documentation:
+          - "*.md"
+          - "api/*.md"
