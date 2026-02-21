@@ -46,6 +46,7 @@ docs = [
     "mkdocs-tooltips>=0.1.0",
     "mkdocs-section-index>=0.3.10",
     "mkdocs-git-revision-date-localized-plugin>=1.5.0",
+    "mkdocs-llmstxt>=0.2.0",
 ]
 test = [
     "pytest>=8.0.0",
