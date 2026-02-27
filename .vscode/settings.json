@@ -1,0 +1,6 @@
+{
+    "sonarlint.connectedMode.project": {
+        "connectionId": "dougtrajano",
+        "projectKey": "DougTrajano_pydantic-ai-skills"
+    }
+}

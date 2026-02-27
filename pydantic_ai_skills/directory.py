@@ -277,6 +277,61 @@ def _discover_scripts(
     return scripts
 
 
+def _load_skill_from_file(
+    skill_file: Path,
+    validate: bool,
+    script_executor: LocalSkillScriptExecutor | CallableSkillScriptExecutor,
+) -> Skill | None:
+    """Parse and build a single :class:`Skill` from a SKILL.md file.
+
+    Args:
+        skill_file: Path to the SKILL.md file.
+        validate: Whether to validate skill structure.
+        script_executor: Executor used for file-based scripts.
+
+    Returns:
+        A :class:`Skill` instance, or ``None`` if the skill should be skipped.
+
+    Raises:
+        SkillValidationError: When validation fails and *validate* is ``True``.
+    """
+    skill_folder = skill_file.parent
+    content = skill_file.read_text(encoding='utf-8')
+    frontmatter, instructions = parse_skill_md(content)
+
+    name = frontmatter.get('name')
+    description = frontmatter.get('description', '')
+
+    if not name:
+        if validate:
+            warnings.warn(f'Skipping skill at {skill_file}: missing required "name" field.', UserWarning, stacklevel=3)
+            return None
+        else:
+            name = skill_folder.name
+
+    license_field = frontmatter.get('license')
+    compatibility_field = frontmatter.get('compatibility')
+    metadata = {k: v for k, v in frontmatter.items() if k not in ('name', 'description', 'license', 'compatibility')}
+
+    if validate:
+        validate_skill_metadata(frontmatter, instructions, uri=str(skill_folder.resolve()))
+
+    resources = _discover_resources(skill_folder)
+    scripts = _discover_scripts(skill_folder, name, script_executor)
+
+    return Skill(
+        name=name,
+        description=description,
+        content=instructions,
+        license=license_field,
+        compatibility=compatibility_field,
+        uri=str(skill_folder.resolve()),
+        resources=resources,
+        scripts=scripts,
+        metadata=metadata if metadata else None,
+    )
+
+
 def discover_skills(
     path: str | Path,
     validate: bool = True,
@@ -310,49 +365,13 @@ def discover_skills(
     if not dir_path.is_dir():
         return skills
 
+    executor = script_executor or LocalSkillScriptExecutor()
     skill_files = _find_skill_files(dir_path, max_depth)
     for skill_file in skill_files:
         try:
-            skill_folder = skill_file.parent
-            content = skill_file.read_text(encoding='utf-8')
-            frontmatter, instructions = parse_skill_md(content)
-
-            name = frontmatter.get('name')
-            description = frontmatter.get('description', '')
-
-            if not name:
-                if validate:
-                    warnings.warn(
-                        f'Skipping skill at {skill_file}: missing required "name" field.', UserWarning, stacklevel=2
-                    )
-                    continue
-                else:
-                    name = skill_folder.name
-
-            license_field = frontmatter.get('license')
-            compatibility_field = frontmatter.get('compatibility')
-            metadata = {
-                k: v for k, v in frontmatter.items() if k not in ('name', 'description', 'license', 'compatibility')
-            }
-
-            if validate:
-                validate_skill_metadata(frontmatter, instructions, uri=str(skill_folder.resolve()))
-
-            resources = _discover_resources(skill_folder)
-            scripts = _discover_scripts(skill_folder, name, script_executor or LocalSkillScriptExecutor())
-
-            skill = Skill(
-                name=name,
-                description=description,
-                content=instructions,
-                license=license_field,
-                compatibility=compatibility_field,
-                uri=str(skill_folder.resolve()),
-                resources=resources,
-                scripts=scripts,
-                metadata=metadata if metadata else None,
-            )
-            skills.append(skill)
+            skill = _load_skill_from_file(skill_file, validate, executor)
+            if skill is not None:
+                skills.append(skill)
         except SkillValidationError as sve:
             if validate:
                 raise
