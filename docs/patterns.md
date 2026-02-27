@@ -692,8 +692,82 @@ async def test_agent_with_skills(test_skills):
     assert 'test-skill' in result.data
 ```
 
+## Registry Patterns
+
+### Multi-Source Agent
+
+Combine registries with local and programmatic skills for maximum flexibility:
+
+```python
+from pydantic_ai import Agent, RunContext
+from pydantic_ai_skills import SkillsToolset
+from pydantic_ai_skills.registries import (
+    CombinedRegistry,
+    GitSkillsRegistry,
+    GitCloneOptions,
+)
+
+# Public skills from Anthropic
+anthropic_registry = GitSkillsRegistry(
+    repo_url='https://github.com/anthropics/skills',
+    path='skills',
+    target_dir='./anthropics-skills',
+    clone_options=GitCloneOptions(depth=1, single_branch=True),
+).prefixed('anthropic-')
+
+# Internal skills from your org
+internal_registry = GitSkillsRegistry(
+    repo_url='https://github.com/my-org/skills',
+    target_dir='./my-org-skills',
+).prefixed('internal-')
+
+# Combine registries — avoid name collisions via prefixes
+combined = CombinedRegistry(registries=[anthropic_registry, internal_registry])
+
+toolset = SkillsToolset(
+    directories=['./skills'],       # Local overrides
+    registries=[combined],          # Remote registries
+)
+
+agent = Agent(
+    model='openai:gpt-5.2',
+    toolsets=[toolset],
+)
+```
+
+### Filtered Registry by Domain
+
+Expose only domain-relevant skills to each agent:
+
+```python
+from pydantic_ai_skills.registries import GitSkillsRegistry
+
+registry = GitSkillsRegistry(
+    repo_url='https://github.com/anthropics/skills',
+    path='skills',
+    target_dir='./anthropics-skills',
+)
+
+# Document agent only sees document-related skills
+doc_agent_toolset = SkillsToolset(
+    registries=[
+        registry.filtered(lambda s: s.name in ('pdf', 'docx', 'pptx'))
+    ]
+)
+
+# Research agent only sees research-related skills
+research_agent_toolset = SkillsToolset(
+    registries=[
+        registry.filtered(lambda s: 'research' in (s.description or '').lower())
+    ]
+)
+```
+
+See [Skill Registries](./registries.md) for the full registry guide and composition API.
+
 ## See Also
 
 - [Advanced Features](./advanced.md) - Decorator patterns and custom executors
 - [Programmatic Skills](./programmatic-skills.md) - Creating skills in code
 - [Creating Skills](./creating-skills.md) - File-based skill creation
+- [Skill Registries](./registries.md) - Remote skill discovery and composition

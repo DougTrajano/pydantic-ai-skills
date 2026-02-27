@@ -28,6 +28,10 @@ my-skill/
 
 Alternatively, define skills directly in Python using the `Skill` class with decorators for dynamic resources and scripts. This enables dependency injection and runtime configuration. See [Programmatic Skills](programmatic-skills.md) for details.
 
+### Registry Skills
+
+Skills can also be loaded from remote sources via **skill registries**. For example, `GitSkillsRegistry` clones a Git repository and exposes its skills. Registries support composition (filtering, prefixing, renaming, combining). See [Skill Registries](registries.md) for details.
+
 ## SKILL.md Format
 
 Each `SKILL.md` file has **YAML frontmatter** (metadata) followed by **Markdown** (instructions).
@@ -184,5 +188,5 @@ The toolset implements security measures:
 ## Next Steps
 
 - [Creating Skills](creating-skills.md) - Learn how to build skills
-- [Skill Patterns](skill-patterns.md) - Common patterns and best practices
+- [Implementation Patterns](patterns.md) - Common patterns and best practices
 - [API Reference](api/toolset.md) - Detailed API documentation
