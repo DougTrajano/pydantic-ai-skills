@@ -103,6 +103,25 @@ def _sanitize_url(repo_url: str) -> str:
     return repo_url
 
 
+def _sanitize_error_message(exc: Exception, clone_url: str, clean_url: str) -> str:
+    """Redact credentials from a git error message.
+
+    ``GitCommandError`` often includes the full command line (with the
+    token-bearing URL).  Replace the authenticated clone URL with the
+    previously sanitized one so secrets never leak into logs or
+    tracebacks.
+
+    Args:
+        exc: The caught exception.
+        clone_url: The URL that may contain embedded credentials.
+        clean_url: The sanitized (credential-free) URL.
+
+    Returns:
+        Sanitized string representation of the exception.
+    """
+    return str(exc).replace(clone_url, clean_url)
+
+
 def _build_source_url(repo_url: str, path: str, skill_name: str, branch: str | None) -> str:
     """Construct a browsable URL to the skill directory.
 
@@ -373,7 +392,8 @@ class GitSkillsRegistry(SkillRegistry):
                 **clone_kwargs,
             )
         except git.exc.GitCommandError as exc:
-            raise SkillRegistryError(f'Failed to clone repository {self._clean_repo_url!r}: {exc}') from exc
+            sanitized = _sanitize_error_message(exc, self._clone_url, self._clean_repo_url)
+            raise SkillRegistryError(f'Failed to clone repository {self._clean_repo_url!r}: {sanitized}') from exc
 
         # Apply sparse checkout if requested
         if opts.sparse_paths:
@@ -381,7 +401,8 @@ class GitSkillsRegistry(SkillRegistry):
                 repo.git.sparse_checkout('init')
                 repo.git.sparse_checkout('set', *opts.sparse_paths)
             except git.exc.GitCommandError as exc:
-                raise SkillRegistryError(f'Failed to configure sparse checkout: {exc}') from exc
+                sanitized = _sanitize_error_message(exc, self._clone_url, self._clean_repo_url)
+                raise SkillRegistryError(f'Failed to configure sparse checkout: {sanitized}') from exc
 
     def _pull(self) -> None:
         """Perform ``git pull`` on the existing clone."""
@@ -400,7 +421,10 @@ class GitSkillsRegistry(SkillRegistry):
             shutil.rmtree(str(self._target_dir), ignore_errors=True)
             self._clone()
         except git.exc.GitCommandError as exc:
-            raise SkillRegistryError(f'Failed to pull latest changes from {self._clean_repo_url!r}: {exc}') from exc
+            sanitized = _sanitize_error_message(exc, self._clone_url, self._clean_repo_url)
+            raise SkillRegistryError(
+                f'Failed to pull latest changes from {self._clean_repo_url!r}: {sanitized}'
+            ) from exc
 
     def _ensure_cloned(self) -> None:
         """Clone or pull the repository to ensure the local cache is up to date."""
