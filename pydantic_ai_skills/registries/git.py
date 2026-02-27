@@ -318,7 +318,9 @@ class GitSkillsRegistry(SkillRegistry):
                     )
             except OSError:
                 pass
-            self._clone_options.env['GIT_SSH_COMMAND'] = f'ssh -i {key_path} -o StrictHostKeyChecking=no'
+            # Use accept-new to avoid disabling host key checking entirely while still
+            # allowing non-interactive first-time connections.
+            self._clone_options.env['GIT_SSH_COMMAND'] = f'ssh -i {key_path} -o StrictHostKeyChecking=accept-new'
 
         # Clean repo URL (no credentials) for display and metadata
         self._clean_repo_url = _sanitize_url(repo_url)
