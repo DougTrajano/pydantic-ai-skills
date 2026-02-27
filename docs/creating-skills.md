@@ -41,7 +41,7 @@ Instructions for the agent on how to use this skill...
 
 ### Naming Conventions
 
-Follow Anthropic's skill naming conventions:
+Follow the [Agent Skills](https://agentskills.io/home) naming conventions:
 
 - **Name**: lowercase, hyphens only, ≤64 chars (no "anthropic" or "claude")
 - **Description**: ≤1024 chars, clear and concise
@@ -1119,5 +1119,5 @@ Create focused, single-purpose skills instead
 
 ## Next Steps
 
-- [Examples](examples/index.md) - Real-world skill examples
+- [Examples](https://github.com/dougtrajano/pydantic-ai-skills/tree/main/examples) - Real-world skill examples
 - [API Reference](api/toolset.md) - API documentation

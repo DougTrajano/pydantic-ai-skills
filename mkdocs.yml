@@ -17,12 +17,14 @@ nav:
       - Core Concepts: concepts.md
       - Creating Skills: creating-skills.md
       - Programmatic Skills: programmatic-skills.md
+      - Skill Registries: registries.md
       - Advanced Features: advanced.md
       - Implementation Patterns: patterns.md
   - Security & Deployment: security.md
   - API Reference:
       - api/toolset.md
       - api/types.md
+      - api/registries.md
       - api/exceptions.md
   - Contributing: contributing.md
 
@@ -143,10 +145,23 @@ plugins:
   - tooltips
   - section-index
   - git-revision-date-localized
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [pydantic_ai_skills]
+          options:
+            relative_crossrefs: true
+            members_order: source
+            separate_signature: true
+            show_signature_annotations: true
+            signature_crossrefs: true
+            group_by_category: false
+            heading_level: 3
+            docstring_style: google
   - llmstxt:
       full_output: llms-full.txt
       markdown_description: |
-        A lightweight Python library implementing Anthropic's Agent Skills framework for Pydantic AI.
+        A lightweight Python library implementing the Agent Skills specification (https://agentskills.io/specification) for Pydantic AI.
         Skills are modular collections of instructions, scripts, and resources that extend AI agent
         capabilities through progressive disclosure (load-on-demand to reduce token usage).
       sections:

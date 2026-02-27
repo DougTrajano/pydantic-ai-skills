@@ -4,7 +4,7 @@ A standardized, composable framework for building and managing Agent Skills with
 
 **Agent Skills** are modular collections of instructions, scripts, tools, and resources that enable AI agents to progressively discover, load, and execute specialized capabilities for domain-specific tasks.
 
-This package implements the [Agent Skills specification](https://agentskills.io/) for Pydantic AI using a tool-calling approach, maintaining full compatibility with the specification while adapting the loading mechanism for Pydantic AI's architecture. It is also compatible with [Anthropic's Agent Skills framework](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview).
+This package implements the [Agent Skills specification](https://agentskills.io/home) for Pydantic AI using a tool-calling approach, maintaining full compatibility with the specification while adapting the loading mechanism for Pydantic AI's architecture. Agent Skills is an open format maintained by Anthropic and open to contributions from the community.
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -13,7 +13,7 @@ This package implements the [Agent Skills specification](https://agentskills.io/
 ## Features
 
 - **Progressive Disclosure** - Load skill information only when needed, reducing token usage
-- **Anthropic-Compatible** - Skills are structurally compatible with Anthropic's Agent Skills
+- **Agent Skills Spec** - Fully compatible with the [Agent Skills](https://agentskills.io/home) open format
 - **Type-Safe** - Built with Python dataclasses and type hints
 - **Validation** - Automatic validation of skill metadata and structure
 - **Multiple Directories** - Load skills from multiple sources
@@ -159,7 +159,7 @@ Use this skill when you need to:
 
 ### Metadata Requirements
 
-Following [Anthropic's specifications](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview#skill-structure):
+Following the [Agent Skills specification](https://agentskills.io/specification):
 
 **Required fields:**
 
@@ -177,7 +177,7 @@ You can also include optional fields to help you manage and categorize skills (`
 
 ## How Skills Work
 
-### Progressive Disclosure (Anthropic's Approach)
+### Progressive Disclosure
 
 Skills implement **progressive disclosure** - loading information in stages:
 
@@ -260,7 +260,7 @@ The `SkillsToolset` automatically injects skill instructions into the agent's sy
 - All skill metadata (name + description) for discovery
 - Instructions on how to use skill tools effectively
 
-This follows Anthropic's approach where all metadata is pre-loaded, enabling agents to select skills without calling `list_skills()`.
+This follows the Agent Skills approach where all metadata is pre-loaded, enabling agents to select skills without calling `list_skills()`.
 
 The automatic injection happens when you add the toolset to an agent - no additional decorator is needed.
 
@@ -272,6 +272,7 @@ We strongly recommend that you use Skills only from trusted sources: those you c
 
 ## Related Resources
 
+- [Agent Skills Specification](https://agentskills.io/specification)
 - [Anthropic Agent Skills Documentation](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview)
 - [Anthropic Agent Skills Best Practices](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices)
 - [Pydantic AI Documentation](https://ai.pydantic.dev/)
@@ -282,7 +283,7 @@ We strongly recommend that you use Skills only from trusted sources: those you c
 
 ## Acknowledgments
 
-- **Anthropic** - For the Agent Skills framework and documentation.
+- **Anthropic** - For creating and maintaining the [Agent Skills](https://agentskills.io/home) open format.
 - **Pydantic AI Team** - For the excellent agent framework.
 - **Community** - For feedback and contributions.
 

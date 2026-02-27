@@ -10,6 +10,7 @@ Agent Skills are **modular collections of instructions, scripts, and resources**
 
 - **Progressive Discovery**: Load skills only when needed, reducing token usage
 - **Modular Design**: Self-contained skill directories with instructions and resources
+- **Skill Registries**: Discover and install skills from Git repositories and other remote sources
 - **Script Execution**: Include Python scripts that agents can execute
 - **Resource Management**: Support for documentation and data files
 - **Type-Safe**: Built on Pydantic AI's type-safe foundation
@@ -77,13 +78,14 @@ We strongly recommend that you use Skills only from trusted sources: those you c
 - [Quick Start](quick-start.md) - Build your first skill-enabled agent
 - [Creating Skills](creating-skills.md) - Learn how to create custom skills
 - [Programmatic Skills](programmatic-skills.md) - Create skills in Python code
+- [Skill Registries](registries.md) - Load skills from Git repositories and remote sources
 - [API Reference](api/toolset.md) - Detailed API documentation
 
 ## References
 
 This package is inspired by:
 
-- [Introducing Agent Skills | Claude](https://www.anthropic.com/news/agent-skills)
+- [Agent Skills Specification](https://agentskills.io/specification)
 - [Using skills with Deep Agents](https://blog.langchain.com/using-skills-with-deep-agents/)
 Note
 

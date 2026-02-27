@@ -25,6 +25,7 @@ from pydantic_ai.toolsets import FunctionToolset
 
 from .directory import SkillsDirectory
 from .exceptions import SkillNotFoundError, SkillResourceNotFoundError, SkillValidationError
+from .registries._base import SkillRegistry
 from .types import (
     SKILL_NAME_PATTERN,
     Skill,
@@ -142,6 +143,7 @@ class SkillsToolset(FunctionToolset):
         *,
         skills: list[Skill] | None = None,
         directories: list[str | Path | SkillsDirectory] | None = None,
+        registries: list[SkillRegistry] | None = None,
         validate: bool = True,
         max_depth: int | None = 3,
         id: str | None = None,
@@ -155,6 +157,10 @@ class SkillsToolset(FunctionToolset):
             directories: List of directories or SkillsDirectory instances to discover skills from.
                 Can be combined with `skills`. If both are None, defaults to ["./skills"].
                 String/Path entries are converted to SkillsDirectory instances.
+            registries: List of SkillRegistry instances (e.g. GitSkillsRegistry) to load
+                skills from. Registry skills are fetched lazily on the first async call
+                (``get_instructions`` or any tool invocation). Can be combined with
+                ``skills`` and ``directories``.
             validate: Validate skill structure during discovery (used when creating SkillsDirectory from str/Path).
             max_depth: Maximum depth for skill discovery (None for unlimited, used when creating SkillsDirectory from str/Path).
             id: Unique identifier for this toolset.
@@ -188,6 +194,14 @@ class SkillsToolset(FunctionToolset):
 
             # Excluding specific tools (disable script execution with a set)
             toolset = SkillsToolset(exclude_tools=['run_skill_script'])
+
+            # Git registry: clone a remote repo and load skills
+            from pydantic_ai_skills.registries.git import GitSkillsRegistry
+            registry = GitSkillsRegistry(
+                repo_url="https://github.com/anthropics/skills",
+                path="skills",
+            )
+            toolset = SkillsToolset(registries=[registry])
             ```
         """
         super().__init__(id=id)
@@ -212,19 +226,20 @@ class SkillsToolset(FunctionToolset):
         # Initialize the skills dict and directories list (for refresh)
         self._skills: dict[str, Skill] = {}
         self._skill_directories: list[SkillsDirectory] = []
+        self._registries: list[SkillRegistry] = list(registries) if registries else []
         self._validate = validate
         self._max_depth = max_depth
 
-        # Load programmatic skills first
+        # Load programmatic skills first (highest priority)
         if skills is not None:
             for skill in skills:
                 self._register_skill(skill)
 
-        # Load directory-based skills
+        # Load directory-based skills (second priority)
         if directories is not None:
             self._load_directory_skills(directories)
-        elif skills is None:
-            # Default: ./skills directory (only if no skills provided)
+        elif skills is None and not self._registries:
+            # Default: ./skills directory (only if no skills or registries provided)
             default_dir = Path('./skills')
             if not default_dir.exists():
                 warnings.warn(
@@ -234,6 +249,9 @@ class SkillsToolset(FunctionToolset):
                 )
             else:
                 self._load_directory_skills([default_dir])
+
+        # Load registry skills (lowest priority — won't override existing)
+        self._load_registry_skills()
 
         # Register tools
         self._register_tools()
@@ -297,6 +315,27 @@ class SkillsToolset(FunctionToolset):
                         stacklevel=3,
                     )
                 self._skills[skill_name] = skill
+
+    def _load_registry_skills(self) -> None:
+        """Load skills from all configured registries.
+
+        Calls ``get_skills()`` on each registry and registers the returned
+        skills. Skills already registered (from ``skills`` or ``directories``)
+        are **not** overridden — registries have the lowest priority.
+        """
+        for registry in self._registries:
+            try:
+                registry_skills = registry.get_skills()
+            except Exception as exc:
+                warnings.warn(
+                    f'Failed to load skills from registry {registry!r}: {exc}',
+                    UserWarning,
+                    stacklevel=2,
+                )
+                continue
+            for skill in registry_skills:
+                if skill.name not in self._skills:
+                    self._register_skill(skill)
 
     def _build_resource_xml(self, resource: SkillResource) -> str:
         """Build XML representation of a resource.

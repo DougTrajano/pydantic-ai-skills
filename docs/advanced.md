@@ -2,7 +2,7 @@
 
 Advanced patterns and features for sophisticated skill systems.
 
-**View the complete example:** [advanced_usage.py](../examples/advanced_usage.py)
+**View the complete example:** [advanced_usage.py](https://github.com/dougtrajano/pydantic-ai-skills/blob/main/examples/advanced_usage.py)
 
 ## Video Tutorial
 
@@ -543,5 +543,6 @@ toolset._register_skill(new_skill)  # Internal method, use with caution
 ## See Also
 
 - [Programmatic Skills](./programmatic-skills.md) - Detailed guide to programmatic skill creation
+- [Skill Registries](./registries.md) - Load skills from Git repositories and remote sources
 - [API Reference - SkillsToolset](./api/toolset.md) - Complete API documentation
 - [Implementation Patterns](./patterns.md) - Common design patterns and best practices

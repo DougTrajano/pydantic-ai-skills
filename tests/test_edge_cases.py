@@ -10,9 +10,9 @@ import pytest
 from pydantic_ai_skills import Skill, SkillResource, SkillsToolset
 from pydantic_ai_skills.directory import (
     SkillsDirectory,
-    _discover_skills,
     _find_skill_files,
-    _validate_skill_metadata,
+    discover_skills,
+    validate_skill_metadata,
 )
 from pydantic_ai_skills.exceptions import (
     SkillNotFoundError,
@@ -255,7 +255,7 @@ def test_validate_skill_metadata_compatibility_too_long() -> None:
 
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter('always')
-        is_valid = _validate_skill_metadata(frontmatter, 'Content')
+        is_valid = validate_skill_metadata(frontmatter, 'Content')
 
         assert is_valid is False
         assert any('compatibility exceeds 500' in str(msg.message) for msg in w)
@@ -276,7 +276,7 @@ Content
     # With validate=False, should skip skill with warning instead of raising
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter('always')
-        _discover_skills(tmp_path, validate=False)
+        discover_skills(tmp_path, validate=False)
         # Should have warning about invalid skill
         assert len(w) > 0
         assert 'Skipping invalid skill' in str(w[0].message)
@@ -297,7 +297,7 @@ def test_discover_skills_os_error_handling(tmp_path: Path) -> None:
 
         # Should raise SkillValidationError
         with pytest.raises(SkillValidationError):
-            _discover_skills(tmp_path, validate=False)
+            discover_skills(tmp_path, validate=False)
     finally:
         # Restore permissions for cleanup
         skill_md.chmod(0o644)

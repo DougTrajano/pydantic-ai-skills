@@ -36,22 +36,20 @@ Example:
     ```
 """
 
-from pydantic_ai_skills.directory import SkillsDirectory, _discover_skills, _parse_skill_md
+from pydantic_ai_skills.directory import SkillsDirectory, discover_skills, parse_skill_md
 from pydantic_ai_skills.exceptions import (
     SkillException,
     SkillNotFoundError,
+    SkillRegistryError,
     SkillResourceLoadError,
     SkillResourceNotFoundError,
     SkillScriptExecutionError,
     SkillValidationError,
 )
 from pydantic_ai_skills.local import CallableSkillScriptExecutor, LocalSkillScriptExecutor
+from pydantic_ai_skills.registries import GitCloneOptions, GitSkillsRegistry, SkillRegistry
 from pydantic_ai_skills.toolset import SkillsToolset
 from pydantic_ai_skills.types import Skill, SkillResource, SkillScript
-
-# Expose internal functions for backward compatibility
-discover_skills = _discover_skills
-parse_skill_md = _parse_skill_md
 
 __all__ = [
     # Main toolset
@@ -68,10 +66,15 @@ __all__ = [
     # Exceptions
     'SkillException',
     'SkillNotFoundError',
+    'SkillRegistryError',
     'SkillResourceLoadError',
     'SkillResourceNotFoundError',
     'SkillScriptExecutionError',
     'SkillValidationError',
+    # Registries
+    'SkillRegistry',
+    'GitSkillsRegistry',
+    'GitCloneOptions',
     # Utility functions
     'discover_skills',
     'parse_skill_md',

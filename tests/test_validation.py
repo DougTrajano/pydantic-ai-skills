@@ -2,7 +2,7 @@
 
 import warnings
 
-from pydantic_ai_skills.directory import _validate_skill_metadata
+from pydantic_ai_skills.directory import validate_skill_metadata
 
 
 def test_validate_skill_metadata_valid() -> None:
@@ -13,7 +13,7 @@ def test_validate_skill_metadata_valid() -> None:
     }
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter('always')
-        is_valid = _validate_skill_metadata(frontmatter, 'Content here.')
+        is_valid = validate_skill_metadata(frontmatter, 'Content here.')
         assert is_valid is True
         assert len(w) == 0
 
@@ -26,7 +26,7 @@ def test_validate_skill_metadata_name_too_long() -> None:
     }
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter('always')
-        is_valid = _validate_skill_metadata(frontmatter, 'Content')
+        is_valid = validate_skill_metadata(frontmatter, 'Content')
         assert is_valid is False
         assert len(w) == 1
         assert '64 characters' in str(w[0].message)
@@ -40,7 +40,7 @@ def test_validate_skill_metadata_invalid_name_format() -> None:
     }
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter('always')
-        is_valid = _validate_skill_metadata(frontmatter, 'Content')
+        is_valid = validate_skill_metadata(frontmatter, 'Content')
         assert is_valid is False
         assert len(w) >= 1
         assert any('lowercase letters, numbers, and hyphens' in str(msg.message) for msg in w)
@@ -54,7 +54,7 @@ def test_validate_skill_metadata_reserved_word() -> None:
     }
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter('always')
-        is_valid = _validate_skill_metadata(frontmatter, 'Content')
+        is_valid = validate_skill_metadata(frontmatter, 'Content')
         assert is_valid is False
         assert len(w) >= 1
         assert any('reserved word' in str(msg.message) for msg in w)
@@ -68,7 +68,7 @@ def test_validate_skill_metadata_description_too_long() -> None:
     }
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter('always')
-        is_valid = _validate_skill_metadata(frontmatter, 'Content')
+        is_valid = validate_skill_metadata(frontmatter, 'Content')
         assert is_valid is False
         assert len(w) >= 1
         assert any('1024 characters' in str(msg.message) for msg in w)
@@ -85,7 +85,7 @@ def test_validate_skill_metadata_instructions_too_long() -> None:
 
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter('always')
-        is_valid = _validate_skill_metadata(frontmatter, instructions)
+        is_valid = validate_skill_metadata(frontmatter, instructions)
         assert is_valid is False
         assert len(w) >= 1
         assert any('500 lines' in str(msg.message) for msg in w)
@@ -101,7 +101,7 @@ def test_validate_skill_metadata_multiple_issues() -> None:
 
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter('always')
-        is_valid = _validate_skill_metadata(frontmatter, instructions)
+        is_valid = validate_skill_metadata(frontmatter, instructions)
         assert is_valid is False
         # Should have warnings for name, description, and instructions
         assert len(w) >= 3
@@ -121,7 +121,7 @@ def test_validate_skill_metadata_good_naming_conventions() -> None:
         frontmatter = {'name': name, 'description': 'Test'}
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter('always')
-            is_valid = _validate_skill_metadata(frontmatter, 'Content')
+            is_valid = validate_skill_metadata(frontmatter, 'Content')
             assert is_valid is True, f"Name '{name}' should be valid"
             assert len(w) == 0, f"Name '{name}' should not emit warnings"
 
@@ -140,6 +140,6 @@ def test_validate_skill_metadata_bad_naming_conventions() -> None:
         frontmatter = {'name': name, 'description': 'Test'}
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter('always')
-            is_valid = _validate_skill_metadata(frontmatter, 'Content')
+            is_valid = validate_skill_metadata(frontmatter, 'Content')
             assert is_valid is False, f"Name '{name}' should be invalid"
             assert len(w) > 0, f"Name '{name}' should trigger warnings"

@@ -11,6 +11,7 @@ Exception hierarchy:
     - [`SkillResourceNotFoundError`][pydantic_ai_skills.SkillResourceNotFoundError]: Resource file not found
     - [`SkillResourceLoadError`][pydantic_ai_skills.SkillResourceLoadError]: Failed to load resource
     - [`SkillScriptExecutionError`][pydantic_ai_skills.SkillScriptExecutionError]: Script execution failed
+    - [`SkillRegistryError`][pydantic_ai_skills.SkillRegistryError]: Registry operation failed
 """
 
 from __future__ import annotations
@@ -38,3 +39,7 @@ class SkillResourceLoadError(SkillException):
 
 class SkillScriptExecutionError(SkillException):
     """Skill script execution failed."""
+
+
+class SkillRegistryError(SkillException):
+    """Raised when a registry operation fails (network, git, auth, etc.)."""

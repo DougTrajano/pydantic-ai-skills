@@ -28,16 +28,17 @@ from .local import (
 )
 from .types import Skill, SkillResource, SkillScript
 
-__all__ = ['SkillsDirectory']
+__all__ = ['SkillsDirectory', 'discover_skills', 'parse_skill_md', 'validate_skill_metadata']
 
 # agentskills.io naming convention: lowercase letters, numbers, and hyphens only (no consecutive hyphens)
 SKILL_NAME_PATTERN = re.compile(r'^[a-z0-9]+(-[a-z0-9]+)*$')
 RESERVED_WORDS = {'anthropic', 'claude'}
 
 
-def _validate_skill_metadata(
+def validate_skill_metadata(
     frontmatter: dict[str, Any],
     instructions: str,
+    uri: str | None = None,
 ) -> bool:
     """Validate skill metadata against Anthropic's requirements.
 
@@ -46,6 +47,7 @@ def _validate_skill_metadata(
     Args:
         frontmatter: Parsed YAML frontmatter.
         instructions: The skill instructions content.
+        uri: Optional URI or path identifying the skill source for diagnostics.
 
     Returns:
         True if validation passed with no issues, False if warnings were emitted.
@@ -53,19 +55,21 @@ def _validate_skill_metadata(
     is_valid = True
     name = frontmatter.get('name', '')
     description = frontmatter.get('description', '')
+    location = f' ({uri})' if uri else ''
 
     # Validate name format
     if name:
         if len(name) > 64:
             warnings.warn(
-                f"Skill name '{name}' exceeds 64 characters ({len(name)} chars) recommendation. Consider shortening it.",
+                f"Skill name '{name}'{location} exceeds 64 characters ({len(name)} chars) recommendation."
+                f' Consider shortening it.',
                 UserWarning,
                 stacklevel=2,
             )
             is_valid = False
         elif not SKILL_NAME_PATTERN.match(name):
             warnings.warn(
-                f"Skill name '{name}' should contain only lowercase letters, numbers, and hyphens",
+                f"Skill name '{name}'{location} should contain only lowercase letters, numbers, and hyphens",
                 UserWarning,
                 stacklevel=2,
             )
@@ -73,13 +77,19 @@ def _validate_skill_metadata(
         # Check for reserved words
         for reserved in RESERVED_WORDS:
             if reserved in name:
-                warnings.warn(f"Skill name '{name}' contains reserved word '{reserved}'", UserWarning, stacklevel=2)
+                warnings.warn(
+                    f"Skill name '{name}'{location} contains reserved word '{reserved}'",
+                    UserWarning,
+                    stacklevel=2,
+                )
                 is_valid = False
 
     # Validate description
     if description and len(description) > 1024:
         warnings.warn(
-            f'Skill description exceeds 1024 characters ({len(description)} chars)', UserWarning, stacklevel=2
+            f"Skill '{name}'{location}: description exceeds 1024 characters ({len(description)} chars)",
+            UserWarning,
+            stacklevel=2,
         )
         is_valid = False
 
@@ -87,7 +97,9 @@ def _validate_skill_metadata(
     compatibility = frontmatter.get('compatibility', '')
     if compatibility and len(compatibility) > 500:
         warnings.warn(
-            f'Skill compatibility exceeds 500 characters ({len(compatibility)} chars)', UserWarning, stacklevel=2
+            f"Skill '{name}'{location}: compatibility exceeds 500 characters ({len(compatibility)} chars)",
+            UserWarning,
+            stacklevel=2,
         )
         is_valid = False
 
@@ -95,7 +107,7 @@ def _validate_skill_metadata(
     lines = instructions.split('\n')
     if len(lines) > 500:
         warnings.warn(
-            f'SKILL.md body exceeds recommended 500 lines ({len(lines)} lines). '
+            f"Skill '{name}'{location}: SKILL.md body exceeds recommended 500 lines ({len(lines)} lines). "
             f'Consider splitting into separate resource files.',
             UserWarning,
             stacklevel=2,
@@ -105,7 +117,7 @@ def _validate_skill_metadata(
     return is_valid
 
 
-def _parse_skill_md(content: str) -> tuple[dict[str, Any], str]:
+def parse_skill_md(content: str) -> tuple[dict[str, Any], str]:
     """Parse a SKILL.md file into frontmatter and instructions.
 
     Args:
@@ -245,7 +257,7 @@ def _discover_scripts(
         rel_path = py_file.relative_to(skill_folder)
         scripts.append(
             create_file_based_script(
-                name = rel_path.as_posix(),
+                name=rel_path.as_posix(),
                 uri=str(resolved_path),
                 skill_name=skill_name,
                 executor=executor,
@@ -265,7 +277,62 @@ def _discover_scripts(
     return scripts
 
 
-def _discover_skills(
+def _load_skill_from_file(
+    skill_file: Path,
+    validate: bool,
+    script_executor: LocalSkillScriptExecutor | CallableSkillScriptExecutor,
+) -> Skill | None:
+    """Parse and build a single :class:`Skill` from a SKILL.md file.
+
+    Args:
+        skill_file: Path to the SKILL.md file.
+        validate: Whether to validate skill structure.
+        script_executor: Executor used for file-based scripts.
+
+    Returns:
+        A :class:`Skill` instance, or ``None`` if the skill should be skipped.
+
+    Raises:
+        SkillValidationError: When validation fails and *validate* is ``True``.
+    """
+    skill_folder = skill_file.parent
+    content = skill_file.read_text(encoding='utf-8')
+    frontmatter, instructions = parse_skill_md(content)
+
+    name = frontmatter.get('name')
+    description = frontmatter.get('description', '')
+
+    if not name:
+        if validate:
+            warnings.warn(f'Skipping skill at {skill_file}: missing required "name" field.', UserWarning, stacklevel=3)
+            return None
+        else:
+            name = skill_folder.name
+
+    license_field = frontmatter.get('license')
+    compatibility_field = frontmatter.get('compatibility')
+    metadata = {k: v for k, v in frontmatter.items() if k not in ('name', 'description', 'license', 'compatibility')}
+
+    if validate:
+        validate_skill_metadata(frontmatter, instructions, uri=str(skill_folder.resolve()))
+
+    resources = _discover_resources(skill_folder)
+    scripts = _discover_scripts(skill_folder, name, script_executor)
+
+    return Skill(
+        name=name,
+        description=description,
+        content=instructions,
+        license=license_field,
+        compatibility=compatibility_field,
+        uri=str(skill_folder.resolve()),
+        resources=resources,
+        scripts=scripts,
+        metadata=metadata if metadata else None,
+    )
+
+
+def discover_skills(
     path: str | Path,
     validate: bool = True,
     max_depth: int | None = 3,
@@ -298,49 +365,13 @@ def _discover_skills(
     if not dir_path.is_dir():
         return skills
 
+    executor = script_executor or LocalSkillScriptExecutor()
     skill_files = _find_skill_files(dir_path, max_depth)
     for skill_file in skill_files:
         try:
-            skill_folder = skill_file.parent
-            content = skill_file.read_text(encoding='utf-8')
-            frontmatter, instructions = _parse_skill_md(content)
-
-            name = frontmatter.get('name')
-            description = frontmatter.get('description', '')
-
-            if not name:
-                if validate:
-                    warnings.warn(
-                        f'Skipping skill at {skill_file}: missing required "name" field.', UserWarning, stacklevel=2
-                    )
-                    continue
-                else:
-                    name = skill_folder.name
-
-            license_field = frontmatter.get('license')
-            compatibility_field = frontmatter.get('compatibility')
-            metadata = {
-                k: v for k, v in frontmatter.items() if k not in ('name', 'description', 'license', 'compatibility')
-            }
-
-            if validate:
-                _validate_skill_metadata(frontmatter, instructions)
-
-            resources = _discover_resources(skill_folder)
-            scripts = _discover_scripts(skill_folder, name, script_executor or LocalSkillScriptExecutor())
-
-            skill = Skill(
-                name=name,
-                description=description,
-                content=instructions,
-                license=license_field,
-                compatibility=compatibility_field,
-                uri=str(skill_folder.resolve()),
-                resources=resources,
-                scripts=scripts,
-                metadata=metadata if metadata else None,
-            )
-            skills.append(skill)
+            skill = _load_skill_from_file(skill_file, validate, executor)
+            if skill is not None:
+                skills.append(skill)
         except SkillValidationError as sve:
             if validate:
                 raise
@@ -415,7 +446,7 @@ class SkillsDirectory:
         Returns:
             Dictionary of skill URI to Skill object.
         """
-        skills = _discover_skills(
+        skills = discover_skills(
             path=self._path,
             validate=self._validate,
             max_depth=self._max_depth,

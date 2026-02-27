@@ -32,7 +32,7 @@ Create skills dynamically using Python decorators:
 
 ## Basic Usage
 
-**View the complete example:** [basic_usage.py](../examples/basic_usage.py)
+**View the complete example:** [basic_usage.py](https://github.com/dougtrajano/pydantic-ai-skills/blob/main/examples/basic_usage.py)
 
 ### 1. Create Your First Skill
 

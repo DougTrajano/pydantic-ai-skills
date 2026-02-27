@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from pydantic_ai_skills.directory import _discover_skills as discover_skills
+from pydantic_ai_skills.directory import discover_skills
 
 
 def test_discover_skills_single_skill(tmp_path: Path) -> None:

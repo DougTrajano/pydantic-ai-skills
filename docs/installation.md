@@ -41,6 +41,9 @@ The package automatically installs:
 Depending on your skills, you may need additional packages:
 
 ```bash
+# For Git-based skill registries
+pip install pydantic-ai-skills[git]
+
 # For skills that use HTTP requests
 pip install httpx
 
@@ -55,3 +58,4 @@ pip install openai
 
 - [Quick Start](quick-start.md) - Build your first agent with skills
 - [Creating Skills](creating-skills.md) - Learn how to create custom skills
+- [Skill Registries](registries.md) - Load skills from Git repositories

@@ -14,6 +14,7 @@ The `SkillsToolset.__init__()` accepts the following parameters:
 |-----------|------|---------|-------------|
 | `skills` | `list[Skill] \| None` | `None` | Pre-loaded Skill objects. Can be combined with `directories`. |
 | `directories` | `list[str \| Path \| SkillsDirectory] \| None` | `None` | Directories or SkillsDirectory instances to discover skills from. Defaults to `["./skills"]` if neither `skills` nor `directories` provided. |
+| `registries` | `list[SkillRegistry] \| None` | `None` | List of [SkillRegistry](registries.md) instances (e.g. `GitSkillsRegistry`) to load skills from. Can be combined with `skills` and `directories`. Registries have the lowest priority. |
 | `validate` | `bool` | `True` | Validate skill structure during discovery. Used when creating SkillsDirectory from str/Path entries. |
 | `max_depth` | `int \| None` | `3` | Maximum depth for skill discovery. `None` for unlimited depth. Used when creating SkillsDirectory from str/Path entries. |
 | `id` | `str \| None` | `None` | Unique identifier for this toolset. |
@@ -63,6 +64,31 @@ skills_dir = SkillsDirectory(
 )
 toolset = SkillsToolset(directories=[skills_dir])
 ```
+
+### Initialize with Git Registry
+
+```python
+from pydantic_ai_skills import SkillsToolset
+from pydantic_ai_skills.registries import GitSkillsRegistry, GitCloneOptions
+
+# Clone a remote Git repository and load its skills
+registry = GitSkillsRegistry(
+    repo_url='https://github.com/anthropics/skills',
+    path='skills',
+    target_dir='./anthropics-skills',
+    clone_options=GitCloneOptions(depth=1, single_branch=True),
+)
+
+toolset = SkillsToolset(registries=[registry])
+
+# Combine with local skills
+toolset = SkillsToolset(
+    directories=['./skills'],
+    registries=[registry],
+)
+```
+
+See [Skill Registries](../registries.md) for composition patterns (filtering, prefixing, combining).
 
 ### Initialize with Programmatic Skills
 
@@ -370,5 +396,7 @@ See [Advanced Features](../advanced.md) for detailed decorator documentation.
 ## See Also
 
 - [Advanced Features](../advanced.md) - Skill decorators, custom templates, dependency injection
+- [Skill Registries](../registries.md) - Load skills from Git repos and remote sources
 - [Types Reference](types.md) - Type definitions and data structures
+- [Registries Reference](registries.md) - Registry API documentation
 - [Exceptions Reference](exceptions.md) - Exception classes

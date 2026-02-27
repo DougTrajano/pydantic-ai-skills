@@ -2,7 +2,7 @@
 
 Create skills directly in Python code for dynamic capabilities that require runtime dependencies, custom logic, or configuration-based generation.
 
-**View the complete example:** [programatic_skills.py](../examples/programatic_skills.py)
+**View the complete example:** [programatic_skills.py](https://github.com/dougtrajano/pydantic-ai-skills/blob/main/examples/programatic_skills.py)
 
 ## Video Tutorial
 
