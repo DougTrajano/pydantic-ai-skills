@@ -5,7 +5,7 @@ import warnings
 from pydantic_ai_skills.directory import validate_skill_metadata
 
 
-def testvalidate_skill_metadata_valid() -> None:
+def test_validate_skill_metadata_valid() -> None:
     """Test validation with valid metadata."""
     frontmatter = {
         'name': 'test-skill',
@@ -18,7 +18,7 @@ def testvalidate_skill_metadata_valid() -> None:
         assert len(w) == 0
 
 
-def testvalidate_skill_metadata_name_too_long() -> None:
+def test_validate_skill_metadata_name_too_long() -> None:
     """Test validation with name exceeding 64 characters."""
     frontmatter = {
         'name': 'a' * 65,
@@ -32,7 +32,7 @@ def testvalidate_skill_metadata_name_too_long() -> None:
         assert '64 characters' in str(w[0].message)
 
 
-def testvalidate_skill_metadata_invalid_name_format() -> None:
+def test_validate_skill_metadata_invalid_name_format() -> None:
     """Test validation with invalid name format."""
     frontmatter = {
         'name': 'Invalid_Name_With_Underscores',
@@ -46,7 +46,7 @@ def testvalidate_skill_metadata_invalid_name_format() -> None:
         assert any('lowercase letters, numbers, and hyphens' in str(msg.message) for msg in w)
 
 
-def testvalidate_skill_metadata_reserved_word() -> None:
+def test_validate_skill_metadata_reserved_word() -> None:
     """Test validation with reserved words in name."""
     frontmatter = {
         'name': 'anthropic-helper',
@@ -60,7 +60,7 @@ def testvalidate_skill_metadata_reserved_word() -> None:
         assert any('reserved word' in str(msg.message) for msg in w)
 
 
-def testvalidate_skill_metadata_description_too_long() -> None:
+def test_validate_skill_metadata_description_too_long() -> None:
     """Test validation with description exceeding 1024 characters."""
     frontmatter = {
         'name': 'test-skill',
@@ -74,7 +74,7 @@ def testvalidate_skill_metadata_description_too_long() -> None:
         assert any('1024 characters' in str(msg.message) for msg in w)
 
 
-def testvalidate_skill_metadata_instructions_too_long() -> None:
+def test_validate_skill_metadata_instructions_too_long() -> None:
     """Test validation with instructions exceeding 500 lines."""
     frontmatter = {
         'name': 'test-skill',
@@ -91,7 +91,7 @@ def testvalidate_skill_metadata_instructions_too_long() -> None:
         assert any('500 lines' in str(msg.message) for msg in w)
 
 
-def testvalidate_skill_metadata_multiple_issues() -> None:
+def test_validate_skill_metadata_multiple_issues() -> None:
     """Test validation with multiple issues."""
     frontmatter = {
         'name': 'A' * 65,  # Too long
@@ -107,7 +107,7 @@ def testvalidate_skill_metadata_multiple_issues() -> None:
         assert len(w) >= 3
 
 
-def testvalidate_skill_metadata_good_naming_conventions() -> None:
+def test_validate_skill_metadata_good_naming_conventions() -> None:
     """Test validation with valid naming conventions."""
     good_names = [
         'processing-pdfs',
@@ -126,7 +126,7 @@ def testvalidate_skill_metadata_good_naming_conventions() -> None:
             assert len(w) == 0, f"Name '{name}' should not emit warnings"
 
 
-def testvalidate_skill_metadata_bad_naming_conventions() -> None:
+def test_validate_skill_metadata_bad_naming_conventions() -> None:
     """Test validation with invalid naming conventions."""
     bad_names = [
         'Invalid_Name',  # Underscores
