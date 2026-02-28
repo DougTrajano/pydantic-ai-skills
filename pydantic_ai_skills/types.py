@@ -231,9 +231,10 @@ class Skill:
         compatibility: Optional environment requirements (max 500 chars).
         resources: List of resources (files or callables).
         scripts: List of scripts (functions or file-based).
-        uri: URI for the skill's base location. Programmatic skills are automatically
-            assigned ``skill://{name}`` (scheme-based URI) for internal reference. Filesystem-based skills
-            use the resolved directory path. Can be overridden explicitly.
+        uri: URI for the skill's base location. When not provided, a ``skill://{name}``
+            (scheme-based URI) is automatically assigned for internal reference. For filesystem-based skills,
+            this is explicitly set by the filesystem discovery/loading utilities to the resolved directory path;
+            it can also be overridden explicitly when constructing a ``Skill``.
         metadata: Additional metadata fields.
     """
 
@@ -248,11 +249,13 @@ class Skill:
     metadata: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
-        """Auto-assign a skill:// URI for programmatic skills that have no URI set.
+        """Auto-assign a skill:// URI for any Skill instantiated with no URI.
 
-        Filesystem skills always set ``uri`` explicitly (to the resolved folder path),
-        so this only fires for programmatic ``Skill`` instances where ``uri=None``.
-        The resulting URI follows this convention: ``skill://{name}``.
+        This fires for any ``Skill`` where ``uri=None`` at construction time, including
+        programmatic skills. Filesystem-based skills have their ``uri`` set explicitly
+        by the filesystem discovery/loading utilities (overwriting this default), so the
+        auto-assigned value is effectively a transient default for those cases.
+        The resulting URI follows the convention: ``skill://{name}``.
         """
         if self.uri is None:
             self.uri = f'skill://{self.name}'

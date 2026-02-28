@@ -56,3 +56,17 @@ def test_skill_script_creation(tmp_path: Path) -> None:
     assert script.uri == str(script_path)
     assert script.skill_name == 'test-skill'
     assert script.function is None
+
+
+def test_skill_uri_auto_assigned_when_none() -> None:
+    """Test that Skill auto-assigns a skill:// URI when uri is not provided."""
+    skill = Skill(name='my-skill', description='A skill', content='Instructions')
+
+    assert skill.uri == 'skill://my-skill'
+
+
+def test_skill_explicit_uri_preserved() -> None:
+    """Test that an explicitly provided URI is not overwritten by __post_init__."""
+    skill = Skill(name='my-skill', description='A skill', content='Instructions', uri='custom://my-uri')
+
+    assert skill.uri == 'custom://my-uri'
