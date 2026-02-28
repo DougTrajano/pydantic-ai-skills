@@ -231,7 +231,9 @@ class Skill:
         compatibility: Optional environment requirements (max 500 chars).
         resources: List of resources (files or callables).
         scripts: List of scripts (functions or file-based).
-        uri: Optional URI for skill's base location (internal use).
+        uri: URI for the skill's base location. Programmatic skills are automatically
+            assigned ``skill://{name}`` (scheme-based URI) for internal reference. Filesystem-based skills
+            use the resolved directory path. Can be overridden explicitly.
         metadata: Additional metadata fields.
     """
 
@@ -244,6 +246,16 @@ class Skill:
     scripts: list[SkillScript] = field(default_factory=list)
     uri: str | None = None
     metadata: dict[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        """Auto-assign a skill:// URI for programmatic skills that have no URI set.
+
+        Filesystem skills always set ``uri`` explicitly (to the resolved folder path),
+        so this only fires for programmatic ``Skill`` instances where ``uri=None``.
+        The resulting URI follows this convention: ``skill://{name}``.
+        """
+        if self.uri is None:
+            self.uri = f'skill://{self.name}'
 
     def resource(
         self,
@@ -610,6 +622,6 @@ class SkillWrapper(Generic[DepsT]):
             compatibility=self.compatibility,
             resources=self.resources,
             scripts=self.scripts,
-            uri=None,  # No URI for programmatic skills
+            uri=None,  # __post_init__ will assign skill://{name}
             metadata=self.metadata,
         )
