@@ -470,3 +470,49 @@ def test_exclude_tools_mixed_valid_invalid(sample_skills_dir: Path) -> None:
             directories=[sample_skills_dir],
             exclude_tools={'run_skill_script', 'invalid_tool', 'load_skill'},
         )
+
+
+def test_skills_toolset_is_subclass_of_abstract_toolset() -> None:
+    """SkillsToolset must be a subclass of AbstractToolset (which is Generic[AgentDepsT])."""
+    from pydantic_ai.toolsets import AbstractToolset
+
+    assert issubclass(SkillsToolset, AbstractToolset)
+
+
+def test_skills_toolset_default_deps_is_none() -> None:
+    """SkillsToolset() without a type parameter should default to AgentDepsT=None."""
+    toolset = SkillsToolset(skills=[])
+    # The unparameterized class is still an instance of SkillsToolset
+    assert isinstance(toolset, SkillsToolset)
+
+
+def test_skills_toolset_generic_accepted_by_agent() -> None:
+    """Agent with a custom deps_type must accept SkillsToolset without a type error."""
+    from dataclasses import dataclass
+
+    from pydantic_ai import Agent
+    from pydantic_ai.models.test import TestModel
+
+    @dataclass
+    class MyDeps:
+        api_key: str
+
+    toolset = SkillsToolset(skills=[])
+    # Constructing the Agent must not raise at runtime
+    agent = Agent(TestModel(), deps_type=MyDeps, toolsets=[toolset])
+    assert agent is not None
+
+
+def test_skills_toolset_parameterized_instance_is_regular_instance() -> None:
+    """An instance created via the unparameterized class works regardless of the type arg used."""
+    from dataclasses import dataclass
+
+    @dataclass
+    class AnotherDeps:
+        user_id: int
+
+    toolset = SkillsToolset(skills=[])
+    # isinstance checks against the origin class still pass
+    assert isinstance(toolset, SkillsToolset)
+    # The parameterized alias resolves back to SkillsToolset at runtime
+    assert type(toolset).__name__ == 'SkillsToolset'
