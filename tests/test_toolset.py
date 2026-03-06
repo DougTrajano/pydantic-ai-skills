@@ -479,15 +479,19 @@ def test_skills_toolset_is_subclass_of_abstract_toolset() -> None:
     assert issubclass(SkillsToolset, AbstractToolset)
 
 
-def test_skills_toolset_default_deps_is_none() -> None:
-    """SkillsToolset() without a type parameter should default to AgentDepsT=None."""
+def test_skills_toolset_works_without_deps() -> None:
+    """SkillsToolset works with an Agent that has no custom deps."""
+    from pydantic_ai import Agent
+    from pydantic_ai.models.test import TestModel
+
     toolset = SkillsToolset(skills=[])
-    # The unparameterized class is still an instance of SkillsToolset
     assert isinstance(toolset, SkillsToolset)
+    agent = Agent(TestModel(), toolsets=[toolset])
+    assert agent is not None
 
 
-def test_skills_toolset_generic_accepted_by_agent() -> None:
-    """Agent with a custom deps_type must accept SkillsToolset without a type error."""
+def test_skills_toolset_accepted_by_agent_with_custom_deps() -> None:
+    """SkillsToolset (pinned to Any) must be accepted by Agent with custom deps — same pattern as MCPServer."""
     from dataclasses import dataclass
 
     from pydantic_ai import Agent
@@ -497,22 +501,7 @@ def test_skills_toolset_generic_accepted_by_agent() -> None:
     class MyDeps:
         api_key: str
 
+    # No type annotation needed — FunctionToolset[Any] is compatible with any deps
     toolset = SkillsToolset(skills=[])
-    # Constructing the Agent must not raise at runtime
     agent = Agent(TestModel(), deps_type=MyDeps, toolsets=[toolset])
     assert agent is not None
-
-
-def test_skills_toolset_parameterized_instance_is_regular_instance() -> None:
-    """An instance created via the unparameterized class works regardless of the type arg used."""
-    from dataclasses import dataclass
-
-    @dataclass
-    class AnotherDeps:
-        user_id: int
-
-    toolset = SkillsToolset(skills=[])
-    # isinstance checks against the origin class still pass
-    assert isinstance(toolset, SkillsToolset)
-    # The parameterized alias resolves back to SkillsToolset at runtime
-    assert type(toolset).__name__ == 'SkillsToolset'
