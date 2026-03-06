@@ -470,3 +470,38 @@ def test_exclude_tools_mixed_valid_invalid(sample_skills_dir: Path) -> None:
             directories=[sample_skills_dir],
             exclude_tools={'run_skill_script', 'invalid_tool', 'load_skill'},
         )
+
+
+def test_skills_toolset_is_subclass_of_abstract_toolset() -> None:
+    """SkillsToolset must be a subclass of AbstractToolset (which is Generic[AgentDepsT])."""
+    from pydantic_ai.toolsets import AbstractToolset
+
+    assert issubclass(SkillsToolset, AbstractToolset)
+
+
+def test_skills_toolset_works_without_deps() -> None:
+    """SkillsToolset works with an Agent that has no custom deps."""
+    from pydantic_ai import Agent
+    from pydantic_ai.models.test import TestModel
+
+    toolset = SkillsToolset(skills=[])
+    assert isinstance(toolset, SkillsToolset)
+    agent = Agent(TestModel(), toolsets=[toolset])
+    assert agent is not None
+
+
+def test_skills_toolset_accepted_by_agent_with_custom_deps() -> None:
+    """SkillsToolset (pinned to Any) must be accepted by Agent with custom deps — same pattern as MCPServer."""
+    from dataclasses import dataclass
+
+    from pydantic_ai import Agent
+    from pydantic_ai.models.test import TestModel
+
+    @dataclass
+    class MyDeps:
+        api_key: str
+
+    # No type annotation needed — FunctionToolset[Any] is compatible with any deps
+    toolset = SkillsToolset(skills=[])
+    agent = Agent(TestModel(), deps_type=MyDeps, toolsets=[toolset])
+    assert agent is not None

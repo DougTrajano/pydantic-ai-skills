@@ -72,7 +72,7 @@ LOAD_SKILL_TEMPLATE = """<skill>
 """
 
 
-class SkillsToolset(FunctionToolset):
+class SkillsToolset(FunctionToolset[Any]):
     """Pydantic AI toolset for automatic skill discovery and integration.
 
     See [skills docs](../creating-skills.md) for more information.
