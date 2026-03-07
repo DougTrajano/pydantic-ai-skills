@@ -12,6 +12,70 @@ Watch the Advanced Usage Tutorial for in-depth demonstrations of advanced skill 
   <source src="../assets/advanced_usage.mp4" type="video/mp4">
 </video>
 
+## Hot-Reload (Runtime Skill Discovery)
+
+Long-lived server processes (FastAPI, Starlette, etc.) may need to pick up skill edits — made by the agent itself, a git-sync job, or a human — without restarting. `SkillsToolset` supports this via `reload()` and the `auto_reload` parameter.
+
+> **Note:** `reload()` always preserves programmatic skills registered via `skills=[]` or `@toolset.skill`. Only filesystem/registry skills are re-discovered.
+
+### Auto-reload (recommended for most cases)
+
+Pass `auto_reload=True` to re-scan directories automatically before every agent run:
+
+```python
+from pydantic_ai import Agent
+from pydantic_ai_skills import SkillsToolset
+
+skills_toolset = SkillsToolset(
+    directories=["./workspace/skills"],
+    auto_reload=True,
+)
+
+agent = Agent(
+    model="openai:gpt-4o",
+    toolsets=[skills_toolset],
+)
+# Every agent.run() call sees the current state of ./workspace/skills/
+```
+
+### Manual reload (for fine-grained control)
+
+Call `toolset.reload()` yourself — e.g. after a git-sync in a lifespan handler:
+
+```python
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
+from pydantic_ai_skills import SkillsToolset
+
+skills_toolset = SkillsToolset(directories=["./workspace/skills"])
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await git_sync()         # sync skills from remote repo
+    skills_toolset.reload()  # pick up the freshly synced files
+    yield
+
+app = FastAPI(lifespan=lifespan)
+```
+
+### Reloading registry skills
+
+By default, `reload()` preserves already-loaded registry skills from the initial cache without making any network or git calls. To re-fetch fresh skills from registries, pass `include_registries=True`:
+
+```python
+skills_toolset.reload(include_registries=True)
+```
+
+### Priority after reload
+
+The priority order is identical to the initial load:
+
+1. **Programmatic skills** (`skills=[]` param, `@toolset.skill` decorator) — always highest
+2. **Directory skills** — fresh filesystem scan
+3. **Registry skills** — always re-applied from cache; pass `include_registries=True` to refresh that cache from registries
+
+---
+
 ## Skill Decorator Pattern
 
 ### @toolset.skill() Decorator
