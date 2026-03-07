@@ -116,13 +116,20 @@ def test_reload_programmatic_priority_over_directory(tmp_path: Path) -> None:
     _write_skill(tmp_path, 'same-name', 'Directory version')
 
     toolset = SkillsToolset(skills=[prog_skill], directories=[tmp_path])
-    # Directory skill overrides programmatic during initial load (last-wins in dir loading)
-    # but after reload, programmatic is applied first and then directory overwrites it.
-    # This mirrors the initial load behaviour: directory skills win over same-priority base.
-    # What we specifically test here is that programmatic skills ARE re-applied (not lost).
+
+    # Programmatic skills have highest priority: on initial load, the programmatic
+    # definition should win over the directory SKILL.md with the same name.
+    assert 'same-name' in toolset.skills
+    assert toolset.skills['same-name'].description == 'Programmatic version'
+    assert toolset.skills['same-name'].content == 'Prog instructions'
+
+    # After reload(), programmatic skills must still win over any directory-loaded
+    # skills with the same name, proving they are re-applied and not overwritten.
     toolset.reload()
 
     assert 'same-name' in toolset.skills
+    assert toolset.skills['same-name'].description == 'Programmatic version'
+    assert toolset.skills['same-name'].content == 'Prog instructions'
 
 
 def test_reload_no_skills_does_not_raise(tmp_path: Path) -> None:
