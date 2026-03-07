@@ -171,11 +171,13 @@ class SkillsToolset(FunctionToolset[Any]):
             exclude_tools: Set or list of tool names to exclude from registration (e.g., ['run_skill_script']).
                 Useful for security or capability restrictions such as disabling script execution.
                 Valid tool names: 'list_skills', 'load_skill', 'read_skill_resource', 'run_skill_script'.
-            auto_reload: If True, automatically re-scan all configured directories (and optionally
-                registries) before each agent run by calling :meth:`reload` inside
-                :meth:`get_instructions`. Useful for long-lived servers where skill files may be
-                edited at runtime. Programmatic skills defined via ``skills=`` or
-                ``@toolset.skill`` are always preserved. Defaults to False.
+            auto_reload: If True, automatically re-scan all configured directories before each
+                agent run by calling :meth:`reload` inside :meth:`get_instructions`. Useful for
+                long-lived servers where skill files may be edited at runtime. Programmatic skills
+                defined via ``skills=`` or ``@toolset.skill`` are always preserved. Registry
+                skills are preserved from the initial load cache (no network calls are made on
+                each run). To re-fetch fresh skills from registries, call :meth:`reload` with
+                ``include_registries=True`` explicitly. Defaults to False.
 
         Example:
             ```python
@@ -239,6 +241,7 @@ class SkillsToolset(FunctionToolset[Any]):
         self._programmatic_skills: list[Skill] = []
         self._skill_directories: list[SkillsDirectory] = []
         self._registries: list[SkillRegistry] = list(registries) if registries else []
+        self._registry_skills: dict[str, Skill] = {}  # Cache of registry-sourced skills
         self._validate = validate
         self._max_depth = max_depth
 
@@ -335,6 +338,8 @@ class SkillsToolset(FunctionToolset[Any]):
         Calls ``get_skills()`` on each registry and registers the returned
         skills. Skills already registered (from ``skills`` or ``directories``)
         are **not** overridden — registries have the lowest priority.
+        Registry skills are also cached in ``_registry_skills`` so they can be
+        preserved across :meth:`reload` calls without additional network requests.
         """
         for registry in self._registries:
             try:
@@ -347,6 +352,7 @@ class SkillsToolset(FunctionToolset[Any]):
                 )
                 continue
             for skill in registry_skills:
+                self._registry_skills[skill.name] = skill  # Populate the cache
                 if skill.name not in self._skills:
                     self._register_skill(skill)
 
@@ -755,11 +761,12 @@ class SkillsToolset(FunctionToolset[Any]):
                 scripts=list(scripts) if scripts else [],
             )
 
-            # Register the skill immediately (execute function to get content)
-            self._register_skill(wrapper)
+            # Convert to Skill once to avoid calling the function twice
+            skill = wrapper.to_skill()
+            self._register_skill(skill)
 
             # Track as programmatic so it survives reload()
-            self._programmatic_skills.append(wrapper.to_skill())
+            self._programmatic_skills.append(skill)
 
             # Return the wrapper so resources/scripts can be attached
             return wrapper
@@ -811,27 +818,49 @@ class SkillsToolset(FunctionToolset[Any]):
             )
             ```
         """
-        self._skills.clear()
+        # Build a new skills mapping to avoid exposing transient empty/partial state
+        new_skills: dict[str, Skill] = {}
 
         # Re-apply programmatic skills (highest priority)
         for skill in self._programmatic_skills:
-            self._skills[skill.name] = skill
+            new_skills[skill.name] = skill
 
         # Re-scan each directory (fresh filesystem read)
         for skill_dir in self._skill_directories:
             for skill in skill_dir.get_skills().values():
                 skill_name = skill.name
-                if skill_name in self._skills:
+                if skill_name in new_skills:
                     warnings.warn(
                         f"Duplicate skill '{skill_name}' found. Overriding previous occurrence.",
                         UserWarning,
                         stacklevel=2,
                     )
-                self._skills[skill_name] = skill
+                new_skills[skill_name] = skill
 
-        # Optionally reload registry skills (lowest priority)
         if include_registries:
-            self._load_registry_skills()
+            # Re-fetch from registries and refresh the cache
+            new_registry_skills: dict[str, Skill] = {}
+            for registry in self._registries:
+                try:
+                    registry_skills = registry.get_skills()
+                except Exception as exc:
+                    warnings.warn(
+                        f'Failed to load skills from registry {registry!r}: {exc}',
+                        UserWarning,
+                        stacklevel=2,
+                    )
+                    continue
+                for skill in registry_skills:
+                    new_registry_skills[skill.name] = skill
+            self._registry_skills = new_registry_skills
+
+        # Re-apply cached registry skills (lowest priority — never override higher-priority skills)
+        for skill_name, skill in self._registry_skills.items():
+            if skill_name not in new_skills:
+                new_skills[skill_name] = skill
+
+        # Atomically replace the skills mapping once fully populated
+        self._skills = new_skills
 
     def _register_skill(self, skill: Skill | SkillWrapper[Any]) -> None:
         """Register a skill with the toolset.

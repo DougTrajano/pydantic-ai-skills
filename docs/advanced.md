@@ -60,7 +60,7 @@ app = FastAPI(lifespan=lifespan)
 
 ### Reloading registry skills
 
-By default `reload()` skips registries to avoid unexpected network or git operations. Pass `include_registries=True` to opt in:
+By default, `reload()` preserves already-loaded registry skills from the initial cache without making any network or git calls. To re-fetch fresh skills from registries, pass `include_registries=True`:
 
 ```python
 skills_toolset.reload(include_registries=True)
