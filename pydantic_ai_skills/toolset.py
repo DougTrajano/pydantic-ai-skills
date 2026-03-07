@@ -149,6 +149,7 @@ class SkillsToolset(FunctionToolset[Any]):
         id: str | None = None,
         instruction_template: str | None = None,
         exclude_tools: set[str] | list[str] | None = None,
+        auto_reload: bool = False,
     ) -> None:
         """Initialize the skills toolset.
 
@@ -170,6 +171,11 @@ class SkillsToolset(FunctionToolset[Any]):
             exclude_tools: Set or list of tool names to exclude from registration (e.g., ['run_skill_script']).
                 Useful for security or capability restrictions such as disabling script execution.
                 Valid tool names: 'list_skills', 'load_skill', 'read_skill_resource', 'run_skill_script'.
+            auto_reload: If True, automatically re-scan all configured directories (and optionally
+                registries) before each agent run by calling :meth:`reload` inside
+                :meth:`get_instructions`. Useful for long-lived servers where skill files may be
+                edited at runtime. Programmatic skills defined via ``skills=`` or
+                ``@toolset.skill`` are always preserved. Defaults to False.
 
         Example:
             ```python
@@ -194,6 +200,9 @@ class SkillsToolset(FunctionToolset[Any]):
 
             # Excluding specific tools (disable script execution with a set)
             toolset = SkillsToolset(exclude_tools=['run_skill_script'])
+
+            # Auto-reload: re-scan directories before every agent run
+            toolset = SkillsToolset(directories=['./skills'], auto_reload=True)
 
             # Git registry: clone a remote repo and load skills
             from pydantic_ai_skills.registries.git import GitSkillsRegistry
@@ -223,8 +232,11 @@ class SkillsToolset(FunctionToolset[Any]):
                 stacklevel=2,
             )
 
+        self._auto_reload = auto_reload
+
         # Initialize the skills dict and directories list (for refresh)
         self._skills: dict[str, Skill] = {}
+        self._programmatic_skills: list[Skill] = []
         self._skill_directories: list[SkillsDirectory] = []
         self._registries: list[SkillRegistry] = list(registries) if registries else []
         self._validate = validate
@@ -233,6 +245,7 @@ class SkillsToolset(FunctionToolset[Any]):
         # Load programmatic skills first (highest priority)
         if skills is not None:
             for skill in skills:
+                self._programmatic_skills.append(skill)
                 self._register_skill(skill)
 
         # Load directory-based skills (second priority)
@@ -614,6 +627,8 @@ class SkillsToolset(FunctionToolset[Any]):
         """Return instructions to inject into the agent's system prompt.
 
         Returns the skills system prompt containing usage guidance and all skill metadata.
+        When ``auto_reload=True`` was set, re-discovers skills from disk before building
+        the prompt so that any edits made since the last run are immediately visible.
 
         Args:
             ctx: The run context for this agent run.
@@ -621,6 +636,9 @@ class SkillsToolset(FunctionToolset[Any]):
         Returns:
             The skills system prompt, or None if no skills are loaded.
         """
+        if self._auto_reload:
+            self.reload()
+
         if not self._skills:
             return None
 
@@ -740,6 +758,9 @@ class SkillsToolset(FunctionToolset[Any]):
             # Register the skill immediately (execute function to get content)
             self._register_skill(wrapper)
 
+            # Track as programmatic so it survives reload()
+            self._programmatic_skills.append(wrapper.to_skill())
+
             # Return the wrapper so resources/scripts can be attached
             return wrapper
 
@@ -749,6 +770,68 @@ class SkillsToolset(FunctionToolset[Any]):
         else:
             # Called without arguments: @skills.skill
             return decorator(func)
+
+    def reload(self, *, include_registries: bool = False) -> None:
+        """Re-discover skills from all configured sources.
+
+        Re-scans all configured directories for SKILL.md changes and re-applies
+        programmatic skills. Useful for long-lived servers where skill files may be
+        edited (by the agent itself, a git-sync job, or a human) without restarting
+        the process.
+
+        Priority after reload (same as initial load):
+
+        1. Programmatic skills (``skills=`` param and ``@toolset.skill`` decorated
+           functions) — always preserved and applied first.
+        2. Directory skills — fresh filesystem scan via
+           :meth:`~pydantic_ai_skills.SkillsDirectory.get_skills`.
+        3. Registry skills — only when ``include_registries=True``.
+
+        Args:
+            include_registries: Whether to also reload skills from configured
+                registries (e.g. :class:`~pydantic_ai_skills.registries.GitSkillsRegistry`).
+                Defaults to ``False`` because registry operations often involve
+                network or git calls and would be unexpectedly slow when called on
+                every agent run.
+
+        Example:
+            ```python
+            # Manual reload after an external git-sync
+            skills_toolset = SkillsToolset(directories=[WORKSPACE / "skills"])
+
+            async def lifespan(app):
+                await git_sync()
+                skills_toolset.reload()
+                yield
+
+            # Automatic reload before every agent run
+            skills_toolset = SkillsToolset(
+                directories=[WORKSPACE / "skills"],
+                auto_reload=True,
+            )
+            ```
+        """
+        self._skills.clear()
+
+        # Re-apply programmatic skills (highest priority)
+        for skill in self._programmatic_skills:
+            self._skills[skill.name] = skill
+
+        # Re-scan each directory (fresh filesystem read)
+        for skill_dir in self._skill_directories:
+            for skill in skill_dir.get_skills().values():
+                skill_name = skill.name
+                if skill_name in self._skills:
+                    warnings.warn(
+                        f"Duplicate skill '{skill_name}' found. Overriding previous occurrence.",
+                        UserWarning,
+                        stacklevel=2,
+                    )
+                self._skills[skill_name] = skill
+
+        # Optionally reload registry skills (lowest priority)
+        if include_registries:
+            self._load_registry_skills()
 
     def _register_skill(self, skill: Skill | SkillWrapper[Any]) -> None:
         """Register a skill with the toolset.
