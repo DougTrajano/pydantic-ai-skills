@@ -72,7 +72,7 @@ The priority order is identical to the initial load:
 
 1. **Programmatic skills** (`skills=[]` param, `@toolset.skill` decorator) — always highest
 2. **Directory skills** — fresh filesystem scan
-3. **Registry skills** — only when `include_registries=True`
+3. **Registry skills** — always re-applied from cache; pass `include_registries=True` to refresh that cache from registries
 
 ---
 
