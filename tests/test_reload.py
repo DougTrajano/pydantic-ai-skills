@@ -214,6 +214,17 @@ async def test_auto_reload_false_does_not_rescan(skills_dir: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_auto_reload_default_is_false(skills_dir: Path) -> None:
-    """auto_reload defaults to False."""
+    """auto_reload defaults to False (no automatic rescan on get_instructions())."""
     toolset = SkillsToolset(directories=[skills_dir])
-    assert toolset._auto_reload is False
+
+    # Add a new skill after initialization; with the default auto_reload behavior,
+    # get_instructions() should not trigger a rescan.
+    _write_skill(skills_dir, 'default-late-skill', 'Added after init with default auto_reload')
+
+    ctx = MagicMock()
+    instructions = await toolset.get_instructions(ctx)
+
+    # default-late-skill was added after __init__ and auto_reload is off by default
+    assert 'default-late-skill' not in toolset.skills
+    # 'default-late-skill' should not appear in the instructions
+    assert instructions is None or 'default-late-skill' not in instructions
