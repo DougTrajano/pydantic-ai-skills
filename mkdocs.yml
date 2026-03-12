@@ -19,6 +19,7 @@ nav:
       - Programmatic Skills: programmatic-skills.md
       - Skill Registries: registries.md
       - Advanced Features: advanced.md
+      - Sandbox Environment: sandbox.md
       - Implementation Patterns: patterns.md
   - Security & Deployment: security.md
   - API Reference:

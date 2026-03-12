@@ -51,6 +51,9 @@ docs = [
 git = [
     "gitpython>=3.1.40",
 ]
+sandbox = [
+    "localsandbox>=0.2.0",
+]
 test = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",

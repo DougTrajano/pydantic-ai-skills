@@ -21,8 +21,8 @@ from .exceptions import (
     SkillValidationError,
 )
 from .local import (
-    CallableSkillScriptExecutor,
     LocalSkillScriptExecutor,
+    SkillScriptExecutor,
     create_file_based_resource,
     create_file_based_script,
 )
@@ -222,7 +222,7 @@ def _find_skill_files(root_dir: Path, max_depth: int | None) -> list[Path]:
 def _discover_scripts(
     skill_folder: Path,
     skill_name: str,
-    executor: LocalSkillScriptExecutor | CallableSkillScriptExecutor,
+    executor: SkillScriptExecutor,
 ) -> list[SkillScript]:
     """Discover executable scripts in a skill folder.
 
@@ -280,7 +280,7 @@ def _discover_scripts(
 def _load_skill_from_file(
     skill_file: Path,
     validate: bool,
-    script_executor: LocalSkillScriptExecutor | CallableSkillScriptExecutor,
+    script_executor: SkillScriptExecutor,
 ) -> Skill | None:
     """Parse and build a single :class:`Skill` from a SKILL.md file.
 
@@ -336,7 +336,7 @@ def discover_skills(
     path: str | Path,
     validate: bool = True,
     max_depth: int | None = 3,
-    script_executor: LocalSkillScriptExecutor | CallableSkillScriptExecutor | None = None,
+    script_executor: SkillScriptExecutor | None = None,
 ) -> list[Skill]:
     """Discover skills from a filesystem directory.
 
@@ -390,7 +390,7 @@ class SkillsDirectory:
     and automatically discovering associated resources and scripts.
 
     File-based scripts are executed using the configured script executor
-    (LocalSkillScriptExecutor or CallableSkillScriptExecutor).
+    (SkillScriptExecutor protocol).
     """
 
     def __init__(
@@ -399,7 +399,7 @@ class SkillsDirectory:
         path: str | Path,
         validate: bool = True,
         max_depth: int | None = 3,
-        script_executor: LocalSkillScriptExecutor | CallableSkillScriptExecutor | None = None,
+        script_executor: SkillScriptExecutor | None = None,
     ) -> None:
         """Initialize the skills directory source.
 
@@ -408,7 +408,7 @@ class SkillsDirectory:
             validate: Validate skill structure on discovery.
             max_depth: Maximum depth for skill discovery (None for unlimited).
             script_executor: Optional custom script executor for file-based scripts.
-                Can be LocalSkillScriptExecutor or CallableSkillScriptExecutor.
+                Can be any object satisfying the :class:`SkillScriptExecutor` protocol.
                 If None, uses LocalSkillScriptExecutor with default settings.
 
         Example:

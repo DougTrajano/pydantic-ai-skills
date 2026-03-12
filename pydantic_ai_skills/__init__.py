@@ -11,6 +11,7 @@ Key components:
 - [`SkillsDirectory`][pydantic_ai_skills.SkillsDirectory]: Filesystem-based skill discovery and management
 - [`LocalSkillScriptExecutor`][pydantic_ai_skills.LocalSkillScriptExecutor]: Execute scripts via subprocess
 - [`CallableSkillScriptExecutor`][pydantic_ai_skills.CallableSkillScriptExecutor]: Wrap callables as script executors
+- [`LocalSandboxSkillScriptExecutor`][pydantic_ai_skills.LocalSandboxSkillScriptExecutor]: Execute scripts in an isolated Pyodide sandbox (requires ``sandbox`` extra)
 
 Example:
     ```python
@@ -46,8 +47,9 @@ from pydantic_ai_skills.exceptions import (
     SkillScriptExecutionError,
     SkillValidationError,
 )
-from pydantic_ai_skills.local import CallableSkillScriptExecutor, LocalSkillScriptExecutor
+from pydantic_ai_skills.local import CallableSkillScriptExecutor, LocalSkillScriptExecutor, SkillScriptExecutor
 from pydantic_ai_skills.registries import GitCloneOptions, GitSkillsRegistry, SkillRegistry
+from pydantic_ai_skills.sandbox import LocalSandboxSkillScriptExecutor
 from pydantic_ai_skills.toolset import SkillsToolset
 from pydantic_ai_skills.types import Skill, SkillResource, SkillScript
 
@@ -57,8 +59,10 @@ __all__ = [
     # Directory discovery
     'SkillsDirectory',
     # Executors
+    'SkillScriptExecutor',
     'LocalSkillScriptExecutor',
     'CallableSkillScriptExecutor',
+    'LocalSandboxSkillScriptExecutor',
     # Types
     'Skill',
     'SkillResource',

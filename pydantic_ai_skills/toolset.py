@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 import warnings
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from inspect import signature as get_signature
 from pathlib import Path
 from typing import Any
@@ -142,7 +142,7 @@ class SkillsToolset(FunctionToolset[Any]):
         self,
         *,
         skills: list[Skill] | None = None,
-        directories: list[str | Path | SkillsDirectory] | None = None,
+        directories: Sequence[str | Path | SkillsDirectory] | None = None,
         registries: list[SkillRegistry] | None = None,
         validate: bool = True,
         max_depth: int | None = 3,
@@ -298,7 +298,7 @@ class SkillsToolset(FunctionToolset[Any]):
             raise SkillNotFoundError(f"Skill '{name}' not found. Available: {available}")
         return self._skills[name]
 
-    def _load_directory_skills(self, directories: list[str | Path | SkillsDirectory]) -> None:
+    def _load_directory_skills(self, directories: Sequence[str | Path | SkillsDirectory]) -> None:
         """Load skills from configured directories.
 
         Converts directory specifications to SkillsDirectory instances,

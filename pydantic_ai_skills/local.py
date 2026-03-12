@@ -21,7 +21,7 @@ import sys
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Protocol, cast
 
 import anyio
 import yaml
@@ -29,6 +29,19 @@ from pydantic_ai._utils import is_async_callable, run_in_executor
 
 from .exceptions import SkillResourceLoadError, SkillScriptExecutionError
 from .types import SkillResource, SkillScript
+
+
+class SkillScriptExecutor(Protocol):
+    """Protocol for skill script executors.
+
+    Any object implementing ``run(script, args)`` satisfies this protocol,
+    including :class:`LocalSkillScriptExecutor`, :class:`CallableSkillScriptExecutor`,
+    and :class:`~pydantic_ai_skills.sandbox.LocalSandboxSkillScriptExecutor`.
+    """
+
+    async def run(self, script: SkillScript, args: dict[str, Any] | None = None) -> Any:
+        """Run a skill script and return its output."""
+        ...
 
 
 @dataclass
@@ -263,7 +276,7 @@ class FileBasedSkillScript(SkillScript):
         executor: Executor for running the script.
     """
 
-    executor: LocalSkillScriptExecutor | CallableSkillScriptExecutor = LocalSkillScriptExecutor()
+    executor: SkillScriptExecutor = LocalSkillScriptExecutor()
 
     async def run(self, ctx: Any, args: dict[str, Any] | None = None) -> Any:
         """Execute script file via subprocess.
@@ -293,7 +306,7 @@ def create_file_based_script(
     name: str,
     uri: str,
     skill_name: str,
-    executor: LocalSkillScriptExecutor | CallableSkillScriptExecutor,
+    executor: SkillScriptExecutor,
     description: str | None = None,
 ) -> FileBasedSkillScript:
     """Create a file-based script with executor.
