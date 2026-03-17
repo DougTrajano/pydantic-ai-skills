@@ -4,6 +4,7 @@ import datetime
 from pathlib import Path
 
 import httpx
+import logfire
 import uvicorn
 from dotenv import load_dotenv
 from langchain_community.tools import DuckDuckGoSearchRun
@@ -15,9 +16,12 @@ from pydantic_ai_skills import SkillsToolset
 
 load_dotenv()
 
+logfire.configure()
+logfire.instrument_pydantic_ai()
+
 # Initialize Skills Toolset with the skills directory
 script_dir = Path(__file__).parent
-skills_toolset = SkillsToolset(directories=[str(script_dir / 'skills'), str(script_dir / 'anthropic-skills')])
+skills_toolset = SkillsToolset(directories=[script_dir / 'skills', script_dir / 'anthropic-skills'])
 
 config = SandboxConfig(mounts=[Mount(host_path=script_dir / 'tmp', mount_point='/', mode='rw')])
 sandbox = Sandbox(config)
@@ -28,9 +32,8 @@ search_tool = tool_from_langchain(search)
 
 # Create agent with skills as a toolset
 agent = Agent(
-    model='openai:gpt-5.2',
+    model='gateway/openai:gpt-5.2',
     instructions='You are a helpful research assistant.',
-    instrument=True,
     toolsets=[skills_toolset, fs_toolset],
     tools=[search_tool],
 )
@@ -48,7 +51,7 @@ async def add_today_date() -> str:
     return f'The date is {datetime.datetime.now().strftime("%B %d, %Y")}.'
 
 
-@agent.tool_plain(retries=2)
+@agent.tool_plain(retries=2, requires_approval=True)
 async def fetch_url(url: str, method: str = 'GET', httpx_timeout: int = 15) -> str:
     """Fetch the content of a URL.
 
