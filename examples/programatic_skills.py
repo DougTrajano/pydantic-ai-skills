@@ -16,6 +16,7 @@ import sqlite3
 from dataclasses import dataclass, field
 
 import datasets
+import logfire
 import uvicorn
 from dotenv import load_dotenv
 from pydantic_ai import Agent
@@ -24,6 +25,9 @@ from pydantic_ai._run_context import RunContext
 from pydantic_ai_skills import Skill, SkillResource, SkillsToolset
 
 load_dotenv()
+
+logfire.configure()
+logfire.instrument_pydantic_ai()
 
 
 @dataclass
@@ -219,7 +223,7 @@ skills_toolset = SkillsToolset(skills=[hr_analytics_skill])
 
 # Create agent with HR analytics capabilities and dependencies
 agent = Agent(
-    model='openai:gpt-5.2',
+    model='gateway/openai:gpt-5.2',
     deps_type=AnalystDeps,
     instructions='You are an expert HR data analyst.',
     toolsets=[skills_toolset],
@@ -227,7 +231,7 @@ agent = Agent(
 
 
 @agent.instructions
-async def add_skills(ctx: RunContext) -> str | None:
+async def add_skills(ctx: RunContext[AnalystDeps]) -> str | None:
     """Inject skill instructions into agent context via progressive disclosure."""
     return await skills_toolset.get_instructions(ctx)
 

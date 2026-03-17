@@ -64,8 +64,9 @@ examples = [
     "datasets>=2.0.0",
     "gitpython>=3.1.40",
     "langchain-community>=0.2.0",
+    "ddgs>=7.0.0",
     "pydantic-ai-filesystem-sandbox>=0.1.0",
-    "mlflow>=2.0.0",
+    "logfire[pydantic-ai]>=3.0.0",
 ]
 
 [tool.ruff]

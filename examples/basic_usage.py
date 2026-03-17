@@ -6,6 +6,7 @@ for research tasks.
 
 from pathlib import Path
 
+import logfire
 import uvicorn
 from dotenv import load_dotenv
 from pydantic_ai import Agent, RunContext
@@ -13,6 +14,9 @@ from pydantic_ai import Agent, RunContext
 from pydantic_ai_skills import SkillsToolset
 
 load_dotenv()
+
+logfire.configure()
+logfire.instrument_pydantic_ai()
 
 # Get the skills directory (examples/skills)
 skills_dir = Path(__file__).parent / 'skills'
@@ -22,7 +26,7 @@ skills_toolset = SkillsToolset(directories=[skills_dir])
 
 # Create agent with skills
 agent = Agent(
-    model='openai:gpt-5.2',
+    model='gateway/openai:gpt-5.2',
     instructions='You are a helpful research assistant.',
     toolsets=[skills_toolset],
 )
