@@ -109,7 +109,7 @@ The Pydantic AI Skills documentation is available in the [llms.txt](https://llms
 
 Two formats are available:
 
-- [`llms.txt`](/llms.txt): a file containing a brief description of the project, along with links to the different sections of the documentation. The structure of this file is described in details [here](https://llmstxt.org/#format).
+- [`llms.txt`](/llms.txt): a file containing a brief description of the project, along with links to the different sections of the documentation. The structure of this file is described in detail [here](https://llmstxt.org/#format).
 - [`llms-full.txt`](/llms-full.txt): Similar to `llms.txt`, but with the linked documentation content included inline. This file may be too large for some LLMs.
 
 As of today, these files are not automatically leveraged by most IDEs or coding agents, but they can use them if you provide a link or the full text.
