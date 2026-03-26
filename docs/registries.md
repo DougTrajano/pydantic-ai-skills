@@ -15,8 +15,8 @@ pip install pydantic-ai-skills[git]
 ### Load Skills from a Git Repository
 
 ```python
-from pydantic_ai import Agent, RunContext
-from pydantic_ai_skills import SkillsToolset
+from pydantic_ai import Agent
+from pydantic_ai_skills import SkillsCapability
 from pydantic_ai_skills.registries import GitSkillsRegistry, GitCloneOptions
 
 # Clone Anthropic's public skills repo (shallow, single-branch)
@@ -27,7 +27,19 @@ registry = GitSkillsRegistry(
     clone_options=GitCloneOptions(depth=1, single_branch=True),
 )
 
-# Pass the registry to the toolset — skills are available immediately
+agent = Agent(
+    model='openai:gpt-5.2',
+    instructions='You are a helpful assistant with access to a variety of skills.',
+    capabilities=[SkillsCapability(registries=[registry])],
+)
+```
+
+### Direct SkillsToolset Integration (manual path)
+
+```python
+from pydantic_ai import Agent, RunContext
+from pydantic_ai_skills import SkillsToolset
+
 skills_toolset = SkillsToolset(registries=[registry])
 
 agent = Agent(

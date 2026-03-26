@@ -106,6 +106,21 @@ CallToolsNode(model_response=ModelResponse(parts=[TextPart(content='Here are the
 End(data=FinalResult(output='Here are the last three papers from arXiv about machine learning:\n\n1. **Title:** Changing Data Sources in the Age of Machine Learning for Official Statistics\n   - **Summary:** This paper discusses the increasing importance of data science in official statistics production, highlighting risks and uncertainties related to changing data sources in machine learning contexts. It covers issues like concept drift, bias, and data validity, and offers measures to maintain the reliability and integrity of machine learning-based statistics.\n   - **URL:** [Link to Paper](http://arxiv.org/abs/2306.04338v1)\n\n2. **Title:** DOME: Recommendations for supervised machine learning validation in biology\n   - **Summary:** The paper provides a set of community-wide recommendations for machine learning validation in biology, emphasizing the importance of a structured methods description using DOME (data, optimization, model, evaluation). These guidelines aim to improve the scrutiny of machine learning performance and facilitate better understanding and assessment of methods.\n   - **URL:** [Link to Paper](http://arxiv.org/abs/2006.16189v4)\n\n3. **Title:** Learning Curves for Decision Making in Supervised Machine Learning: A Survey\n   - **Summary:** This survey covers the concept of learning curves in machine learning, which assess algorithm performance concerning resources like training examples. The paper categorizes learning curve approaches based on decision-making situations, and it surveys literature to classify various models within this framework.\n   - **URL:** [Link to Paper](http://arxiv.org/abs/2201.12150v2)'))
 ````
 
+### Capability API (pydantic-ai >= 1.71)
+
+If you are using `pydantic-ai>=1.71`, you can use `SkillsCapability`, which is based on the Pydantic AI [Capabilities API](https://ai.pydantic.dev/capabilities/). It bundles the skills tools and instructions into a single capability that can be added to agents. This provides a more streamlined integration of the agent skills functionality.
+
+```python
+from pydantic_ai import Agent
+from pydantic_ai_skills import SkillsCapability
+
+agent = Agent(
+  model='openai:gpt-4o',
+  instructions='You are a helpful research assistant.',
+  capabilities=[SkillsCapability(directories=['./skills'])],
+)
+```
+
 ## Creating Skills
 
 Skills are filesystem-based directories with a `SKILL.md` file containing YAML frontmatter and Markdown instructions.

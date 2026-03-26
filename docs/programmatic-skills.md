@@ -14,6 +14,8 @@ Learn how to create programmatic skills by watching the Programmatic Skills Tuto
 
 ## Overview
 
+For pydantic-ai >= 1.71, prefer integrating programmatic skills through `SkillsCapability` and `capabilities=[...]`. Use `SkillsToolset` directly when you need explicit/manual control over instruction wiring.
+
 Programmatic skills let you:
 
 - Create skills using Python dataclasses instead of files
@@ -48,6 +50,33 @@ my_skill = Skill(
 
 # Initialize toolset with the programmatic skill
 skills_toolset = SkillsToolset(skills=[my_skill])
+```
+
+### Preferred Agent Integration (SkillsCapability)
+
+```python
+from pydantic_ai import Agent
+from pydantic_ai_skills import SkillsCapability
+
+agent = Agent(
+    model='openai:gpt-5.2',
+    capabilities=[SkillsCapability(skills=[my_skill])],
+)
+```
+
+### Direct SkillsToolset Integration (manual path)
+
+```python
+from pydantic_ai import Agent, RunContext
+
+agent = Agent(
+    model='openai:gpt-5.2',
+    toolsets=[skills_toolset],
+)
+
+@agent.instructions
+async def add_skills(ctx: RunContext) -> str | None:
+    return await skills_toolset.get_instructions(ctx)
 ```
 
 ## Adding Dynamic Resources

@@ -1,5 +1,9 @@
 # SkillsToolset API Reference
 
+For pydantic-ai >= 1.71, prefer [SkillsCapability API](capability.md).
+
+When using `SkillsToolset` directly, remember to manually inject `get_instructions(ctx)` via `@agent.instructions`.
+
 ::: pydantic_ai_skills.toolset.SkillsToolset
 options:
 members: - **init** - get_instructions - get_skill - skills

@@ -35,7 +35,8 @@ class AnalystDeps:
     """Dependencies for the HR analytics agent.
 
     Manages database connection and dataset configuration for progressive
-    data loading and querying capabilities.
+    data loading and querying capabilities. Automatically loads the HR dataset
+    upon initialization.
     """
 
     hf_dataset_name: str = 'dougtrajano/hr-synthetic-database'
@@ -43,6 +44,14 @@ class AnalystDeps:
         default_factory=lambda: ['business_units', 'departments', 'jobs', 'employees', 'compensations']
     )
     db: sqlite3.Connection | None = field(default=None)
+
+    def __post_init__(self) -> None:
+        """Auto-load HR dataset into in-memory SQLite database upon initialization."""
+        self.db = sqlite3.connect(':memory:', check_same_thread=False)
+        for subset in self.hf_dataset_subsets:
+            dataset = datasets.load_dataset(self.hf_dataset_name, name=subset, split='train')
+            df = dataset.to_pandas()
+            df.to_sql(subset, self.db, if_exists='replace', index=False)
 
     def get_db_tables(self) -> list[str]:
         """Get list of tables currently loaded in the SQLite database."""
@@ -117,7 +126,7 @@ hr_analytics_skill = Skill(
 - Employee lifecycle metrics
 
 **Workflow:**
-1. Call `load_dataset` script to initialize the in-memory database
+1. Dataset is pre-loaded and ready (automatic on agent initialization)
 2. Use `get_context` resource for dataset overview
 3. Reference `table-schemas` resource for detailed field definitions
 4. Execute `run_query` script with SQL to analyze data
@@ -149,33 +158,6 @@ def get_context() -> str:
 
 
 @hr_analytics_skill.script
-async def load_dataset(ctx: RunContext[AnalystDeps]) -> str:
-    """Load HuggingFace HR dataset into in-memory SQLite database.
-
-    Initializes database connection and loads all dataset subsets as tables.
-    Idempotent: skips already-loaded tables.
-
-    Returns status message confirming successful load.
-    """
-    # Initialize database if needed
-    if ctx.deps.db is None:
-        ctx.deps.db = sqlite3.connect(':memory:', check_same_thread=False)
-
-    loaded_tables = []
-    # Load each subset as a separate table
-    for subset in ctx.deps.hf_dataset_subsets:
-        if subset not in ctx.deps.get_db_tables():
-            dataset = datasets.load_dataset(ctx.deps.hf_dataset_name, name=subset, split='train')
-            df = dataset.to_pandas()
-            df.to_sql(subset, ctx.deps.db, if_exists='replace', index=False)
-            loaded_tables.append(subset)
-
-    if loaded_tables:
-        return f'HR dataset loaded. Tables created: {", ".join(loaded_tables)}'
-    return 'HR dataset already loaded. All tables available.'
-
-
-@hr_analytics_skill.script
 async def run_query(ctx: RunContext[AnalystDeps], query: str) -> str:  # noqa: D417
     """Execute SQL query on the HR dataset and return formatted results.
 
@@ -191,9 +173,6 @@ async def run_query(ctx: RunContext[AnalystDeps], query: str) -> str:  # noqa: D
     - SELECT department_id, AVG(total_compensation) FROM compensations
       JOIN employees ON compensations.employee_id = employees.id GROUP BY department_id
     """
-    if ctx.deps.db is None:
-        return 'Error: HR dataset not loaded. Run load_dataset script first.'
-
     try:
         cursor = ctx.deps.db.cursor()
         cursor.execute(query)

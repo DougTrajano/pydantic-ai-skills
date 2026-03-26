@@ -36,6 +36,7 @@ Example:
     ```
 """
 
+from pydantic_ai_skills.capability import SkillsCapability
 from pydantic_ai_skills.directory import SkillsDirectory, discover_skills, parse_skill_md
 from pydantic_ai_skills.exceptions import (
     SkillException,
@@ -54,6 +55,7 @@ from pydantic_ai_skills.types import Skill, SkillResource, SkillScript
 __all__ = [
     # Main toolset
     'SkillsToolset',
+    'SkillsCapability',
     # Directory discovery
     'SkillsDirectory',
     # Executors
