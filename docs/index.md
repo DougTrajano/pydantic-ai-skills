@@ -116,7 +116,6 @@ As of today, these files are not automatically leveraged by most IDEs or coding 
 
 ## Next Steps
 
-- [Installation](installation.md) - Get started with pydantic-ai-skills
 - [Quick Start](quick-start.md) - Build your first skill-enabled agent
 - [Creating Skills](creating-skills.md) - Learn how to create custom skills
 - [Programmatic Skills](programmatic-skills.md) - Create skills in Python code
