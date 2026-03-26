@@ -14,6 +14,8 @@ This package implements the [Agent Skills specification](https://agentskills.io/
 
 - **Progressive Disclosure** - Load skill information only when needed, reducing token usage
 - **Agent Skills Spec** - Fully compatible with the [Agent Skills](https://agentskills.io/home) open format
+- **Filesystem Skills** - Define skills as filesystem directories with Markdown files and scripts
+- **Programmatic Skills** - Create skills dynamically in Python code using decorators or dataclasses
 - **Type-Safe** - Built with Python dataclasses and type hints
 - **Validation** - Automatic validation of skill metadata and structure
 - **Multiple Directories** - Load skills from multiple sources
@@ -63,6 +65,21 @@ Create dynamic skills with Python:
 
 ## Quick Start
 
+If you are using `pydantic-ai>=1.71`, we recommend using `SkillsCapability`, which is based on the Pydantic AI [Capabilities API](https://ai.pydantic.dev/capabilities/). It bundles the skills tools and instructions into a single capability that can be added to agents. This provides a more streamlined and integrated way to use agent skills.
+
+```python
+from pydantic_ai import Agent
+from pydantic_ai_skills import SkillsCapability
+
+agent = Agent(
+  model='openai:gpt-4o',
+  instructions='You are a helpful research assistant.',
+  capabilities=[SkillsCapability(directories=['./skills'])],
+)
+```
+
+For earlier versions of Pydantic AI, you can use `SkillsToolset`:
+
 ```python
 from pydantic_ai import Agent, RunContext
 from pydantic_ai_skills import SkillsToolset
@@ -105,21 +122,6 @@ ModelRequestNode(request=ModelRequest(parts=[ToolReturnPart(tool_name='run_skill
 CallToolsNode(model_response=ModelResponse(parts=[TextPart(content='Here are the last three papers from arXiv about machine learning:\n\n1. **Title:** Changing Data Sources in the Age of Machine Learning for Official Statistics\n   - **Summary:** This paper discusses the increasing importance of data science in official statistics production, highlighting risks and uncertainties related to changing data sources in machine learning contexts. It covers issues like concept drift, bias, and data validity, and offers measures to maintain the reliability and integrity of machine learning-based statistics.\n   - **URL:** [Link to Paper](http://arxiv.org/abs/2306.04338v1)\n\n2. **Title:** DOME: Recommendations for supervised machine learning validation in biology\n   - **Summary:** The paper provides a set of community-wide recommendations for machine learning validation in biology, emphasizing the importance of a structured methods description using DOME (data, optimization, model, evaluation). These guidelines aim to improve the scrutiny of machine learning performance and facilitate better understanding and assessment of methods.\n   - **URL:** [Link to Paper](http://arxiv.org/abs/2006.16189v4)\n\n3. **Title:** Learning Curves for Decision Making in Supervised Machine Learning: A Survey\n   - **Summary:** This survey covers the concept of learning curves in machine learning, which assess algorithm performance concerning resources like training examples. The paper categorizes learning curve approaches based on decision-making situations, and it surveys literature to classify various models within this framework.\n   - **URL:** [Link to Paper](http://arxiv.org/abs/2201.12150v2)')], usage=RequestUsage(input_tokens=2177, cache_read_tokens=1408, output_tokens=322, details={'accepted_prediction_tokens': 0, 'audio_tokens': 0, 'reasoning_tokens': 0, 'rejected_prediction_tokens': 0}), model_name='gpt-4o-2024-08-06', timestamp=datetime.datetime(2025, 12, 18, 23, 27, 19, tzinfo=TzInfo(0)), provider_name='openai', provider_details={'finish_reason': 'stop'}, provider_response_id='chatcmpl-CoHgtHBD9LUsRKbILVar99GtAGKHM', finish_reason='stop'))
 End(data=FinalResult(output='Here are the last three papers from arXiv about machine learning:\n\n1. **Title:** Changing Data Sources in the Age of Machine Learning for Official Statistics\n   - **Summary:** This paper discusses the increasing importance of data science in official statistics production, highlighting risks and uncertainties related to changing data sources in machine learning contexts. It covers issues like concept drift, bias, and data validity, and offers measures to maintain the reliability and integrity of machine learning-based statistics.\n   - **URL:** [Link to Paper](http://arxiv.org/abs/2306.04338v1)\n\n2. **Title:** DOME: Recommendations for supervised machine learning validation in biology\n   - **Summary:** The paper provides a set of community-wide recommendations for machine learning validation in biology, emphasizing the importance of a structured methods description using DOME (data, optimization, model, evaluation). These guidelines aim to improve the scrutiny of machine learning performance and facilitate better understanding and assessment of methods.\n   - **URL:** [Link to Paper](http://arxiv.org/abs/2006.16189v4)\n\n3. **Title:** Learning Curves for Decision Making in Supervised Machine Learning: A Survey\n   - **Summary:** This survey covers the concept of learning curves in machine learning, which assess algorithm performance concerning resources like training examples. The paper categorizes learning curve approaches based on decision-making situations, and it surveys literature to classify various models within this framework.\n   - **URL:** [Link to Paper](http://arxiv.org/abs/2201.12150v2)'))
 ````
-
-### Capability API (pydantic-ai >= 1.71)
-
-If you are using `pydantic-ai>=1.71`, you can use `SkillsCapability`, which is based on the Pydantic AI [Capabilities API](https://ai.pydantic.dev/capabilities/). It bundles the skills tools and instructions into a single capability that can be added to agents. This provides a more streamlined integration of the agent skills functionality.
-
-```python
-from pydantic_ai import Agent
-from pydantic_ai_skills import SkillsCapability
-
-agent = Agent(
-  model='openai:gpt-4o',
-  instructions='You are a helpful research assistant.',
-  capabilities=[SkillsCapability(directories=['./skills'])],
-)
-```
 
 ## Creating Skills
 
