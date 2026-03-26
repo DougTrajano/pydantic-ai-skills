@@ -10,7 +10,8 @@ from dotenv import load_dotenv
 from langchain_community.tools import DuckDuckGoSearchRun
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.ext.langchain import tool_from_langchain
-from pydantic_ai_filesystem_sandbox import FileSystemToolset, Mount, Sandbox, SandboxConfig
+from pydantic_ai.mcp import MCPServerStdio
+from pydantic_ai.tools import DeferredToolRequests
 
 from pydantic_ai_skills import SkillsToolset
 
@@ -23,19 +24,23 @@ logfire.instrument_pydantic_ai()
 script_dir = Path(__file__).parent
 skills_toolset = SkillsToolset(directories=[script_dir / 'skills', script_dir / 'anthropic-skills'])
 
-config = SandboxConfig(mounts=[Mount(host_path=script_dir / 'tmp', mount_point='/', mode='rw')])
-sandbox = Sandbox(config)
-fs_toolset = FileSystemToolset(sandbox)
+# Initialize MCP filesystem server
+fs_toolset = MCPServerStdio(
+    'npx',
+    args=['@modelcontextprotocol/server-filesystem', str(script_dir / 'tmp')],
+    timeout=30,
+)
 
 search = DuckDuckGoSearchRun()
 search_tool = tool_from_langchain(search)
 
-# Create agent with skills as a toolset
+# Create agent with skills and MCP filesystem toolsets
 agent = Agent(
     model='gateway/openai:gpt-5.2',
     instructions='You are a helpful research assistant.',
     toolsets=[skills_toolset, fs_toolset],
     tools=[search_tool],
+    output_type=[str, DeferredToolRequests],
 )
 
 

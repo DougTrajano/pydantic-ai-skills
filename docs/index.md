@@ -15,34 +15,65 @@ Agent Skills are **modular collections of instructions, scripts, and resources**
 - **Resource Management**: Support for documentation and data files
 - **Type-Safe**: Built on Pydantic AI's type-safe foundation
 - **Simple Integration**: Drop-in toolset for Pydantic AI agents
+- **Capabilities Integration**: Preferred on pydantic-ai >= 1.71 via `SkillsCapability` and `capabilities=[...]`
 
 ## Quick Example
 
 ```python
-from pydantic_ai import Agent, RunContext
-from pydantic_ai_skills import SkillsToolset
+from pydantic_ai import Agent
+from pydantic_ai_skills import SkillsCapability
 
-# Initialize Skills Toolset with skill directories
-skills_toolset = SkillsToolset(directories=["./skills"])
-
-# Create agent with skills
+# Create agent with skills (preferred on pydantic-ai >= 1.71)
 agent = Agent(
     model='openai:gpt-5.2',
     instructions="You are a helpful research assistant.",
-    toolsets=[skills_toolset]
+    capabilities=[SkillsCapability(directories=['./skills'])],
 )
-
-# Add skills instructions to agent
-@agent.instructions
-async def add_skills(ctx: RunContext) -> str | None:
-    """Add skills instructions to the agent's context."""
-    return await skills_toolset.get_instructions(ctx)
 
 # Use agent - skills tools are automatically available
 result = await agent.run(
     "What are the last 3 papers on arXiv about machine learning?"
 )
 print(result.output)
+```
+
+## Capabilities API Example (pydantic-ai >= 1.71)
+
+`SkillsCapability` is the preferred integration path on pydantic-ai >= 1.71.
+
+It bundles `SkillsToolset` behavior and instruction injection through Pydantic AI's Capability API. If you use `SkillsToolset` directly, you must manually add `get_instructions(ctx)` using `@agent.instructions`.
+
+```python
+from pydantic_ai import Agent
+from pydantic_ai_skills import SkillsCapability
+
+agent = Agent(
+    model='openai:gpt-5.2',
+    capabilities=[
+        SkillsCapability(directories=['./skills'])
+    ],
+)
+```
+
+## Direct SkillsToolset Example (manual path)
+
+If you use `SkillsToolset` directly, manually inject instructions with `@agent.instructions`.
+
+```python
+from pydantic_ai import Agent, RunContext
+from pydantic_ai_skills import SkillsToolset
+
+skills_toolset = SkillsToolset(directories=['./skills'])
+
+agent = Agent(
+    model='openai:gpt-5.2',
+    instructions='You are a helpful research assistant.',
+    toolsets=[skills_toolset],
+)
+
+@agent.instructions
+async def add_skills(ctx: RunContext) -> str | None:
+    return await skills_toolset.get_instructions(ctx)
 ```
 
 ## How It Works
@@ -71,6 +102,17 @@ We strongly recommend that you use Skills only from trusted sources: those you c
 !!! warning
 
     If you must use a Skill from an untrusted or unknown source, exercise extreme caution and thoroughly audit it before use. Depending on what access agents have when executing the Skill, malicious Skills could lead to data exfiltration, unauthorized system access, or other security risks.
+
+## llms.txt
+
+The Pydantic AI Skills documentation is available in the [llms.txt](https://llmstxt.org/) format. This format is defined in Markdown and is suited for LLMs, AI coding assistants, and agents.
+
+Two formats are available:
+
+- [`llms.txt`](/llms.txt): a file containing a brief description of the project, along with links to the different sections of the documentation. The structure of this file is described in details [here](https://llmstxt.org/#format).
+- [`llms-full.txt`](/llms-full.txt): Similar to `llms.txt`, but with the linked documentation content included inline. This file may be too large for some LLMs.
+
+As of today, these files are not automatically leveraged by most IDEs or coding agents, but they can use them if you provide a link or the full text.
 
 ## Next Steps
 

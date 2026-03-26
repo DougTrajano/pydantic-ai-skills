@@ -14,6 +14,8 @@ Watch the Advanced Usage Tutorial for in-depth demonstrations of advanced skill 
 
 ## Hot-Reload (Runtime Skill Discovery)
 
+`SkillsCapability` is the preferred integration path on pydantic-ai >= 1.71. This section focuses on `SkillsToolset` because hot-reload controls (`reload()`, `auto_reload`) are configured on the underlying toolset.
+
 Long-lived server processes (FastAPI, Starlette, etc.) may need to pick up skill edits — made by the agent itself, a git-sync job, or a human — without restarting. `SkillsToolset` supports this via `reload()` and the `auto_reload` parameter.
 
 > **Note:** `reload()` always preserves programmatic skills registered via `skills=[]` or `@toolset.skill`. Only filesystem/registry skills are re-discovered.

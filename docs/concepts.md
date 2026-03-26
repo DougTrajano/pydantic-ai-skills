@@ -32,6 +32,39 @@ Alternatively, define skills directly in Python using the `Skill` class with dec
 
 Skills can also be loaded from remote sources via **skill registries**. For example, `GitSkillsRegistry` clones a Git repository and exposes its skills. Registries support composition (filtering, prefixing, renaming, combining). See [Skill Registries](registries.md) for details.
 
+## Integration Modes
+
+You can integrate skills in two ways:
+
+1. `SkillsToolset` (works across supported pydantic-ai versions)
+2. `SkillsCapability` (uses the `capabilities=[...]` API in pydantic-ai >= 1.71)
+
+For pydantic-ai >= 1.71, prefer `SkillsCapability`.
+
+`SkillsCapability` wraps an internal `SkillsToolset` so behavior is consistent across both approaches, and it bundles instruction injection automatically through the Capability API.
+
+### SkillsToolset mode
+
+Use this mode when your app is built around `toolsets=[...]`.
+
+When using `SkillsToolset` directly, you must explicitly add skills instructions with `get_instructions(ctx)` via `@agent.instructions`.
+
+### SkillsCapability mode
+
+Use this mode when your app is built around `capabilities=[...]`.
+
+This is the recommended mode on pydantic-ai >= 1.71 because skills tools and skills instructions are bundled in one capability.
+
+```python
+from pydantic_ai import Agent
+from pydantic_ai_skills import SkillsCapability
+
+agent = Agent(
+    model='openai:gpt-5.2',
+    capabilities=[SkillsCapability(directories=['./skills'])],
+)
+```
+
 ## SKILL.md Format
 
 Each `SKILL.md` file has **YAML frontmatter** (metadata) followed by **Markdown** (instructions).

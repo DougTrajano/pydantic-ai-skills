@@ -4,6 +4,14 @@
 
 Python library (Python ≥3.10) implementing the [Agent Skills specification](https://agentskills.io/specification) for Pydantic AI. Agent Skills is an open format maintained by Anthropic and open to contributions from the community. Skills are modular collections of instructions, scripts, and resources that extend AI agent capabilities through **progressive disclosure** (load-on-demand to reduce token usage).
 
+## External Resources
+
+When working on tasks related to Pydantic AI integration, LLM configuration, or advanced framework features, consult the Pydantic AI documentation:
+
+- **Pydantic AI docs**: https://ai.pydantic.dev/llms.txt - Comprehensive reference for LLM configuration, model selection, tool integration, and framework patterns.
+
+Use this resource to understand Pydantic AI's API surface, best practices, and implementation details when extending or integrating skills with the broader Pydantic AI ecosystem.
+
 ## Core Architecture
 
 **3-Layer Skill System:**

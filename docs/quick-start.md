@@ -8,7 +8,7 @@ For a visual walkthrough of the basics, check out the video tutorials:
 
 ### Basic Usage
 
-Learn how to create your first skill and initialize an agent with the SkillsToolset:
+Learn how to create your first skill and initialize an agent with SkillsCapability (preferred):
 
 <video controls style="max-width:100%; border-radius:8px">
   <source src="../assets/basic_usage.mp4" type="video/mp4">
@@ -75,6 +75,29 @@ async def my_tool(ctx: RunContext[str]) -> str:
 
 ### 2. Create an Agent with Skills
 
+For pydantic-ai >= 1.71, use `SkillsCapability` as the default integration path.
+
+Create `agent.py`:
+
+```python
+from pydantic_ai import Agent
+from pydantic_ai_skills import SkillsCapability
+
+
+agent = Agent(
+    model='openai:gpt-5.2',
+    instructions='You are a helpful assistant.',
+    capabilities=[SkillsCapability(directories=['./skills'])],
+)
+
+result = agent.run_sync('How do I create a Pydantic AI agent with tools?')
+print(result.output)
+```
+
+### Alternative: Direct SkillsToolset (advanced/manual path)
+
+Use direct `SkillsToolset` integration when you need explicit manual control over instruction injection or are on an older pydantic-ai version.
+
 Create `agent.py`:
 
 ```python
@@ -123,11 +146,11 @@ The agent will use the pydanticai-docs skill to answer your question!
 
 ## How It Works
 
-When you initialize the skills toolset:
+When you initialize skills support (via `SkillsCapability` or `SkillsToolset`):
 
 1. **Discovery**: Scans `./skills/` for skill directories with `SKILL.md` files
 2. **Registration**: Registers four tools (`list_skills`, `load_skill`, `read_skill_resource`, `run_skill_script`)
-3. **Instructions**: Skills overview is added to the agent via `@agent.instructions`
+3. **Instructions**: Skills overview is added to the agent automatically with `SkillsCapability`, or manually via `@agent.instructions` when using `SkillsToolset` directly
 4. **Execution**: Agent discovers, loads, and uses skills as needed
 
 ## Add a Script-Based Skill

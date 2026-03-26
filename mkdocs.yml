@@ -23,6 +23,7 @@ nav:
   - Security & Deployment: security.md
   - API Reference:
       - api/toolset.md
+      - api/capability.md
       - api/types.md
       - api/registries.md
       - api/exceptions.md

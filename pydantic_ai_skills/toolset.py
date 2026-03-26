@@ -45,9 +45,10 @@ Each skill provides specialized instructions, resources, and scripts for specifi
 </available_skills>
 
 When a task falls within a skill's domain:
-1. Use `load_skill` to read the complete skill instructions
-2. Follow the skill's guidance to complete the task
-3. Use any additional skill resources and scripts as needed
+1. Use `load_skill` first to read the complete skill instructions for that skill
+2. Only after `load_skill` succeeds, follow the skill's guidance to complete the task
+3. Call `read_skill_resource` or `run_skill_script` only for skills already loaded with `load_skill`
+4. Never guess resource or script names; use the exact names listed by `load_skill`
 
 Use progressive disclosure: load only what you need, when you need it."""
 
@@ -516,6 +517,7 @@ class SkillsToolset(FunctionToolset[Any]):
 
             Important:
             - Read the entire instructions section before taking action
+            - Call this before using `read_skill_resource` or `run_skill_script` for this skill
             - Resource and script names are authoritative - use exact names from the output
             - Do NOT infer or guess resource/script names
             - Check parameter schemas if resources or scripts require arguments
@@ -584,6 +586,7 @@ class SkillsToolset(FunctionToolset[Any]):
                 The resource content as a string.
 
             Important:
+            - Always call `load_skill(skill_name)` first in this run
             - Get resource names from the skill's documentation first
             - Use exact resource names - do not modify or guess
             - Check if the resource requires arguments (check its schema)
@@ -639,6 +642,7 @@ class SkillsToolset(FunctionToolset[Any]):
                 Script execution output including stdout and stderr.
 
             Important:
+            - Always call `load_skill(skill_name)` first in this run
             - Get script names from the skill's documentation first
             - Use exact script names - do not modify or guess
             - Check the script's parameter schema for required arguments
