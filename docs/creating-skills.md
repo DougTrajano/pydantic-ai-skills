@@ -137,7 +137,7 @@ my-skill/
 
 Scripts should:
 
-- Accept command-line arguments via `sys.argv`
+- Accept named command-line arguments (using `argparse` or similar)
 - Print output to stdout
 - Exit with code 0 on success, non-zero on error
 - Handle errors gracefully
@@ -200,12 +200,12 @@ When agents call scripts via `run_skill_script()`, arguments are converted to co
 # Agent calls:
 run_skill_script(
     skill_name='data-analyzer',
-    script_name='analyze',
+    script_name='scripts/analyze.py',
     args={'query': 'SELECT * FROM users', 'limit': '100', 'format': 'json'}
 )
 
 # Your script receives command-line arguments:
-# python analyze.py --query "SELECT * FROM users" --limit 100 --format json
+# <script> --query "SELECT * FROM users" --limit 100 --format json
 ```
 
 **Argument Mapping Rules:**

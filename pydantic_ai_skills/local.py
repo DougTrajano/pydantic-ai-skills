@@ -3,12 +3,12 @@
 This module provides:
 - FileBasedSkillResource: File-based skill resource implementation
 - FileBasedSkillScript: File-based skill script implementation
-- LocalSkillScriptExecutor: Execute scripts using local Python subprocess
+- LocalSkillScriptExecutor: Execute scripts using local subprocesses
 - CallableSkillScriptExecutor: Wrap a callable in the executor interface
 - Factory functions for creating file-based resources and scripts
 
 Implementations:
-- [`LocalSkillScriptExecutor`][pydantic_ai_skills.LocalSkillScriptExecutor]: Execute scripts using local Python subprocess
+- [`LocalSkillScriptExecutor`][pydantic_ai_skills.LocalSkillScriptExecutor]: Execute scripts using local subprocesses
 - [`CallableSkillScriptExecutor`][pydantic_ai_skills.CallableSkillScriptExecutor]: Wrap a callable in the executor interface
 - [`FileBasedSkillResource`][pydantic_ai_skills.FileBasedSkillResource]: File-based resource with disk loading
 - [`FileBasedSkillScript`][pydantic_ai_skills.FileBasedSkillScript]: File-based script with subprocess execution
@@ -83,10 +83,12 @@ class FileBasedSkillResource(SkillResource):
 
 
 class LocalSkillScriptExecutor:
-    """Execute skill scripts using local Python interpreter via subprocess.
+    """Execute skill scripts using local subprocesses.
 
     Executes file-based scripts as subprocesses with args passed as command-line named arguments.
     Dictionary keys are used exactly as provided (e.g., {"max-papers": 5} becomes --max-papers 5).
+    Python scripts are run with the configured Python interpreter. Common shell scripts
+    are run with their matching shell interpreter. Other files are executed directly.
     Uses anyio.run_process for async-compatible subprocess execution.
 
     Note:
@@ -95,6 +97,16 @@ class LocalSkillScriptExecutor:
     Attributes:
         timeout: Execution timeout in seconds.
     """
+
+    _SHELL_INTERPRETERS: dict[str, list[str]] = {
+        '.sh': ['bash'],
+        '.bash': ['bash'],
+        '.zsh': ['zsh'],
+        '.fish': ['fish'],
+        '.ps1': ['pwsh', '-File'],
+        '.bat': ['cmd', '/c'],
+        '.cmd': ['cmd', '/c'],
+    }
 
     def __init__(
         self,
@@ -109,6 +121,15 @@ class LocalSkillScriptExecutor:
         """
         self._python_executable = str(python_executable) if python_executable else sys.executable
         self.timeout = timeout
+
+    def _build_command(self, script_path: Path) -> list[str]:
+        """Build subprocess command based on script file type."""
+        suffix = script_path.suffix.lower()
+        if suffix == '.py':
+            return [self._python_executable, str(script_path)]
+        if suffix in self._SHELL_INTERPRETERS:
+            return [*self._SHELL_INTERPRETERS[suffix], str(script_path)]
+        return [str(script_path)]
 
     async def run(
         self,
@@ -133,7 +154,7 @@ class LocalSkillScriptExecutor:
             raise SkillScriptExecutionError(f"Script '{script.name}' has no URI for subprocess execution")
 
         script_path = Path(script.uri)
-        cmd = [self._python_executable, str(script_path)]
+        cmd = self._build_command(script_path)
 
         if args:
             for key, value in args.items():

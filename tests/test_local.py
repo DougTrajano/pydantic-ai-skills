@@ -213,6 +213,27 @@ print(f"CWD: {os.getcwd()}")
 
 
 @pytest.mark.asyncio
+async def test_local_script_executor_bash_script(tmp_path: Path) -> None:
+    """Test LocalSkillScriptExecutor can run bash scripts."""
+    script_file = tmp_path / 'test_script.sh'
+    script_file.write_text("""#!/usr/bin/env bash
+echo "Args: $*"
+""")
+
+    executor = LocalSkillScriptExecutor()
+    script = FileBasedSkillScript(
+        name='test_script.sh',
+        uri=str(script_file),
+    )
+
+    result = await executor.run(script, args={'query': 'test', 'limit': 3})
+
+    assert 'Args:' in result
+    assert '--query test' in result
+    assert '--limit 3' in result
+
+
+@pytest.mark.asyncio
 async def test_local_script_executor_invalid_script(tmp_path: Path) -> None:
     """Test LocalSkillScriptExecutor with invalid Python syntax."""
     script_file = tmp_path / 'invalid.py'

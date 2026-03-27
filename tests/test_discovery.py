@@ -112,6 +112,38 @@ Use the search script.
     assert script_names == {'scripts/search.py', 'scripts/process.py'}
 
 
+def test_discover_skills_with_shell_and_executable_scripts(tmp_path: Path) -> None:
+    """Test discovering shell scripts and executable files."""
+    skill_dir = tmp_path / 'test-skill'
+    skill_dir.mkdir()
+
+    (skill_dir / 'SKILL.md').write_text("""---
+name: test-skill
+description: Skill with mixed script types
+---
+
+Use mixed scripts.
+""")
+
+    scripts_dir = skill_dir / 'scripts'
+    scripts_dir.mkdir()
+
+    shell_script = scripts_dir / 'deploy.sh'
+    shell_script.write_text('#!/usr/bin/env bash\necho "deploy"\n')
+
+    executable_script = scripts_dir / 'runner'
+    executable_script.write_text('#!/usr/bin/env bash\necho "runner"\n')
+    executable_script.chmod(0o755)
+
+    skills = discover_skills(tmp_path, validate=True)
+
+    assert len(skills) == 1
+    assert skills[0].scripts is not None
+    script_names = {s.name for s in skills[0].scripts}
+    assert 'scripts/deploy.sh' in script_names
+    assert 'scripts/runner' in script_names
+
+
 def test_discover_skills_nested_directories(tmp_path: Path) -> None:
     """Test discovering skills in nested directories."""
     nested_dir = tmp_path / 'category' / 'subcategory' / 'test-skill'

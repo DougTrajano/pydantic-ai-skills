@@ -141,9 +141,10 @@ my-skill/
 ├── SKILL.md # Required: Main instructions and metadata
 ├── FORMS.md # Optional: Form-filling guides
 ├── REFERENCE.md # Optional: Detailed API reference
-├── scripts/ # Optional: Python scripts
+├── scripts/ # Optional: executable scripts
 │ ├── script1.py
-│ └── script2.py
+│ ├── script2.sh
+│ └── script3
 └── resources/ # Optional: Additional files
 ├── templates/
 └── data.json
