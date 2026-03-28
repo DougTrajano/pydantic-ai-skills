@@ -143,12 +143,13 @@ my-skill/
 ├── REFERENCE.md # Optional: Detailed API reference
 ├── scripts/ # Optional: executable scripts
 │ ├── script1.py
-│ ├── script2.sh
-│ └── script3
+│ └── script2.sh
 └── resources/ # Optional: Additional files
 ├── templates/
 └── data.json
 ```
+
+> Supported filesystem-based scripts include Python (`.py`), shell scripts (`.sh`, `.bash`, `.zsh`, `.fish`), and Windows batch files (`.bat`, `.cmd`). The `run_skill_script` tool can execute these scripts with appropriate named command-line arguments.
 
 ### Minimal SKILL.md
 

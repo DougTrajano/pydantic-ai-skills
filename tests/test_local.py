@@ -1,5 +1,7 @@
 """Tests for file-based resources and script execution (local.py)."""
 
+import shutil
+import sys
 from pathlib import Path
 
 import pytest
@@ -215,6 +217,9 @@ print(f"CWD: {os.getcwd()}")
 @pytest.mark.asyncio
 async def test_local_script_executor_bash_timeout(tmp_path: Path) -> None:
     """Test LocalSkillScriptExecutor timeout for bash scripts that spawn child processes."""
+    if sys.platform == 'win32' or shutil.which('bash') is None:
+        pytest.skip('bash is required for this test')
+
     script_file = tmp_path / 'slow_script.sh'
     script_file.write_text("""#!/usr/bin/env bash
 sleep 10 &
@@ -235,6 +240,9 @@ echo "Done"
 @pytest.mark.asyncio
 async def test_local_script_executor_bash_script(tmp_path: Path) -> None:
     """Test LocalSkillScriptExecutor can run bash scripts."""
+    if sys.platform == 'win32' or shutil.which('bash') is None:
+        pytest.skip('bash is required for this test')
+
     script_file = tmp_path / 'test_script.sh'
     script_file.write_text("""#!/usr/bin/env bash
 echo "Args: $*"

@@ -137,7 +137,7 @@ my-skill/
 
 Scripts should:
 
-- Accept named command-line arguments (using `argparse` or similar)
+- Accept named command-line arguments (for example, using `argparse` in Python or an equivalent option parser in your runtime)
 - Print output to stdout
 - Exit with code 0 on success, non-zero on error
 - Handle errors gracefully

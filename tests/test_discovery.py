@@ -1,6 +1,9 @@
 """Tests for skill discovery."""
 
+import sys
 from pathlib import Path
+
+import pytest
 
 from pydantic_ai_skills.directory import discover_skills
 
@@ -114,6 +117,9 @@ Use the search script.
 
 def test_discover_skills_with_shell_and_executable_scripts(tmp_path: Path) -> None:
     """Test discovering shell scripts and executable files."""
+    if sys.platform == 'win32':
+        pytest.skip('Executable-bit semantics differ on Windows')
+
     skill_dir = tmp_path / 'test-skill'
     skill_dir.mkdir()
 

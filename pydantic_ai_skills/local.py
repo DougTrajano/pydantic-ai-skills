@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import signal
 import subprocess as _subprocess
 import sys
@@ -103,11 +104,10 @@ class LocalSkillScriptExecutor:
     """
 
     _SHELL_INTERPRETERS: dict[str, list[str]] = {
-        '.sh': ['bash'],
+        '.sh': ['sh'],
         '.bash': ['bash'],
         '.zsh': ['zsh'],
         '.fish': ['fish'],
-        '.ps1': ['pwsh', '-File'],
         '.bat': ['cmd', '/c'],
         '.cmd': ['cmd', '/c'],
     }
@@ -131,6 +131,11 @@ class LocalSkillScriptExecutor:
         suffix = script_path.suffix.lower()
         if suffix == '.py':
             return [self._python_executable, str(script_path)]
+        if suffix == '.ps1':
+            powershell = shutil.which('pwsh') or shutil.which('powershell')
+            if powershell:
+                return [powershell, '-File', str(script_path)]
+            return ['pwsh', '-File', str(script_path)]
         if suffix in self._SHELL_INTERPRETERS:
             return [*self._SHELL_INTERPRETERS[suffix], str(script_path)]
         return [str(script_path)]
