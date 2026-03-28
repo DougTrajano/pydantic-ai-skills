@@ -213,6 +213,26 @@ print(f"CWD: {os.getcwd()}")
 
 
 @pytest.mark.asyncio
+async def test_local_script_executor_bash_timeout(tmp_path: Path) -> None:
+    """Test LocalSkillScriptExecutor timeout for bash scripts that spawn child processes."""
+    script_file = tmp_path / 'slow_script.sh'
+    script_file.write_text("""#!/usr/bin/env bash
+sleep 10 &
+wait
+echo "Done"
+""")
+
+    executor = LocalSkillScriptExecutor(timeout=1)
+    script = FileBasedSkillScript(
+        name='slow_script.sh',
+        uri=str(script_file),
+    )
+
+    with pytest.raises(SkillScriptExecutionError, match='timed out'):
+        await executor.run(script)
+
+
+@pytest.mark.asyncio
 async def test_local_script_executor_bash_script(tmp_path: Path) -> None:
     """Test LocalSkillScriptExecutor can run bash scripts."""
     script_file = tmp_path / 'test_script.sh'

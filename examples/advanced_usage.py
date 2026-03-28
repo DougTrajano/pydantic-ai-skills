@@ -24,10 +24,14 @@ logfire.instrument_pydantic_ai()
 script_dir = Path(__file__).parent
 skills_toolset = SkillsToolset(directories=[script_dir / 'skills', script_dir / 'anthropic-skills'])
 
+# Create tmp directory for MCP filesystem server
+tmp_dir = script_dir / 'tmp'
+tmp_dir.mkdir(exist_ok=True)
+
 # Initialize MCP filesystem server
 fs_toolset = MCPServerStdio(
     'npx',
-    args=['@modelcontextprotocol/server-filesystem', str(script_dir / 'tmp')],
+    args=['@modelcontextprotocol/server-filesystem', str(tmp_dir)],
     timeout=30,
 )
 

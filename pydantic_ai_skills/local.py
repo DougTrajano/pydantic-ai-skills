@@ -17,6 +17,9 @@ Implementations:
 from __future__ import annotations
 
 import json
+import os
+import signal
+import subprocess as _subprocess
 import sys
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -24,6 +27,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import anyio
+import anyio.abc
 import yaml
 from pydantic_ai._utils import is_async_callable, run_in_executor
 
@@ -131,6 +135,54 @@ class LocalSkillScriptExecutor:
             return [*self._SHELL_INTERPRETERS[suffix], str(script_path)]
         return [str(script_path)]
 
+    @staticmethod
+    def _build_args(cmd: list[str], args: dict[str, Any]) -> None:
+        """Append named arguments to cmd in-place."""
+        for key, value in args.items():
+            if isinstance(value, bool):
+                if value:
+                    cmd.append(f'--{key}')
+            elif isinstance(value, list):
+                for item in cast(list[Any], value):
+                    cmd.append(f'--{key}')
+                    cmd.append(str(item))
+            elif value is not None:
+                cmd.append(f'--{key}')
+                cmd.append(str(value))
+
+    @staticmethod
+    def _format_output(stdout_chunks: list[bytes], stderr_chunks: list[bytes], return_code: int) -> str:
+        """Decode and combine stdout, stderr, and exit code into a single string."""
+        output = b''.join(stdout_chunks).decode('utf-8', errors='replace')
+        stderr_output = b''.join(stderr_chunks).decode('utf-8', errors='replace')
+        if stderr_output:
+            output += f'\n\nStderr:\n{stderr_output}'
+        if return_code != 0:
+            output += f'\n\nScript exited with code {return_code}'
+        return output.strip() or '(no output)'
+
+    async def _collect_output(
+        self,
+        process: anyio.abc.Process,
+        stdout_chunks: list[bytes],
+        stderr_chunks: list[bytes],
+    ) -> int:
+        """Read stdout/stderr concurrently, then wait for the process to exit."""
+        async with anyio.create_task_group() as io_tg:
+
+            async def _read_stdout() -> None:
+                async for chunk in process.stdout:  # type: ignore[union-attr]
+                    stdout_chunks.append(chunk)
+
+            async def _read_stderr() -> None:
+                async for chunk in process.stderr:  # type: ignore[union-attr]
+                    stderr_chunks.append(chunk)
+
+            io_tg.start_soon(_read_stdout)
+            io_tg.start_soon(_read_stderr)
+
+        return await process.wait()
+
     async def run(
         self,
         script: SkillScript,
@@ -155,48 +207,67 @@ class LocalSkillScriptExecutor:
 
         script_path = Path(script.uri)
         cmd = self._build_command(script_path)
-
         if args:
-            for key, value in args.items():
-                if isinstance(value, bool):
-                    if value:
-                        cmd.append(f'--{key}')
-                elif isinstance(value, list):
-                    for item in cast(list[Any], value):
-                        cmd.append(f'--{key}')
-                        cmd.append(str(item))
-                elif value is not None:
-                    cmd.append(f'--{key}')
-                    cmd.append(str(value))
+            self._build_args(cmd, args)
 
-        stdin_data: bytes | None = None
         cwd = str(script_path.parent)
+        use_process_group = sys.platform != 'win32'
 
         try:
-            result = None
-            with anyio.move_on_after(self.timeout) as scope:
-                result = await anyio.run_process(
-                    cmd,
-                    check=False,
-                    cwd=cwd,
-                    input=stdin_data,
-                )
-
-            if scope.cancelled_caught or result is None:
-                raise SkillScriptExecutionError(f"Script '{script.name}' timed out after {self.timeout} seconds")
-
-            output = result.stdout.decode('utf-8', errors='replace')
-            if result.stderr:
-                stderr = result.stderr.decode('utf-8', errors='replace')
-                output += f'\n\nStderr:\n{stderr}'
-
-            if result.returncode != 0:
-                output += f'\n\nScript exited with code {result.returncode}'
-
-            return output.strip() or '(no output)'
-
+            process = await anyio.open_process(
+                cmd,
+                stdin=_subprocess.DEVNULL,
+                stdout=_subprocess.PIPE,
+                stderr=_subprocess.PIPE,
+                cwd=cwd,
+                start_new_session=use_process_group,
+            )
         except OSError as e:
             raise SkillScriptExecutionError(f"Failed to execute script '{script.name}': {e}") from e
+
+        stdout_chunks: list[bytes] = []
+        stderr_chunks: list[bytes] = []
+        return_code = 0
+        timed_out = False
+
+        def _kill() -> None:
+            nonlocal timed_out
+            timed_out = True
+            if use_process_group:
+                try:
+                    os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                    return
+                except OSError:
+                    pass
+            try:
+                process.kill()
+            except Exception:
+                pass
+
+        try:
+            async with anyio.create_task_group() as tg:
+
+                async def _kill_after_timeout() -> None:
+                    await anyio.sleep(self.timeout)
+                    _kill()
+
+                async def _run() -> None:
+                    nonlocal return_code
+                    return_code = await self._collect_output(process, stdout_chunks, stderr_chunks)
+                    tg.cancel_scope.cancel()
+
+                tg.start_soon(_kill_after_timeout)
+                tg.start_soon(_run)
+        finally:
+            try:
+                await process.aclose()
+            except Exception:
+                pass
+
+        if timed_out:
+            raise SkillScriptExecutionError(f"Script '{script.name}' timed out after {self.timeout} seconds")
+
+        return self._format_output(stdout_chunks, stderr_chunks, return_code)
 
 
 class CallableSkillScriptExecutor:
