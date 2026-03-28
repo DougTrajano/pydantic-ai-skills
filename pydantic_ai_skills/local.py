@@ -235,13 +235,16 @@ class LocalSkillScriptExecutor:
             timed_out = True
             if use_process_group:
                 try:
-                    os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                    pgid = os.getpgid(process.pid)
+                    os.killpg(pgid, signal.SIGKILL)
                     return
-                except OSError:
+                except (OSError, ProcessLookupError):
+                    # Process no longer exists or group doesn't exist
                     pass
             try:
                 process.kill()
-            except Exception:
+            except (OSError, ProcessLookupError):
+                # Process already terminated
                 pass
 
         try:

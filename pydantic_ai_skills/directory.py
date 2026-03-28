@@ -241,18 +241,17 @@ def _discover_scripts(
     """
     scripts: list[SkillScript] = []
     skill_folder_resolved = skill_folder.resolve()
-    supported_script_extensions = {'.py', '.sh', '.bash', '.zsh', '.fish', '.ps1', '.bat', '.cmd'}
-    ignored_script_names = {'__init__.py', 'SKILL.md'}
+    supported_extensions = {'.py', '.sh', '.bash', '.zsh', '.fish', '.ps1', '.bat', '.cmd'}
+    ignored_names = {'__init__.py', 'SKILL.md'}
 
     def _is_script_candidate(script_file: Path) -> bool:
-        if not script_file.is_file() or script_file.name in ignored_script_names:
+        """Check if a file should be treated as a script."""
+        if script_file.name in ignored_names or not script_file.is_file():
             return False
-        if script_file.suffix.lower() in supported_script_extensions:
-            return True
-        return os.access(script_file, os.X_OK)
+        return script_file.suffix.lower() in supported_extensions or os.access(script_file, os.X_OK)
 
-    def _add_script_if_safe(script_file: Path) -> None:
-        """Add script if its resolved path stays within skill_folder."""
+    def _try_add_script(script_file: Path) -> None:
+        """Add script if resolved path stays within skill_folder."""
         resolved_path = script_file.resolve()
         try:
             resolved_path.relative_to(skill_folder_resolved)
@@ -264,25 +263,26 @@ def _discover_scripts(
             )
             return
 
-        rel_path = script_file.relative_to(skill_folder)
         scripts.append(
             create_file_based_script(
-                name=rel_path.as_posix(),
+                name=script_file.relative_to(skill_folder).as_posix(),
                 uri=str(resolved_path),
                 skill_name=skill_name,
                 executor=executor,
             )
         )
 
-    for script_file in skill_folder.iterdir():
-        if _is_script_candidate(script_file):
-            _add_script_if_safe(script_file)
-
+    # Collect directories to scan (root + scripts/ subdirectory if present)
+    dirs_to_scan = [skill_folder]
     scripts_dir = skill_folder / 'scripts'
-    if scripts_dir.exists() and scripts_dir.is_dir():
-        for script_file in scripts_dir.iterdir():
+    if scripts_dir.is_dir():
+        dirs_to_scan.append(scripts_dir)
+
+    # Scan all directories for eligible scripts
+    for directory in dirs_to_scan:
+        for script_file in directory.iterdir():
             if _is_script_candidate(script_file):
-                _add_script_if_safe(script_file)
+                _try_add_script(script_file)
 
     return scripts
 
