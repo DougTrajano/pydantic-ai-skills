@@ -94,7 +94,8 @@ class LocalSkillScriptExecutor:
     Dictionary keys are used exactly as provided (e.g., {"max-papers": 5} becomes --max-papers 5).
     Python scripts are run with the configured Python interpreter. Common shell scripts
     are run with their matching shell interpreter. Other files are executed directly.
-    Uses anyio.run_process for async-compatible subprocess execution.
+    Uses anyio.open_process with custom output collection and timeout handling for
+    async-compatible subprocess execution.
 
     Note:
         All scripts must accept named arguments. Positional arguments are not supported.
