@@ -216,6 +216,22 @@ class LocalSkillScriptExecutor:
             output += f'\n\nScript exited with code {return_code}'
         return output.strip() or '(no output)'
 
+    async def _drain_stream(self, stream: anyio.abc.ByteReceiveStream | None, chunks: list[bytes]) -> None:
+        """Drain a process output stream into chunks until EOF."""
+        if stream is None:
+            return
+
+        while True:
+            try:
+                chunk = await stream.receive()
+            except anyio.EndOfStream:
+                break
+
+            if chunk == b'':
+                break
+
+            chunks.append(chunk)
+
     async def _collect_output(
         self,
         process: anyio.abc.Process,
@@ -224,35 +240,8 @@ class LocalSkillScriptExecutor:
     ) -> int:
         """Read stdout/stderr concurrently, then wait for the process to exit."""
         async with anyio.create_task_group() as io_tg:
-
-            async def _read_stdout() -> None:
-                stream = process.stdout
-                if stream is None:
-                    return
-                while True:
-                    try:
-                        chunk = await stream.receive()
-                    except anyio.EndOfStream:
-                        break
-                    if chunk == b'':
-                        break
-                    stdout_chunks.append(chunk)
-
-            async def _read_stderr() -> None:
-                stream = process.stderr
-                if stream is None:
-                    return
-                while True:
-                    try:
-                        chunk = await stream.receive()
-                    except anyio.EndOfStream:
-                        break
-                    if chunk == b'':
-                        break
-                    stderr_chunks.append(chunk)
-
-            io_tg.start_soon(_read_stdout)
-            io_tg.start_soon(_read_stderr)
+            io_tg.start_soon(self._drain_stream, process.stdout, stdout_chunks)
+            io_tg.start_soon(self._drain_stream, process.stderr, stderr_chunks)
 
         return await process.wait()
 

@@ -29,6 +29,52 @@ from .local import (
 )
 from .types import Skill, SkillResource, SkillScript
 
+_SUPPORTED_SCRIPT_EXTENSIONS = {'.py', '.sh', '.bash', '.zsh', '.fish', '.ps1', '.bat', '.cmd'}
+_WINDOWS_EXECUTABLE_EXTENSIONS = {'.exe', '.bat', '.cmd', '.com', '.ps1'}
+_IGNORED_SCRIPT_NAMES = {'__init__.py', 'SKILL.md'}
+
+
+def _is_script_candidate(script_file: Path) -> bool:
+    """Check if a file should be treated as a script."""
+    if script_file.name in _IGNORED_SCRIPT_NAMES or not script_file.is_file():
+        return False
+
+    suffix = script_file.suffix.lower()
+    if suffix in _SUPPORTED_SCRIPT_EXTENSIONS:
+        return True
+
+    if os.name == 'nt':
+        return suffix in _WINDOWS_EXECUTABLE_EXTENSIONS
+
+    try:
+        return bool(script_file.stat().st_mode & 0o111)
+    except OSError:
+        return False
+
+
+def _iter_script_directories(skill_folder: Path) -> list[Path]:
+    """Return directories to scan for scripts."""
+    scripts_dir = skill_folder / 'scripts'
+    if scripts_dir.is_dir():
+        return [skill_folder, scripts_dir]
+    return [skill_folder]
+
+
+def _resolve_script_path(script_file: Path, skill_folder_resolved: Path) -> Path | None:
+    """Resolve script path and reject symlink escapes."""
+    resolved_path = script_file.resolve()
+    try:
+        resolved_path.relative_to(skill_folder_resolved)
+    except ValueError:
+        warnings.warn(
+            f"Script '{script_file}' resolves outside skill directory (symlink escape detected). Skipping.",
+            UserWarning,
+            stacklevel=4,
+        )
+        return None
+    return resolved_path
+
+
 __all__ = ['SkillsDirectory', 'discover_skills', 'parse_skill_md', 'validate_skill_metadata']
 
 # agentskills.io naming convention: lowercase letters, numbers, and hyphens only (no consecutive hyphens)
@@ -241,59 +287,24 @@ def _discover_scripts(
     """
     scripts: list[SkillScript] = []
     skill_folder_resolved = skill_folder.resolve()
-    supported_extensions = {'.py', '.sh', '.bash', '.zsh', '.fish', '.ps1', '.bat', '.cmd'}
-    windows_executable_extensions = {'.exe', '.bat', '.cmd', '.com', '.ps1'}
-    ignored_names = {'__init__.py', 'SKILL.md'}
 
-    def _is_script_candidate(script_file: Path) -> bool:
-        """Check if a file should be treated as a script."""
-        if script_file.name in ignored_names or not script_file.is_file():
-            return False
-
-        suffix = script_file.suffix.lower()
-        if suffix in supported_extensions:
-            return True
-
-        if os.name == 'nt':
-            return suffix in windows_executable_extensions
-
-        try:
-            return bool(script_file.stat().st_mode & 0o111)
-        except OSError:
-            return False
-    def _try_add_script(script_file: Path) -> None:
-        """Add script if resolved path stays within skill_folder."""
-        resolved_path = script_file.resolve()
-        try:
-            resolved_path.relative_to(skill_folder_resolved)
-        except ValueError:
-            warnings.warn(
-                f"Script '{script_file}' resolves outside skill directory (symlink escape detected). Skipping.",
-                UserWarning,
-                stacklevel=3,
-            )
-            return
-
-        scripts.append(
-            create_file_based_script(
-                name=script_file.relative_to(skill_folder).as_posix(),
-                uri=str(resolved_path),
-                skill_name=skill_name,
-                executor=executor,
-            )
-        )
-
-    # Collect directories to scan (root + scripts/ subdirectory if present)
-    dirs_to_scan = [skill_folder]
-    scripts_dir = skill_folder / 'scripts'
-    if scripts_dir.is_dir():
-        dirs_to_scan.append(scripts_dir)
-
-    # Scan all directories for eligible scripts
-    for directory in dirs_to_scan:
+    for directory in _iter_script_directories(skill_folder):
         for script_file in directory.iterdir():
-            if _is_script_candidate(script_file):
-                _try_add_script(script_file)
+            if not _is_script_candidate(script_file):
+                continue
+
+            resolved_path = _resolve_script_path(script_file, skill_folder_resolved)
+            if resolved_path is None:
+                continue
+
+            scripts.append(
+                create_file_based_script(
+                    name=script_file.relative_to(skill_folder).as_posix(),
+                    uri=str(resolved_path),
+                    skill_name=skill_name,
+                    executor=executor,
+                )
+            )
 
     return scripts
 
