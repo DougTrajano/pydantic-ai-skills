@@ -230,7 +230,10 @@ class LocalSkillScriptExecutor:
                 if stream is None:
                     return
                 while True:
-                    chunk = await stream.receive()
+                    try:
+                        chunk = await stream.receive()
+                    except anyio.EndOfStream:
+                        break
                     if chunk == b'':
                         break
                     stdout_chunks.append(chunk)
@@ -240,7 +243,10 @@ class LocalSkillScriptExecutor:
                 if stream is None:
                     return
                 while True:
-                    chunk = await stream.receive()
+                    try:
+                        chunk = await stream.receive()
+                    except anyio.EndOfStream:
+                        break
                     if chunk == b'':
                         break
                     stderr_chunks.append(chunk)
