@@ -149,7 +149,7 @@ my-skill/
 └── data.json
 ```
 
-> Supported filesystem-based scripts include Python (`.py`), shell scripts (`.sh`, `.bash`, `.zsh`, `.fish`), and Windows batch files (`.bat`, `.cmd`). The `run_skill_script` tool can execute these scripts with appropriate named command-line arguments.
+> Supported filesystem-based scripts include Python (`.py`), shell scripts (`.sh`, `.bash`, `.zsh`, `.fish`), and Windows batch files (`.bat`, `.cmd`). The `run_skill_script` tool can execute these scripts, accepting named command-line arguments via a dict-style mapping (recommended) while also supporting legacy list-style positional arguments for backward compatibility.
 
 ### Minimal SKILL.md
 
