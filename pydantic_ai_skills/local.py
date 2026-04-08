@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
 import signal
 import subprocess as _subprocess
@@ -92,8 +93,8 @@ class LocalSkillScriptExecutor:
 
     Executes file-based scripts as subprocesses with args passed as command-line named arguments.
     Dictionary keys are used exactly as provided (e.g., {"max-papers": 5} becomes --max-papers 5).
-    Python scripts are run with the configured Python interpreter. Common shell scripts
-    are run with their matching shell interpreter. Other files are executed directly.
+    A shebang line is used first when present and resolvable, then suffix-based fallback
+    is used for compatibility. Other files are executed directly.
     Uses anyio.open_process with custom output collection and timeout handling for
     async-compatible subprocess execution.
 
@@ -127,8 +128,57 @@ class LocalSkillScriptExecutor:
         self._python_executable = str(python_executable) if python_executable else sys.executable
         self.timeout = timeout
 
+    @staticmethod
+    def _resolve_interpreter(interpreter: str) -> str | None:
+        """Resolve a shebang interpreter to an executable path."""
+        if Path(interpreter).is_absolute():
+            path = Path(interpreter)
+            return str(path) if path.exists() else None
+        return shutil.which(interpreter)
+
+    def _extract_shebang_command(self, script_path: Path) -> list[str] | None:
+        """Return an interpreter command from shebang if present and resolvable."""
+        try:
+            with script_path.open('rb') as handle:
+                first_line = handle.readline()
+        except OSError:
+            return None
+
+        if not first_line.startswith(b'#!'):
+            return None
+
+        shebang = first_line[2:].decode('utf-8', errors='ignore').strip()
+        if not shebang:
+            return None
+
+        parts = shlex.split(shebang)
+        if not parts:
+            return None
+
+        if Path(parts[0]).name == 'env':
+            idx = 1
+            while idx < len(parts) and parts[idx].startswith('-'):
+                idx += 1
+            if idx >= len(parts):
+                return None
+            interpreter = parts[idx]
+            interpreter_args = parts[idx + 1 :]
+        else:
+            interpreter = parts[0]
+            interpreter_args = parts[1:]
+
+        resolved = self._resolve_interpreter(interpreter)
+        if not resolved:
+            return None
+
+        return [resolved, *interpreter_args]
+
     def _build_command(self, script_path: Path) -> list[str]:
-        """Build subprocess command based on script file type."""
+        """Build subprocess command using shebang-first dispatch with compatibility fallback."""
+        shebang_command = self._extract_shebang_command(script_path)
+        if shebang_command:
+            return [*shebang_command, str(script_path)]
+
         suffix = script_path.suffix.lower()
         if suffix == '.py':
             return [self._python_executable, str(script_path)]
@@ -136,7 +186,6 @@ class LocalSkillScriptExecutor:
             powershell = shutil.which('pwsh') or shutil.which('powershell')
             if powershell:
                 return [powershell, '-File', str(script_path)]
-            return ['pwsh', '-File', str(script_path)]
         if suffix in self._SHELL_INTERPRETERS:
             return [*self._SHELL_INTERPRETERS[suffix], str(script_path)]
         return [str(script_path)]
@@ -189,6 +238,78 @@ class LocalSkillScriptExecutor:
 
         return await process.wait()
 
+    @staticmethod
+    def _kill_process(process: anyio.abc.Process, use_process_group: bool) -> None:
+        """Terminate a process and its process group when possible."""
+        if use_process_group:
+            try:
+                # Validate PID before calling os.getpgid
+                if process.pid and process.pid > 0:
+                    pgid = os.getpgid(process.pid)
+                    if pgid > 0:
+                        os.killpg(pgid, signal.SIGKILL)
+                        return
+            except (OSError, ValueError):
+                # Process no longer exists or group doesn't exist
+                pass
+        try:
+            process.kill()
+        except OSError:
+            # Process already terminated
+            pass
+
+    async def _run_with_timeout(
+        self,
+        process: anyio.abc.Process,
+        stdout_chunks: list[bytes],
+        stderr_chunks: list[bytes],
+        use_process_group: bool,
+    ) -> tuple[int, bool]:
+        """Collect process output while enforcing timeout."""
+        return_code = 0
+        timed_out = False
+
+        def _kill() -> None:
+            nonlocal timed_out
+            timed_out = True
+            self._kill_process(process, use_process_group)
+
+        async with anyio.create_task_group() as tg:
+
+            async def _kill_after_timeout() -> None:
+                await anyio.sleep(self.timeout)
+                _kill()
+
+            async def _run() -> None:
+                nonlocal return_code
+                return_code = await self._collect_output(process, stdout_chunks, stderr_chunks)
+                tg.cancel_scope.cancel()
+
+            tg.start_soon(_kill_after_timeout)
+            tg.start_soon(_run)
+
+        return return_code, timed_out
+
+    async def _start_process(
+        self,
+        cmd: list[str],
+        cwd: str,
+        use_process_group: bool,
+        script_name: str,
+    ) -> anyio.abc.Process:
+        """Start script subprocess and normalize startup errors."""
+        try:
+            return await anyio.open_process(
+                cmd,
+                stdin=_subprocess.DEVNULL,
+                stdout=_subprocess.PIPE,
+                stderr=_subprocess.PIPE,
+                cwd=cwd,
+                start_new_session=use_process_group,
+            )
+        except OSError as e:
+            raise SkillScriptExecutionError(f"Failed to execute script '{script_name}': {e}") from e
+
     async def run(
         self,
         script: SkillScript,
@@ -218,62 +339,24 @@ class LocalSkillScriptExecutor:
 
         cwd = str(script_path.parent)
         use_process_group = sys.platform != 'win32'
-
-        try:
-            process = await anyio.open_process(
-                cmd,
-                stdin=_subprocess.DEVNULL,
-                stdout=_subprocess.PIPE,
-                stderr=_subprocess.PIPE,
-                cwd=cwd,
-                start_new_session=use_process_group,
-            )
-        except OSError as e:
-            raise SkillScriptExecutionError(f"Failed to execute script '{script.name}': {e}") from e
+        process = await self._start_process(cmd, cwd, use_process_group, script.name)
 
         stdout_chunks: list[bytes] = []
         stderr_chunks: list[bytes] = []
         return_code = 0
         timed_out = False
 
-        def _kill() -> None:
-            nonlocal timed_out
-            timed_out = True
-            if use_process_group:
-                try:
-                    # Validate PID before calling os.getpgid
-                    if process.pid and process.pid > 0:
-                        pgid = os.getpgid(process.pid)
-                        if pgid > 0:
-                            os.killpg(pgid, signal.SIGKILL)
-                            return
-                except (OSError, ValueError):
-                    # Process no longer exists or group doesn't exist
-                    pass
-            try:
-                process.kill()
-            except OSError:
-                # Process already terminated
-                pass
-
         try:
-            async with anyio.create_task_group() as tg:
-
-                async def _kill_after_timeout() -> None:
-                    await anyio.sleep(self.timeout)
-                    _kill()
-
-                async def _run() -> None:
-                    nonlocal return_code
-                    return_code = await self._collect_output(process, stdout_chunks, stderr_chunks)
-                    tg.cancel_scope.cancel()
-
-                tg.start_soon(_kill_after_timeout)
-                tg.start_soon(_run)
+            return_code, timed_out = await self._run_with_timeout(
+                process=process,
+                stdout_chunks=stdout_chunks,
+                stderr_chunks=stderr_chunks,
+                use_process_group=use_process_group,
+            )
         finally:
             try:
                 await process.aclose()
-            except Exception:
+            except OSError:
                 pass
 
         if timed_out:

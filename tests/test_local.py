@@ -345,3 +345,80 @@ def test_local_script_executor_custom_timeout() -> None:
     executor = LocalSkillScriptExecutor(timeout=120)
 
     assert executor.timeout == 120
+
+
+@pytest.mark.asyncio
+async def test_local_script_executor_shebang_takes_precedence_over_suffix(tmp_path: Path) -> None:
+    """Test that shebang dispatch is used before suffix mapping."""
+    script_file = tmp_path / 'python_script.sh'
+    script_file.write_text("""#!/usr/bin/env python3
+print('shebang python')
+""")
+
+    executor = LocalSkillScriptExecutor()
+    script = FileBasedSkillScript(
+        name='python_script.sh',
+        uri=str(script_file),
+    )
+
+    result = await executor.run(script)
+
+    assert 'shebang python' in result
+
+
+@pytest.mark.asyncio
+async def test_local_script_executor_shebang_with_env_and_args(tmp_path: Path) -> None:
+    """Test shebang parsing with /usr/bin/env and interpreter arguments."""
+    script_file = tmp_path / 'unbuffered.py'
+    script_file.write_text("""#!/usr/bin/env python3 -u
+print('env shebang')
+""")
+
+    executor = LocalSkillScriptExecutor()
+    script = FileBasedSkillScript(
+        name='unbuffered.py',
+        uri=str(script_file),
+    )
+
+    result = await executor.run(script)
+
+    assert 'env shebang' in result
+
+
+@pytest.mark.asyncio
+async def test_local_script_executor_missing_shebang_interpreter_falls_back_to_suffix(tmp_path: Path) -> None:
+    """Test fallback to suffix dispatch when shebang interpreter cannot be resolved."""
+    script_file = tmp_path / 'fallback.py'
+    script_file.write_text("""#!/usr/bin/env does-not-exist
+print('suffix fallback')
+""")
+
+    executor = LocalSkillScriptExecutor()
+    script = FileBasedSkillScript(
+        name='fallback.py',
+        uri=str(script_file),
+    )
+
+    result = await executor.run(script)
+
+    assert 'suffix fallback' in result
+
+
+@pytest.mark.asyncio
+async def test_local_script_executor_ps1_without_powershell_falls_back_to_direct(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test .ps1 execution fails clearly when no PowerShell interpreter is available."""
+    script_file = tmp_path / 'script.ps1'
+    script_file.write_text('Write-Host "hello"\n')
+
+    monkeypatch.setattr('pydantic_ai_skills.local.shutil.which', lambda _: None)
+
+    executor = LocalSkillScriptExecutor()
+    script = FileBasedSkillScript(
+        name='script.ps1',
+        uri=str(script_file),
+    )
+
+    with pytest.raises(SkillScriptExecutionError, match='Failed to execute script'):
+        await executor.run(script)
