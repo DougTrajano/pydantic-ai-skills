@@ -242,14 +242,25 @@ def _discover_scripts(
     scripts: list[SkillScript] = []
     skill_folder_resolved = skill_folder.resolve()
     supported_extensions = {'.py', '.sh', '.bash', '.zsh', '.fish', '.ps1', '.bat', '.cmd'}
+    windows_executable_extensions = {'.exe', '.bat', '.cmd', '.com', '.ps1'}
     ignored_names = {'__init__.py', 'SKILL.md'}
 
     def _is_script_candidate(script_file: Path) -> bool:
         """Check if a file should be treated as a script."""
         if script_file.name in ignored_names or not script_file.is_file():
             return False
-        return script_file.suffix.lower() in supported_extensions or os.access(script_file, os.X_OK)
 
+        suffix = script_file.suffix.lower()
+        if suffix in supported_extensions:
+            return True
+
+        if os.name == 'nt':
+            return suffix in windows_executable_extensions
+
+        try:
+            return bool(script_file.stat().st_mode & 0o111)
+        except OSError:
+            return False
     def _try_add_script(script_file: Path) -> None:
         """Add script if resolved path stays within skill_folder."""
         resolved_path = script_file.resolve()
