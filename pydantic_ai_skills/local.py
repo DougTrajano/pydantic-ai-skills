@@ -226,11 +226,23 @@ class LocalSkillScriptExecutor:
         async with anyio.create_task_group() as io_tg:
 
             async def _read_stdout() -> None:
-                async for chunk in process.stdout:  # type: ignore[union-attr]
+                stream = process.stdout
+                if stream is None:
+                    return
+                while True:
+                    chunk = await stream.receive()
+                    if chunk == b'':
+                        break
                     stdout_chunks.append(chunk)
 
             async def _read_stderr() -> None:
-                async for chunk in process.stderr:  # type: ignore[union-attr]
+                stream = process.stderr
+                if stream is None:
+                    return
+                while True:
+                    chunk = await stream.receive()
+                    if chunk == b'':
+                        break
                     stderr_chunks.append(chunk)
 
             io_tg.start_soon(_read_stdout)
