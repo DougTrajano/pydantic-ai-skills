@@ -151,7 +151,7 @@ my-skill/
 
 > Supported filesystem-based scripts include Python (`.py`), shell scripts (`.sh`, `.bash`, `.zsh`, `.fish`), and Windows batch files (`.bat`, `.cmd`). Extensionless or custom-extension files are supported when they are executable (and typically include a shebang on Unix-like systems).
 >
-> The `run_skill_script` tool accepts named command-line arguments via a dict-style mapping (recommended) while also supporting legacy list-style positional arguments for backward compatibility.
+> The `run_skill_script` tool accepts named command-line arguments via a dict-style mapping.
 >
 > Interpreter selection order for `run_skill_script` is:
 >
