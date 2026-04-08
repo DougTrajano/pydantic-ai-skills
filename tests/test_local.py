@@ -217,8 +217,8 @@ print(f"CWD: {os.getcwd()}")
 @pytest.mark.asyncio
 async def test_local_script_executor_bash_timeout(tmp_path: Path) -> None:
     """Test LocalSkillScriptExecutor timeout for bash scripts that spawn child processes."""
-    if sys.platform == 'win32' or shutil.which('bash') is None:
-        pytest.skip('bash is required for this test')
+    if sys.platform == 'win32' or shutil.which('sh') is None:
+        pytest.skip('sh is required for this test')
 
     script_file = tmp_path / 'slow_script.sh'
     script_file.write_text("""#!/usr/bin/env bash
@@ -240,8 +240,8 @@ echo "Done"
 @pytest.mark.asyncio
 async def test_local_script_executor_bash_script(tmp_path: Path) -> None:
     """Test LocalSkillScriptExecutor can run bash scripts."""
-    if sys.platform == 'win32' or shutil.which('bash') is None:
-        pytest.skip('bash is required for this test')
+    if sys.platform == 'win32' or shutil.which('sh') is None:
+        pytest.skip('sh is required for this test')
 
     script_file = tmp_path / 'test_script.sh'
     script_file.write_text("""#!/usr/bin/env bash
