@@ -633,7 +633,7 @@ class SkillsToolset(FunctionToolset[Any]):
             Args:
                 skill_name: Name of the skill containing the script.
                 script_name: Exact name of the script as listed in the skill.
-                    Usually includes .py extension: "analyze.py", "process.py"
+                    Examples: "analyze.py", "scripts/analyze.py", "scripts/deploy.sh", "scripts/runner"
                     Must match exactly - do not infer or guess.
                 args: Arguments required by the script.
                     Keys must match the parameter names in the script's schema.

@@ -3,12 +3,12 @@
 This module provides:
 - FileBasedSkillResource: File-based skill resource implementation
 - FileBasedSkillScript: File-based skill script implementation
-- LocalSkillScriptExecutor: Execute scripts using local Python subprocess
+- LocalSkillScriptExecutor: Execute scripts using local subprocesses
 - CallableSkillScriptExecutor: Wrap a callable in the executor interface
 - Factory functions for creating file-based resources and scripts
 
 Implementations:
-- [`LocalSkillScriptExecutor`][pydantic_ai_skills.LocalSkillScriptExecutor]: Execute scripts using local Python subprocess
+- [`LocalSkillScriptExecutor`][pydantic_ai_skills.LocalSkillScriptExecutor]: Execute scripts using local subprocesses
 - [`CallableSkillScriptExecutor`][pydantic_ai_skills.CallableSkillScriptExecutor]: Wrap a callable in the executor interface
 - [`FileBasedSkillResource`][pydantic_ai_skills.FileBasedSkillResource]: File-based resource with disk loading
 - [`FileBasedSkillScript`][pydantic_ai_skills.FileBasedSkillScript]: File-based script with subprocess execution
@@ -17,6 +17,11 @@ Implementations:
 from __future__ import annotations
 
 import json
+import os
+import shlex
+import shutil
+import signal
+import subprocess as _subprocess
 import sys
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -24,6 +29,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import anyio
+import anyio.abc
 import yaml
 from pydantic_ai._utils import is_async_callable, run_in_executor
 
@@ -83,11 +89,14 @@ class FileBasedSkillResource(SkillResource):
 
 
 class LocalSkillScriptExecutor:
-    """Execute skill scripts using local Python interpreter via subprocess.
+    """Execute skill scripts using local subprocesses.
 
     Executes file-based scripts as subprocesses with args passed as command-line named arguments.
     Dictionary keys are used exactly as provided (e.g., {"max-papers": 5} becomes --max-papers 5).
-    Uses anyio.run_process for async-compatible subprocess execution.
+    A shebang line is used first when present and resolvable, then suffix-based fallback
+    is used for compatibility. Other files are executed directly.
+    Uses anyio.open_process with custom output collection and timeout handling for
+    async-compatible subprocess execution.
 
     Note:
         All scripts must accept named arguments. Positional arguments are not supported.
@@ -95,6 +104,15 @@ class LocalSkillScriptExecutor:
     Attributes:
         timeout: Execution timeout in seconds.
     """
+
+    _SHELL_INTERPRETERS: dict[str, list[str]] = {
+        '.sh': ['sh'],
+        '.bash': ['bash'],
+        '.zsh': ['zsh'],
+        '.fish': ['fish'],
+        '.bat': ['cmd', '/c'],
+        '.cmd': ['cmd', '/c'],
+    }
 
     def __init__(
         self,
@@ -109,6 +127,195 @@ class LocalSkillScriptExecutor:
         """
         self._python_executable = str(python_executable) if python_executable else sys.executable
         self.timeout = timeout
+
+    @staticmethod
+    def _resolve_interpreter(interpreter: str) -> str | None:
+        """Resolve a shebang interpreter to an executable path."""
+        if Path(interpreter).is_absolute():
+            path = Path(interpreter)
+            return str(path) if path.exists() else None
+        return shutil.which(interpreter)
+
+    def _extract_shebang_command(self, script_path: Path) -> list[str] | None:
+        """Return an interpreter command from shebang if present and resolvable."""
+        try:
+            with script_path.open('rb') as handle:
+                first_line = handle.readline()
+        except OSError:
+            return None
+
+        if not first_line.startswith(b'#!'):
+            return None
+
+        shebang = first_line[2:].decode('utf-8', errors='ignore').strip()
+        if not shebang:
+            return None
+
+        parts = shlex.split(shebang)
+        if not parts:
+            return None
+
+        if Path(parts[0]).name == 'env':
+            idx = 1
+            while idx < len(parts) and parts[idx].startswith('-'):
+                idx += 1
+            if idx >= len(parts):
+                return None
+            interpreter = parts[idx]
+            interpreter_args = parts[idx + 1 :]
+        else:
+            interpreter = parts[0]
+            interpreter_args = parts[1:]
+
+        resolved = self._resolve_interpreter(interpreter)
+        if not resolved:
+            return None
+
+        return [resolved, *interpreter_args]
+
+    def _build_command(self, script_path: Path) -> list[str]:
+        """Build subprocess command using shebang-first dispatch with compatibility fallback."""
+        shebang_command = self._extract_shebang_command(script_path)
+        if shebang_command:
+            return [*shebang_command, str(script_path)]
+
+        suffix = script_path.suffix.lower()
+        if suffix == '.py':
+            return [self._python_executable, str(script_path)]
+        if suffix == '.ps1':
+            powershell = shutil.which('pwsh') or shutil.which('powershell')
+            if powershell:
+                return [powershell, '-File', str(script_path)]
+        if suffix in self._SHELL_INTERPRETERS:
+            return [*self._SHELL_INTERPRETERS[suffix], str(script_path)]
+        return [str(script_path)]
+
+    @staticmethod
+    def _build_args(cmd: list[str], args: dict[str, Any]) -> None:
+        """Append named arguments to cmd in-place."""
+        for key, value in args.items():
+            if isinstance(value, bool):
+                if value:
+                    cmd.append(f'--{key}')
+            elif isinstance(value, list):
+                for item in cast(list[Any], value):
+                    cmd.append(f'--{key}')
+                    cmd.append(str(item))
+            elif value is not None:
+                cmd.append(f'--{key}')
+                cmd.append(str(value))
+
+    @staticmethod
+    def _format_output(stdout_chunks: list[bytes], stderr_chunks: list[bytes], return_code: int) -> str:
+        """Decode and combine stdout, stderr, and exit code into a single string."""
+        output = b''.join(stdout_chunks).decode('utf-8', errors='replace')
+        stderr_output = b''.join(stderr_chunks).decode('utf-8', errors='replace')
+        if stderr_output:
+            output += f'\n\nStderr:\n{stderr_output}'
+        if return_code != 0:
+            output += f'\n\nScript exited with code {return_code}'
+        return output.strip() or '(no output)'
+
+    async def _drain_stream(self, stream: anyio.abc.ByteReceiveStream | None, chunks: list[bytes]) -> None:
+        """Drain a process output stream into chunks until EOF."""
+        if stream is None:
+            return
+
+        while True:
+            try:
+                chunk = await stream.receive()
+            except anyio.EndOfStream:
+                break
+
+            if chunk == b'':
+                break
+
+            chunks.append(chunk)
+
+    async def _collect_output(
+        self,
+        process: anyio.abc.Process,
+        stdout_chunks: list[bytes],
+        stderr_chunks: list[bytes],
+    ) -> int:
+        """Read stdout/stderr concurrently, then wait for the process to exit."""
+        async with anyio.create_task_group() as io_tg:
+            io_tg.start_soon(self._drain_stream, process.stdout, stdout_chunks)
+            io_tg.start_soon(self._drain_stream, process.stderr, stderr_chunks)
+
+        return await process.wait()
+
+    @staticmethod
+    def _kill_process(process: anyio.abc.Process, use_process_group: bool) -> None:
+        """Terminate a process and its process group when possible."""
+        if use_process_group:
+            try:
+                # Validate PID before calling os.getpgid
+                if process.pid and process.pid > 0:
+                    pgid = os.getpgid(process.pid)
+                    if pgid > 0:
+                        os.killpg(pgid, signal.SIGKILL)
+                        return
+            except (OSError, ValueError):
+                # Process no longer exists or group doesn't exist
+                pass
+        try:
+            process.kill()
+        except OSError:
+            # Process already terminated
+            pass
+
+    async def _run_with_timeout(
+        self,
+        process: anyio.abc.Process,
+        stdout_chunks: list[bytes],
+        stderr_chunks: list[bytes],
+        use_process_group: bool,
+    ) -> tuple[int, bool]:
+        """Collect process output while enforcing timeout."""
+        return_code = 0
+        timed_out = False
+
+        def _kill() -> None:
+            nonlocal timed_out
+            timed_out = True
+            self._kill_process(process, use_process_group)
+
+        async with anyio.create_task_group() as tg:
+
+            async def _kill_after_timeout() -> None:
+                await anyio.sleep(self.timeout)
+                _kill()
+
+            async def _run() -> None:
+                nonlocal return_code
+                return_code = await self._collect_output(process, stdout_chunks, stderr_chunks)
+                tg.cancel_scope.cancel()
+
+            tg.start_soon(_kill_after_timeout)
+            tg.start_soon(_run)
+
+        return return_code, timed_out
+
+    async def _start_process(
+        self,
+        cmd: list[str],
+        cwd: str,
+        use_process_group: bool,
+        script_name: str,
+    ) -> anyio.abc.Process:
+        """Start script subprocess and normalize startup errors."""
+        try:
+            return await anyio.open_process(
+                cmd,
+                stdin=_subprocess.DEVNULL,
+                stdout=_subprocess.PIPE,
+                stderr=_subprocess.PIPE,
+                cwd=cwd,
+                start_new_session=use_process_group,
+            )
+        except OSError as e:
+            raise SkillScriptExecutionError(f"Failed to execute script '{script_name}': {e}") from e
 
     async def run(
         self,
@@ -133,49 +340,36 @@ class LocalSkillScriptExecutor:
             raise SkillScriptExecutionError(f"Script '{script.name}' has no URI for subprocess execution")
 
         script_path = Path(script.uri)
-        cmd = [self._python_executable, str(script_path)]
-
+        cmd = self._build_command(script_path)
         if args:
-            for key, value in args.items():
-                if isinstance(value, bool):
-                    if value:
-                        cmd.append(f'--{key}')
-                elif isinstance(value, list):
-                    for item in cast(list[Any], value):
-                        cmd.append(f'--{key}')
-                        cmd.append(str(item))
-                elif value is not None:
-                    cmd.append(f'--{key}')
-                    cmd.append(str(value))
+            self._build_args(cmd, args)
 
-        stdin_data: bytes | None = None
         cwd = str(script_path.parent)
+        use_process_group = sys.platform != 'win32'
+        process = await self._start_process(cmd, cwd, use_process_group, script.name)
+
+        stdout_chunks: list[bytes] = []
+        stderr_chunks: list[bytes] = []
+        return_code = 0
+        timed_out = False
 
         try:
-            result = None
-            with anyio.move_on_after(self.timeout) as scope:
-                result = await anyio.run_process(
-                    cmd,
-                    check=False,
-                    cwd=cwd,
-                    input=stdin_data,
-                )
+            return_code, timed_out = await self._run_with_timeout(
+                process=process,
+                stdout_chunks=stdout_chunks,
+                stderr_chunks=stderr_chunks,
+                use_process_group=use_process_group,
+            )
+        finally:
+            try:
+                await process.aclose()
+            except OSError:
+                pass
 
-            if scope.cancelled_caught or result is None:
-                raise SkillScriptExecutionError(f"Script '{script.name}' timed out after {self.timeout} seconds")
+        if timed_out:
+            raise SkillScriptExecutionError(f"Script '{script.name}' timed out after {self.timeout} seconds")
 
-            output = result.stdout.decode('utf-8', errors='replace')
-            if result.stderr:
-                stderr = result.stderr.decode('utf-8', errors='replace')
-                output += f'\n\nStderr:\n{stderr}'
-
-            if result.returncode != 0:
-                output += f'\n\nScript exited with code {result.returncode}'
-
-            return output.strip() or '(no output)'
-
-        except OSError as e:
-            raise SkillScriptExecutionError(f"Failed to execute script '{script.name}': {e}") from e
+        return self._format_output(stdout_chunks, stderr_chunks, return_code)
 
 
 class CallableSkillScriptExecutor:

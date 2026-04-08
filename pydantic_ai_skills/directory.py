@@ -9,6 +9,7 @@ internal helper functions for skill validation, metadata parsing, and resource/s
 
 from __future__ import annotations
 
+import os
 import re
 import warnings
 from pathlib import Path
@@ -27,6 +28,52 @@ from .local import (
     create_file_based_script,
 )
 from .types import Skill, SkillResource, SkillScript
+
+_SUPPORTED_SCRIPT_EXTENSIONS = {'.py', '.sh', '.bash', '.zsh', '.fish', '.ps1', '.bat', '.cmd'}
+_WINDOWS_EXECUTABLE_EXTENSIONS = {'.exe', '.bat', '.cmd', '.com', '.ps1'}
+_IGNORED_SCRIPT_NAMES = {'__init__.py', 'SKILL.md'}
+
+
+def _is_script_candidate(script_file: Path) -> bool:
+    """Check if a file should be treated as a script."""
+    if script_file.name in _IGNORED_SCRIPT_NAMES or not script_file.is_file():
+        return False
+
+    suffix = script_file.suffix.lower()
+    if suffix in _SUPPORTED_SCRIPT_EXTENSIONS:
+        return True
+
+    if os.name == 'nt':
+        return suffix in _WINDOWS_EXECUTABLE_EXTENSIONS
+
+    try:
+        return bool(script_file.stat().st_mode & 0o111)
+    except OSError:
+        return False
+
+
+def _iter_script_directories(skill_folder: Path) -> list[Path]:
+    """Return directories to scan for scripts."""
+    scripts_dir = skill_folder / 'scripts'
+    if scripts_dir.is_dir():
+        return [skill_folder, scripts_dir]
+    return [skill_folder]
+
+
+def _resolve_script_path(script_file: Path, skill_folder_resolved: Path) -> Path | None:
+    """Resolve script path and reject symlink escapes."""
+    resolved_path = script_file.resolve()
+    try:
+        resolved_path.relative_to(skill_folder_resolved)
+    except ValueError:
+        warnings.warn(
+            f"Script '{script_file}' resolves outside skill directory (symlink escape detected). Skipping.",
+            UserWarning,
+            stacklevel=4,
+        )
+        return None
+    return resolved_path
+
 
 __all__ = ['SkillsDirectory', 'discover_skills', 'parse_skill_md', 'validate_skill_metadata']
 
@@ -226,7 +273,7 @@ def _discover_scripts(
 ) -> list[SkillScript]:
     """Discover executable scripts in a skill folder.
 
-    Looks for Python scripts in the root and scripts/ subdirectory.
+    Looks for script files and executables in the root and scripts/ subdirectory.
     Security validates that resolved paths remain within skill_folder
     after symlink resolution to prevent traversal attacks.
 
@@ -241,38 +288,23 @@ def _discover_scripts(
     scripts: list[SkillScript] = []
     skill_folder_resolved = skill_folder.resolve()
 
-    def _add_script_if_safe(py_file: Path) -> None:
-        """Add script if its resolved path stays within skill_folder."""
-        resolved_path = py_file.resolve()
-        try:
-            resolved_path.relative_to(skill_folder_resolved)
-        except ValueError:
-            warnings.warn(
-                f"Script '{py_file}' resolves outside skill directory (symlink escape detected). Skipping.",
-                UserWarning,
-                stacklevel=3,
+    for directory in _iter_script_directories(skill_folder):
+        for script_file in directory.iterdir():
+            if not _is_script_candidate(script_file):
+                continue
+
+            resolved_path = _resolve_script_path(script_file, skill_folder_resolved)
+            if resolved_path is None:
+                continue
+
+            scripts.append(
+                create_file_based_script(
+                    name=script_file.relative_to(skill_folder).as_posix(),
+                    uri=str(resolved_path),
+                    skill_name=skill_name,
+                    executor=executor,
+                )
             )
-            return
-
-        rel_path = py_file.relative_to(skill_folder)
-        scripts.append(
-            create_file_based_script(
-                name=rel_path.as_posix(),
-                uri=str(resolved_path),
-                skill_name=skill_name,
-                executor=executor,
-            )
-        )
-
-    for py_file in skill_folder.glob('*.py'):
-        if py_file.name != '__init__.py':
-            _add_script_if_safe(py_file)
-
-    scripts_dir = skill_folder / 'scripts'
-    if scripts_dir.exists() and scripts_dir.is_dir():
-        for py_file in scripts_dir.glob('*.py'):
-            if py_file.name != '__init__.py':
-                _add_script_if_safe(py_file)
 
     return scripts
 

@@ -88,10 +88,10 @@ Use this skill when you need to:
 To search arXiv, use the `run_skill_script` tool with:
 
 1. **skill_name**: "arxiv-search"
-2. **script_name**: "arxiv_search"
+2. **script_name**: "scripts/arxiv_search.py"
 3. **args**:
-   - First argument: Your search query (e.g., "neural networks")
-   - `--max-papers`: Optional, defaults to 10
+    - `query`: Required search query (e.g., "neural networks")
+    - `max-papers`: Optional, defaults to 10
 
 ## Examples
 
@@ -100,8 +100,8 @@ Search for 5 papers on machine learning:
 ```python
 run_skill_script(
     skill_name="arxiv-search",
-    script_name="arxiv_search",
-    args=["machine learning", "--max-papers", "5"]
+    script_name="scripts/arxiv_search.py",
+    args={"query": "machine learning", "max-papers": 5}
 )
 ```
 
@@ -137,7 +137,7 @@ my-skill/
 
 Scripts should:
 
-- Accept command-line arguments via `sys.argv`
+- Accept named command-line arguments (for example, using `argparse` in Python or an equivalent option parser in your runtime)
 - Print output to stdout
 - Exit with code 0 on success, non-zero on error
 - Handle errors gracefully
@@ -180,17 +180,30 @@ if __name__ == "__main__":
 ### Script Best Practices
 
 **✅ Do:**
+
 - Validate input arguments
 - Return structured output (JSON preferred)
 - Handle errors gracefully
 - Document expected inputs/outputs in SKILL.md
 - Use timeouts for external calls
+- Add a shebang line for interpreter portability (for example `#!/usr/bin/env python3`)
 
 **❌ Don't:**
+
 - Make network calls without timeouts
 - Write to files outside the skill directory
 - Require interactive input
 - Use environment-specific paths
+
+### Script Interpreter Selection
+
+When filesystem scripts are executed, interpreter selection follows this order:
+
+1. Shebang line, when present and resolvable
+2. Extension-based fallback for compatibility (`.py`, `.sh`, `.bash`, `.zsh`, `.fish`, `.ps1`, `.bat`, `.cmd`)
+3. Direct executable invocation fallback
+
+This allows extensionless and custom-extension executable scripts to run while preserving compatibility with existing script names and extensions.
 
 ### Script Argument Handling
 
@@ -200,12 +213,12 @@ When agents call scripts via `run_skill_script()`, arguments are converted to co
 # Agent calls:
 run_skill_script(
     skill_name='data-analyzer',
-    script_name='analyze',
+    script_name='scripts/analyze.py',
     args={'query': 'SELECT * FROM users', 'limit': '100', 'format': 'json'}
 )
 
 # Your script receives command-line arguments:
-# python analyze.py --query "SELECT * FROM users" --limit 100 --format json
+# <script> --query "SELECT * FROM users" --limit 100 --format json
 ```
 
 **Argument Mapping Rules:**
@@ -741,8 +754,8 @@ Use the `run_skill_script` tool to search arXiv:
 ```python
 run_skill_script(
     skill_name="arxiv-search",
-    script_name="arxiv_search",
-    args=["machine learning", "--max-papers", "10"]
+    script_name="scripts/arxiv_search.py",
+    args={"query": "machine learning", "max-papers": 10}
 )
 ```
 
@@ -945,8 +958,8 @@ read_skill_resource(
 ```python
 run_skill_script(
     skill_name="data-analyzer",
-    script_name="analyze",
-    args=["data.csv", "--output", "json"]
+    script_name="scripts/analyze.py",
+    args={"input": "data.csv", "output": "json"}
 )
 ```
 
@@ -955,8 +968,8 @@ run_skill_script(
 ```python
 run_skill_script(
     skill_name="data-analyzer",
-    script_name="visualize",
-    args=["data.csv", "--type", "histogram"]
+    script_name="scripts/visualize.py",
+    args={"input": "data.csv", "type": "histogram"}
 )
 ```
 
