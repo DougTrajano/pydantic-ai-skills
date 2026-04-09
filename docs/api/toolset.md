@@ -229,7 +229,7 @@ agent = Agent(
     toolsets=[toolset]
 )
 
-# For pydantic<1.74, you must add an instructions hook to inject the skills instructions into the agent's context
+# For pydantic-ai<1.74, you must add an instructions hook to inject the skills instructions into the agent's context
 # On pydantic-ai >= 1.74, this is automatic and you can omit the following instructions hook
 # @agent.instructions
 # async def add_skills(ctx: RunContext) -> str | None:
