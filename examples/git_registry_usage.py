@@ -7,7 +7,7 @@ the skills to a Pydantic AI agent via SkillsToolset.
 import logfire
 import uvicorn
 from dotenv import load_dotenv
-from pydantic_ai import Agent, RunContext
+from pydantic_ai import Agent
 
 from pydantic_ai_skills import SkillsToolset
 from pydantic_ai_skills.registries.git import GitCloneOptions, GitSkillsRegistry
@@ -35,12 +35,6 @@ agent = Agent(
     instructions='You are a helpful assistant with access to a variety of skills.',
     toolsets=[skills_toolset],
 )
-
-
-@agent.instructions
-async def add_skills(ctx: RunContext) -> str | None:
-    """Add skills instructions to the agent's context."""
-    return await skills_toolset.get_instructions(ctx)
 
 
 app = agent.to_web()

@@ -41,7 +41,11 @@ print(result.output)
 
 `SkillsCapability` is the preferred integration path on pydantic-ai >= 1.71.
 
-It bundles `SkillsToolset` behavior and instruction injection through Pydantic AI's Capability API. If you use `SkillsToolset` directly, you must manually add `get_instructions(ctx)` using `@agent.instructions`.
+It bundles `SkillsToolset` behavior and instruction injection through Pydantic AI's Capability API.
+If you use `SkillsToolset` directly:
+
+- For pydantic-ai < 1.74, you must add an instructions hook to inject the skills instructions into the agent's context.
+- On pydantic-ai >= 1.74, this is automatic.
 
 ```python
 from pydantic_ai import Agent
@@ -55,9 +59,9 @@ agent = Agent(
 )
 ```
 
-## Direct SkillsToolset Example (manual path)
+## Direct SkillsToolset Example
 
-If you use `SkillsToolset` directly, manually inject instructions with `@agent.instructions`.
+For earlier versions of Pydantic AI, you can use `SkillsToolset`.
 
 ```python
 from pydantic_ai import Agent, RunContext
@@ -71,9 +75,11 @@ agent = Agent(
     toolsets=[skills_toolset],
 )
 
-@agent.instructions
-async def add_skills(ctx: RunContext) -> str | None:
-    return await skills_toolset.get_instructions(ctx)
+# For pydantic<1.74, you must add an instructions hook to inject the skills instructions into the agent's context
+# On pydantic-ai >= 1.74, this is automatic and you can omit the following instructions hook
+# @agent.instructions
+# async def add_skills(ctx: RunContext) -> str | None:
+#     return await skills_toolset.get_instructions(ctx)
 ```
 
 ## How It Works

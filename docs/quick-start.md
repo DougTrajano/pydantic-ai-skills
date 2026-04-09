@@ -94,9 +94,11 @@ result = agent.run_sync('How do I create a Pydantic AI agent with tools?')
 print(result.output)
 ```
 
-### Alternative: Direct SkillsToolset (advanced/manual path)
+### Alternative: Direct SkillsToolset
 
-Use direct `SkillsToolset` integration when you need explicit manual control over instruction injection or are on an older pydantic-ai version.
+Use direct `SkillsToolset` integration when your app is built around `toolsets=[...]`.
+For pydantic-ai < 1.74, you must add an instructions hook to inject the skills instructions into the agent's context.
+On pydantic-ai >= 1.74, this is automatic.
 
 Create `agent.py`:
 
@@ -116,11 +118,12 @@ async def main():
         toolsets=[skills_toolset]
     )
 
-    # Add skills instructions to agent
-    @agent.instructions
-    async def add_skills(ctx: RunContext) -> str | None:
-        """Add skills instructions to the agent's context."""
-        return await skills_toolset.get_instructions(ctx)
+    # For pydantic<1.74, you must add an instructions hook to inject the skills instructions into the agent's context
+    # On pydantic-ai >= 1.74, this is automatic and you can omit the following instructions hook
+    # @agent.instructions
+    # async def add_skills(ctx: RunContext) -> str | None:
+    #     """Add skills instructions to the agent's context."""
+    #     return await skills_toolset.get_instructions(ctx)
 
     # Run the agent
     result = await agent.run("How do I create a Pydantic AI agent with tools?")
@@ -150,7 +153,7 @@ When you initialize skills support (via `SkillsCapability` or `SkillsToolset`):
 
 1. **Discovery**: Scans `./skills/` for skill directories with `SKILL.md` files
 2. **Registration**: Registers four tools (`list_skills`, `load_skill`, `read_skill_resource`, `run_skill_script`)
-3. **Instructions**: Skills overview is added to the agent automatically with `SkillsCapability`, or manually via `@agent.instructions` when using `SkillsToolset` directly
+3. **Instructions**: Skills overview is added automatically (`SkillsCapability` always; `SkillsToolset` on pydantic-ai >= 1.74). For pydantic-ai < 1.74 with `SkillsToolset`, add a manual compatibility hook.
 4. **Execution**: Agent discovers, loads, and uses skills as needed
 
 ## Add a Script-Based Skill
@@ -280,11 +283,6 @@ async def main():
         toolsets=[skills_toolset]
     )
 
-    @agent.instructions
-    async def add_skills(ctx: RunContext) -> str | None:
-        """Add skills instructions to the agent's context."""
-        return await skills_toolset.get_instructions(ctx)
-
     result = await agent.run(
         "Find the 5 most recent papers on transformer architectures"
     )
@@ -311,11 +309,6 @@ async def main():
         toolsets=[toolset]
     )
 
-    @agent.instructions
-    async def add_skills(ctx: RunContext) -> str | None:
-        """Add skills instructions to the agent's context."""
-        return await toolset.get_instructions(ctx)
-
     # Use agent
     result = await agent.run("What skills are available?")
     print(result.output)
@@ -329,11 +322,6 @@ async def main():
         instructions="You are a helpful assistant.",
         toolsets=[toolset]
     )
-
-    @agent.instructions
-    async def add_skills_again(ctx: RunContext) -> str | None:
-        """Add skills instructions to the agent's context."""
-        return await toolset.get_instructions(ctx)
 
     print(f"\nReloaded. Now have {len(toolset.skills)} skills")
 

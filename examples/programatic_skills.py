@@ -210,12 +210,6 @@ agent = Agent(
 
 
 @agent.instructions
-async def add_skills(ctx: RunContext[AnalystDeps]) -> str | None:
-    """Inject skill instructions into agent context via progressive disclosure."""
-    return await skills_toolset.get_instructions(ctx)
-
-
-@agent.instructions
 def add_today_date() -> str:
     """Provide current date context for time-sensitive analyses."""
     return f'Today is {datetime.datetime.now().strftime("%B %d, %Y")}.'

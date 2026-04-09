@@ -8,7 +8,7 @@ import logfire
 import uvicorn
 from dotenv import load_dotenv
 from langchain_community.tools import DuckDuckGoSearchRun
-from pydantic_ai import Agent, RunContext
+from pydantic_ai import Agent
 from pydantic_ai.ext.langchain import tool_from_langchain
 from pydantic_ai.mcp import MCPServerStdio
 from pydantic_ai.tools import DeferredToolRequests
@@ -46,12 +46,6 @@ agent = Agent(
     tools=[search_tool],
     output_type=[str, DeferredToolRequests],
 )
-
-
-@agent.instructions
-async def add_skills(ctx: RunContext) -> str | None:
-    """Add skills instructions to the agent's context."""
-    return await skills_toolset.get_instructions(ctx)
 
 
 @agent.instructions

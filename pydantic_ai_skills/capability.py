@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Generic
 
-from pydantic_ai.tools import AgentDepsT, RunContext
+from pydantic_ai.tools import RunContext
 
 from .directory import SkillsDirectory
 from .registries._base import SkillRegistry
@@ -29,11 +29,11 @@ else:
     except ImportError:
         _CAPABILITIES_AVAILABLE = False
 
-        class _AbstractCapabilityBase(Generic[AgentDepsT]):
+        class _AbstractCapabilityBase(Generic[Any]):
             """Fallback placeholder when pydantic-ai capabilities are unavailable."""
 
 
-class SkillsCapability(_AbstractCapabilityBase[AgentDepsT]):
+class SkillsCapability(_AbstractCapabilityBase[Any]):
     """Capability wrapper for `SkillsToolset`.
 
     Use this class with the agent `capabilities=[...]` API introduced in
