@@ -47,7 +47,10 @@ For pydantic-ai >= 1.71, prefer `SkillsCapability`.
 
 Use this mode when your app is built around `toolsets=[...]`.
 
-When using `SkillsToolset` directly, you must explicitly add skills instructions with `get_instructions(ctx)` via `@agent.instructions`.
+When using `SkillsToolset` directly:
+
+- For pydantic-ai < 1.74, you must add an instructions hook to inject the skills instructions into the agent's context.
+- On pydantic-ai >= 1.74, this is automatic.
 
 ### SkillsCapability mode
 
@@ -97,7 +100,7 @@ category: research
 
 The toolset implements **progressive disclosure** - exposing information only when needed:
 
-1. **Initial**: Skill names and descriptions are added to agent's instructions via `@agent.instructions` decorator calling `get_instructions(ctx)`
+1. **Initial**: Skill names and descriptions are added to agent instructions via `get_instructions(ctx)` (called automatically by the framework on newer pydantic-ai versions)
 2. **Loading**: Agent calls `load_skill(name)` to get full instructions when needed
 3. **Resources**: Agent calls `read_skill_resource()` for additional documentation
 4. **Execution**: Agent calls `run_skill_script()` to execute scripts
@@ -114,7 +117,7 @@ Skills use **progressive disclosure** to minimize context:
 This reduces token usage, enables dynamic capability discovery, and scales to many skills.
 **Returns**: Formatted markdown with skill names and descriptions
 
-**When to use**: Optional - skills are already listed in the agent's instructions via `get_instructions(ctx)`. Use only if the agent needs to re-check available skills dynamically.
+**When to use**: Optional - skills are already listed in the agent's instructions via `get_instructions(ctx)` injection. Use only if the agent needs to re-check available skills dynamically.
 
 ### 2. load_skill(name)
 

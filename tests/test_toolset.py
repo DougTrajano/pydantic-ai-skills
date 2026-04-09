@@ -1,6 +1,8 @@
 """Tests for SkillsToolset."""
 
 from pathlib import Path
+from typing import Any
+from unittest.mock import Mock
 
 import pytest
 
@@ -220,8 +222,6 @@ async def test_run_skill_script_not_found(sample_skills_dir: Path) -> None:
 @pytest.mark.asyncio
 async def test_get_instructions(sample_skills_dir: Path) -> None:
     """Test generating the system prompt via get_instructions."""
-    from unittest.mock import Mock
-
     toolset = SkillsToolset(directories=[sample_skills_dir])
 
     # Create a mock context (get_instructions doesn't use ctx, but requires it)
@@ -246,8 +246,6 @@ async def test_get_instructions(sample_skills_dir: Path) -> None:
 @pytest.mark.asyncio
 async def test_get_instructions_empty() -> None:
     """Test system prompt with no skills."""
-    from unittest.mock import Mock
-
     toolset = SkillsToolset(skills=[], directories=[])
 
     mock_ctx = Mock()
@@ -376,6 +374,66 @@ def test_exclude_tools_empty_set(sample_skills_dir: Path) -> None:
     assert 'load_skill' in tool_names
     assert 'read_skill_resource' in tool_names
     assert 'run_skill_script' in tool_names
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ('name', 'builder'),
+    [
+        (
+            'filtered',
+            lambda toolset: toolset.filtered(lambda _ctx, _tool_def: True),
+        ),
+        (
+            'prefixed',
+            lambda toolset: toolset.prefixed('skills__'),
+        ),
+        (
+            'prepared',
+            lambda toolset: toolset.prepared(lambda _ctx, tool_defs: tool_defs),
+        ),
+        (
+            'renamed',
+            lambda toolset: toolset.renamed({'skills_list': 'list_skills'}),
+        ),
+        (
+            'approval_required',
+            lambda toolset: toolset.approval_required(lambda _ctx, _tool_def, _tool_args: True),
+        ),
+    ],
+)
+async def test_composition_wrappers_delegate_get_instructions(
+    sample_skills_dir: Path,
+    name: str,
+    builder: Any,
+) -> None:
+    """Composed toolsets should preserve delegated get_instructions()."""
+    toolset = SkillsToolset(directories=[sample_skills_dir])
+
+    composed_toolset = builder(toolset)
+    prompt = await composed_toolset.get_instructions(Mock())
+
+    assert prompt is not None, f'{name} wrapper returned no instructions'
+    assert 'skill-one' in prompt
+    assert 'skill-two' in prompt
+    assert 'skill-three' in prompt
+
+
+@pytest.mark.asyncio
+async def test_chained_composition_delegates_get_instructions(sample_skills_dir: Path) -> None:
+    """Chained wrappers should still delegate instructions to the base SkillsToolset."""
+    toolset = SkillsToolset(directories=[sample_skills_dir])
+
+    composed = (
+        toolset.filtered(lambda _ctx, _tool_def: True)
+        .prefixed('skills__')
+        .prepared(lambda _ctx, tool_defs: tool_defs)
+        .approval_required(lambda _ctx, _tool_def, _tool_args: True)
+    )
+
+    prompt = await composed.get_instructions(Mock())
+    assert prompt is not None
+    assert 'First test skill for basic operations' in prompt
 
 
 def test_exclude_tools_empty_list(sample_skills_dir: Path) -> None:

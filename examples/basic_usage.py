@@ -9,7 +9,7 @@ from pathlib import Path
 import logfire
 import uvicorn
 from dotenv import load_dotenv
-from pydantic_ai import Agent, RunContext
+from pydantic_ai import Agent
 
 from pydantic_ai_skills import SkillsToolset
 
@@ -30,13 +30,6 @@ agent = Agent(
     instructions='You are a helpful research assistant.',
     toolsets=[skills_toolset],
 )
-
-
-# Add skills instructions to agent (includes skill names and descriptions)
-@agent.instructions
-async def add_skills(ctx: RunContext) -> str | None:
-    """Add skills instructions to the agent's context."""
-    return await skills_toolset.get_instructions(ctx)
 
 
 app = agent.to_web()

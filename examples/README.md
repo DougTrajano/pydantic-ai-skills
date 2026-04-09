@@ -70,3 +70,8 @@ python -m examples.basic_usage
 ```
 
 The agent will be available at `http://127.0.0.1:7932`.
+
+## Compatibility Note
+
+- On pydantic-ai >= 1.74, `SkillsToolset.get_instructions()` is injected automatically by the agent graph.
+- On pydantic-ai < 1.74, add a manual `@agent.instructions` hook that returns `await SkillsToolset.get_instructions(ctx)`.
