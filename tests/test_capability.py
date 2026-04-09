@@ -94,7 +94,7 @@ def test_skills_capability_init_with_all_params(tmp_path: object) -> None:
         validate=False,
         max_depth=5,
         id='test-toolset',
-        instruction_template='custom-template',
+        instruction_template='Available skills: {skills_list}',
         exclude_tools={'run_skill_script'},
         auto_reload=True,
     )
@@ -161,7 +161,7 @@ def test_skills_capability_init_with_custom_template() -> None:
     if not _capabilities_available():
         pytest.skip('Capabilities API is not available in this environment')
 
-    template = 'Use these skills: {{skills}}'
+    template = 'Use these skills: {skills_list}'
     capability = SkillsCapability(
         skills=[],
         instruction_template=template,

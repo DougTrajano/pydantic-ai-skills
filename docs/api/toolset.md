@@ -38,7 +38,7 @@ The `SkillsToolset.__init__()` accepts the following parameters:
 | Method | Description |
 |--------|-------------|
 | `get_skill(skill_name: str) -> Skill` | Retrieve a specific skill by name. Raises `SkillNotFoundError` if not found. |
-| `get_instructions(ctx: RunContext[Any]) -> str` | Returns formatted system prompt with skills instructions. Called automatically on pydantic-ai >= 1.74. |
+| `get_instructions(ctx: RunContext[Any]) -> str | None` | Returns formatted system prompt with skills instructions, or `None` if no skills are loaded. Called automatically on pydantic-ai >= 1.74. |
 
 ## Usage Examples
 
