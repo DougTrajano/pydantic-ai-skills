@@ -10,9 +10,20 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
-from pydantic_ai._instructions import AgentInstructions
-from pydantic_ai.tools import AgentDepsT, RunContext
+if TYPE_CHECKING:
+    from pydantic_ai._instructions import AgentInstructions
+    from pydantic_ai.tools import AgentDepsT, RunContext
+else:
+    try:
+        from pydantic_ai.tools import AgentDepsT, RunContext
+    except ImportError:
+        AgentDepsT = Any
+        RunContext = Any
 
+    try:
+        from pydantic_ai._instructions import AgentInstructions
+    except ImportError:
+        AgentInstructions = Any
 from .directory import SkillsDirectory
 from .registries._base import SkillRegistry
 from .toolset import SkillsToolset
