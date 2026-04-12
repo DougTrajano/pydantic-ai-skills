@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import importlib.util
-from types import SimpleNamespace
 
 import pytest
 
@@ -42,26 +41,6 @@ def test_skills_capability_runtime_error_when_flag_disabled(monkeypatch: pytest.
 
     with pytest.raises(RuntimeError, match='pydantic-ai>=1.71'):
         capability_module.SkillsCapability(skills=[], directories=[])
-
-
-@pytest.mark.asyncio
-async def test_skills_capability_get_instructions_delegates_to_toolset() -> None:
-    """get_instructions should delegate to the wrapped SkillsToolset method."""
-    if not _capabilities_available():
-        pytest.skip('Capabilities API is not available in this environment')
-
-    capability = SkillsCapability(skills=[], directories=[])
-
-    async def _fake_get_instructions(ctx: object) -> str:
-        assert ctx is fake_ctx
-        return 'delegated-instructions'
-
-    fake_ctx = SimpleNamespace(deps=None)
-    capability.toolset.get_instructions = _fake_get_instructions  # type: ignore[method-assign]
-
-    instructions_provider = capability.get_instructions()
-    assert callable(instructions_provider)
-    assert await instructions_provider(fake_ctx) == 'delegated-instructions'
 
 
 def test_skills_capability_init_with_minimal_params() -> None:
@@ -114,36 +93,6 @@ def test_skills_capability_toolset_property_is_same_as_get_toolset() -> None:
     assert toolset_property is get_toolset_result
 
 
-@pytest.mark.asyncio
-async def test_skills_capability_get_instructions_returns_callable() -> None:
-    """get_instructions should always return a callable."""
-    if not _capabilities_available():
-        pytest.skip('Capabilities API is not available in this environment')
-
-    capability = SkillsCapability(skills=[])
-    instructions_func = capability.get_instructions()
-    assert callable(instructions_func)
-
-
-@pytest.mark.asyncio
-async def test_skills_capability_get_instructions_with_none_return() -> None:
-    """get_instructions should handle None return from toolset."""
-    if not _capabilities_available():
-        pytest.skip('Capabilities API is not available in this environment')
-
-    capability = SkillsCapability(skills=[])
-
-    async def _fake_get_instructions(ctx: object) -> None:
-        return None
-
-    fake_ctx = SimpleNamespace(deps=None)
-    capability.toolset.get_instructions = _fake_get_instructions  # type: ignore[method-assign]
-
-    instructions_provider = capability.get_instructions()
-    result = await instructions_provider(fake_ctx)
-    assert result is None
-
-
 def test_skills_capability_with_exclude_tools_as_list() -> None:
     """Constructor should accept exclude_tools as a list."""
     if not _capabilities_available():
@@ -167,3 +116,45 @@ def test_skills_capability_init_with_custom_template() -> None:
         instruction_template=template,
     )
     assert isinstance(capability.get_toolset(), SkillsToolset)
+
+
+@pytest.mark.asyncio
+async def test_skills_capability_get_instructions_delegates_when_no_toolset_method(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """get_instructions delegates when AbstractToolset.get_instructions is missing."""
+    if not _capabilities_available():
+        pytest.skip('Capabilities API is not available in this environment')
+
+    class MockToolset:
+        pass
+
+    monkeypatch.setattr('pydantic_ai.toolsets.AbstractToolset', MockToolset, raising=False)
+
+    capability = SkillsCapability(skills=[])
+
+    async def _fake_get_instructions(ctx: object) -> str:
+        return 'delegated-instructions'
+
+    capability.toolset.get_instructions = _fake_get_instructions  # type: ignore[method-assign]
+
+    instructions_provider = capability.get_instructions()
+    assert callable(instructions_provider)
+    assert await instructions_provider(None) == 'delegated-instructions'
+
+
+@pytest.mark.asyncio
+async def test_skills_capability_get_instructions_returns_none_when_has_method(monkeypatch: pytest.MonkeyPatch) -> None:
+    """get_instructions returns None when AbstractToolset implicitly has get_instructions."""
+    if not _capabilities_available():
+        pytest.skip('Capabilities API is not available in this environment')
+
+    class MockToolset:
+        def get_instructions(self) -> None:
+            pass
+
+    monkeypatch.setattr('pydantic_ai.toolsets.AbstractToolset', MockToolset, raising=False)
+
+    capability = SkillsCapability(skills=[])
+    instructions_provider = capability.get_instructions()
+    assert instructions_provider is None

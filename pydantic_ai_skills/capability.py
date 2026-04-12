@@ -10,7 +10,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
-from pydantic_ai.tools import RunContext
+from pydantic_ai._instructions import AgentInstructions
+from pydantic_ai.tools import AgentDepsT, RunContext
 
 from .directory import SkillsDirectory
 from .registries._base import SkillRegistry
@@ -105,10 +106,22 @@ class SkillsCapability(_AbstractCapabilityBase[Any]):
         """Return the underlying skills toolset."""
         return self._toolset
 
-    def get_instructions(self) -> Any:
-        """Return dynamic instructions via the underlying skills toolset."""
+    def get_instructions(self) -> AgentInstructions[AgentDepsT] | None:
+        """Return dynamic instructions via the underlying skills toolset.
 
-        async def _instructions(ctx: RunContext[Any]) -> str | None:
+        For pydantic-ai >= 1.74, instructions are natively extracted from the toolset
+        by the agent, so we return None here to avoid injecting duplicate instructions.
+        For older versions (pydantic-ai>=1.71), we return a function that delegates to the toolset.
+        """
+        try:
+            from pydantic_ai.toolsets import AbstractToolset
+
+            if hasattr(AbstractToolset, 'get_instructions'):
+                return None
+        except ImportError:
+            pass
+
+        async def _instructions(ctx: RunContext[AgentDepsT]) -> str | None:
             return await self._toolset.get_instructions(ctx)
 
         return _instructions
