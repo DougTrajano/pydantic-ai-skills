@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import builtins
 import importlib.util
+from typing import Any
 
 import pytest
 
@@ -158,3 +160,57 @@ async def test_skills_capability_get_instructions_returns_none_when_has_method(m
     capability = SkillsCapability(skills=[])
     instructions_provider = capability.get_instructions()
     assert instructions_provider is None
+
+
+@pytest.mark.asyncio
+async def test_skills_capability_get_instructions_handles_toolsets_importerror(monkeypatch: pytest.MonkeyPatch) -> None:
+    """get_instructions should delegate when importing pydantic_ai.toolsets fails."""
+    if not _capabilities_available():
+        pytest.skip('Capabilities API is not available in this environment')
+
+    capability = SkillsCapability(skills=[])
+
+    async def _fake_get_instructions(ctx: object) -> str:
+        _ = ctx
+        return 'delegated-on-importerror'
+
+    capability.toolset.get_instructions = _fake_get_instructions  # type: ignore[method-assign]
+
+    real_import = builtins.__import__
+
+    def _import_with_toolsets_error(name: str, *args: Any, **kwargs: Any) -> Any:
+        if name == 'pydantic_ai.toolsets':
+            raise ImportError('simulated toolsets import failure')
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, '__import__', _import_with_toolsets_error)
+
+    instructions_provider = capability.get_instructions()
+    assert callable(instructions_provider)
+    assert await instructions_provider(None) == 'delegated-on-importerror'
+
+
+def test_capability_module_import_fallbacks(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Module-level fallback assignments should be used when pydantic-ai imports fail."""
+    real_import = builtins.__import__
+
+    def _import_with_failures(name: str, *args: Any, **kwargs: Any) -> Any:
+        if name in {
+            'pydantic_ai.tools',
+            'pydantic_ai.agent.abstract',
+            'pydantic_ai.capabilities',
+        }:
+            raise ImportError(f'simulated import failure for {name}')
+        return real_import(name, *args, **kwargs)
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(builtins, '__import__', _import_with_failures)
+        reloaded = importlib.reload(capability_module)
+
+    assert reloaded.AgentDepsT is Any
+    assert reloaded.RunContext is Any
+    assert reloaded.AgentInstructions is Any
+    assert reloaded._CAPABILITIES_AVAILABLE is False
+
+    # Restore the module state for later tests.
+    importlib.reload(capability_module)
