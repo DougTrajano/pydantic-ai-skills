@@ -1,166 +1,158 @@
-# Copilot Instructions for pydantic-ai-skills
+# Project Guidelines
 
-## Project Overview
+## Scope
 
-Python library (Python ≥3.10) implementing the [Agent Skills specification](https://agentskills.io/specification) for Pydantic AI. Agent Skills is an open format maintained by Anthropic and open to contributions from the community. Skills are modular collections of instructions, scripts, and resources that extend AI agent capabilities through **progressive disclosure** (load-on-demand to reduce token usage).
+This repository is a Python library (Python >=3.10) implementing the Agent Skills specification for Pydantic AI.
 
-## External Resources
+Use this file for agent-critical defaults only. For detailed user docs, link to the docs site content in [docs/](docs/).
 
-When working on tasks related to Pydantic AI integration, LLM configuration, or advanced framework features, consult the Pydantic AI documentation:
+## Code Style
 
-- **Pydantic AI docs**: https://ai.pydantic.dev/llms.txt - Comprehensive reference for LLM configuration, model selection, tool integration, and framework patterns.
+- Match existing style in [pydantic_ai_skills/](pydantic_ai_skills/).
+- Use single quotes for Python strings (enforced by Ruff config in [pyproject.toml](pyproject.toml)).
+- Keep line length <= 120.
+- Use Google-style docstrings for public APIs.
+- Prefer small, surgical diffs over broad refactors.
 
-Use this resource to understand Pydantic AI's API surface, best practices, and implementation details when extending or integrating skills with the broader Pydantic AI ecosystem.
+## Architecture
 
-## Core Architecture
+Core boundaries:
 
-**3-Layer Skill System:**
+- Discovery layer: [pydantic_ai_skills/directory.py](pydantic_ai_skills/directory.py)
+- Type layer (dataclasses and normalization): [pydantic_ai_skills/types.py](pydantic_ai_skills/types.py)
+- Tool integration layer: [pydantic_ai_skills/toolset.py](pydantic_ai_skills/toolset.py)
+- Local execution and script dispatch: [pydantic_ai_skills/local.py](pydantic_ai_skills/local.py)
+- Capability adapter for pydantic-ai >=1.71: [pydantic_ai_skills/capability.py](pydantic_ai_skills/capability.py)
+- Registry implementations and composition wrappers: [pydantic_ai_skills/registries/](pydantic_ai_skills/registries/)
 
-1. **Discovery Layer** ([directory.py](../pydantic_ai_skills/directory.py)): `SkillsDirectory` scans filesystem for skills, validates YAML frontmatter in SKILL.md files
-2. **Type Layer** ([types.py](../pydantic_ai_skills/types.py)): Dataclasses (`Skill`, `SkillResource`, `SkillScript`) with dual modes — file-based (subclassed in `local.py`) and programmatic (callables with `function_schema`)
-3. **Integration Layer** ([toolset.py](../pydantic_ai_skills/toolset.py)): `SkillsToolset` extends Pydantic AI's `FunctionToolset`, auto-registers 4 tools: `list_skills`, `load_skill`, `read_skill_resource`, `run_skill_script`
+Behavioral constraints to preserve:
 
-Registries (`pydantic_ai_skills/registries/`) extend discovery to remote sources (Git repos) with composition wrappers (`FilteredRegistry`, `PrefixedRegistry`, `RenamedRegistry`, `CombinedRegistry`).
+- Keep `SkillsCapability` import-safe on older pydantic-ai versions (runtime error on use, not import-time crash).
+- Keep capability behavior delegated to `SkillsToolset` for parity.
+- Registry priority order is programmatic > directories > registries.
 
-**Dual Skill Modes:**
+## Build and Test
 
-- **Filesystem skills**: Directory with SKILL.md + optional scripts/, resources (see [examples/skills/arxiv-search/](../examples/skills/arxiv-search/))
-- **Programmatic skills**: Python-defined via decorators with callable resources/scripts (see [examples/programatic_skills.py](../examples/programatic_skills.py))
-
-## Critical Patterns
-
-### Tool Registration (toolset.py)
-
-Tools are registered using Pydantic AI's `@self.tool` decorator. **Every tool function MUST accept `ctx: RunContext[Any]` as first parameter** (protocol requirement), even if unused:
-
-```python
-@self.tool
-async def load_skill(ctx: RunContext[Any], skill_name: str) -> str:
-    """Load full instructions for a skill."""
-    _ = ctx  # Required by protocol, suppress unused warning
-    skill = self.get_skill(skill_name)
-    return LOAD_SKILL_TEMPLATE.format(...)
-```
-
-### Skill Naming Conventions (directory.py#L35-L36)
-
-The Agent Skills spec enforces strict validation (warnings, not errors):
-
-- Pattern: `^[a-z0-9]+(-[a-z0-9]+)*$` (lowercase, hyphens only)
-- Max 64 chars, no reserved words (`anthropic`, `claude`)
-- Use `normalize_skill_name()` to convert function names (underscores → hyphens). Violations emit warnings, not errors.
-- Example: `arxiv-search`, `web-research` ✓ | `ArxivSearch`, `claude_helper` ✗
-
-### YAML Frontmatter Parsing (toolset.py#L94-L121)
-
-Uses regex `^---\s*\n(.*?)^---\s*\n` with `DOTALL|MULTILINE` flags to extract frontmatter, then `yaml.safe_load()`. Critical fields:
-
-- `name` (required): Skill identifier
-- `description` (required, ≤1024 chars): Used in tool selection
-
-### Security Measures
-
-- **Path traversal prevention**: `_is_safe_path()` checks before any file read
-- **Script timeout**: Default 30s, configurable via `script_timeout` param
-- **Async execution**: Scripts run via `anyio.run_process` (not `subprocess`)
-- **Symlink escape detection**: in `_discover_resources()`
-
-## Development Workflow
-
-### Testing (pytest.ini)
+Primary commands:
 
 ```bash
-pytest                     # Full suite with coverage
-pytest tests/test_toolset.py -v  # Specific test file
+pip install -e ".[test]"
+pip install -e ".[git]"
+pytest
+ruff check pydantic_ai_skills/
+ruff format pydantic_ai_skills/
 ```
 
-- `pytest-asyncio` in auto mode - **no `@pytest.mark.asyncio` needed**
-- Fixtures use `tmp_path` to create temporary skill directories (see `sample_skills_dir` in `tests/test_toolset.py`)
-- Coverage reports to `htmlcov/` and terminal
-- Markers: `slow`, `integration`
-
-### Code Style (pyproject.toml)
+Docs commands:
 
 ```bash
-ruff check pydantic_ai_skills/   # Lint
-ruff format pydantic_ai_skills/  # Format
+pip install -e ".[docs]"
+mkdocs serve
+mkdocs build
 ```
 
-- **Single quotes** for strings (enforced by ruff)
-- **Google docstring** convention (D-series rules)
-- Line length: 120 chars
-- Max complexity: 15 (mccabe)
+Testing notes:
 
-### Running Examples
+- `pytest.ini` uses `asyncio_mode = auto` (do not require `@pytest.mark.asyncio`).
+- Keep/add tests in [tests/](tests/) for behavior changes.
+- Useful targeted runs: `pytest tests/test_toolset.py -v`, `pytest -m "not slow"`.
 
-```bash
-# Basic usage with filesystem skills
-python examples/basic_usage.py
+## Conventions and Pitfalls
 
-# Programmatic skills with HR analytics
-python examples/programatic_skills.py
+- Every tool function registered in [pydantic_ai_skills/toolset.py](pydantic_ai_skills/toolset.py) must accept `ctx: RunContext[Any]` first.
+- Skill names must follow the normalized spec format (`lowercase-with-hyphens`, max 64, no `anthropic`/`claude` reserved words).
+- Do not regress path traversal and symlink safety checks in discovery/load paths.
+- Script discovery must include supported extensions and executable files (not Python-only).
+- AnyIO process stream readers should handle `anyio.EndOfStream` explicitly.
+
+## Link, Do Not Duplicate
+
+Prefer linking to existing docs for task-specific details:
+
+- Concepts and architecture: [docs/concepts.md](docs/concepts.md)
+- Creating filesystem skills: [docs/creating-skills.md](docs/creating-skills.md)
+- Programmatic skills: [docs/programmatic-skills.md](docs/programmatic-skills.md)
+- Registries and composition: [docs/registries.md](docs/registries.md)
+- Security model: [docs/security.md](docs/security.md)
+- Advanced patterns: [docs/advanced.md](docs/advanced.md)
+- Contribution workflow: [docs/contributing.md](docs/contributing.md)
+- API references: [docs/api/toolset.md](docs/api/toolset.md), [docs/api/capability.md](docs/api/capability.md), [docs/api/types.md](docs/api/types.md), [docs/api/registries.md](docs/api/registries.md), [docs/api/exceptions.md](docs/api/exceptions.md)
+
+External reference for Pydantic AI integration details:
+
+- https://ai.pydantic.dev/llms.txt
+
+Official Agent Skills specification documentation:
+
+- https://agentskills.io/home
+
+## Behavioral Guidelines for AI Coding Agents
+
+Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
+
+**Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
+
+## 1. Think Before Coding
+
+**Don't assume. Don't hide confusion. Surface tradeoffs.**
+
+Before implementing:
+
+- State your assumptions explicitly. If uncertain, ask.
+- If multiple interpretations exist, present them - don't pick silently.
+- If a simpler approach exists, say so. Push back when warranted.
+- If something is unclear, stop. Name what's confusing. Ask.
+
+## 2. Simplicity First
+
+**Minimum code that solves the problem. Nothing speculative.**
+
+- No features beyond what was asked.
+- No abstractions for single-use code.
+- No "flexibility" or "configurability" that wasn't requested.
+- No error handling for impossible scenarios.
+- If you write 200 lines and it could be 50, rewrite it.
+
+Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+
+## 3. Surgical Changes
+
+**Touch only what you must. Clean up only your own mess.**
+
+When editing existing code:
+
+- Don't "improve" adjacent code, comments, or formatting.
+- Don't refactor things that aren't broken.
+- Match existing style, even if you'd do it differently.
+- If you notice unrelated dead code, mention it - don't delete it.
+
+When your changes create orphans:
+
+- Remove imports/variables/functions that YOUR changes made unused.
+- Don't remove pre-existing dead code unless asked.
+
+The test: Every changed line should trace directly to the user's request.
+
+## 4. Goal-Driven Execution
+
+**Define success criteria. Loop until verified.**
+
+Transform tasks into verifiable goals:
+
+- "Add validation" → "Write tests for invalid inputs, then make them pass"
+- "Fix the bug" → "Write a test that reproduces it, then make it pass"
+- "Refactor X" → "Ensure tests pass before and after"
+
+For multi-step tasks, state a brief plan:
+
+```md
+1. [Step] → verify: [check]
+2. [Step] → verify: [check]
+3. [Step] → verify: [check]
 ```
 
-Examples expect skill-specific dependencies (e.g., `arxiv` package). Install on-demand as needed per skill.
+Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
 
-## Exception Hierarchy
-
-All inherit from `SkillException` in `pydantic_ai_skills/exceptions.py`:
-`SkillNotFoundError`, `SkillValidationError`, `SkillResourceNotFoundError`, `SkillResourceLoadError`, `SkillScriptExecutionError`, `SkillRegistryError`.
-
-## Key Files Reference
-
-| File                                                 | Purpose                                                                        |
-| ---------------------------------------------------- | ------------------------------------------------------------------------------ |
-| [toolset.py](../pydantic_ai_skills/toolset.py)       | Main integration — tool registration, `get_instructions()`, `@skill` decorator |
-| [types.py](../pydantic_ai_skills/types.py)           | Data structures — `Skill.resource()`, `Skill.script()`, `SkillWrapper`         |
-| [directory.py](../pydantic_ai_skills/directory.py)   | Filesystem scanning — `validate_skill_metadata()`, `parse_skill_md()`          |
-| [local.py](../pydantic_ai_skills/local.py)           | File-based resource/script implementations, `LocalSkillScriptExecutor`         |
-| [registries/](../pydantic_ai_skills/registries/)     | Remote skill sources — `GitSkillsRegistry`, composition wrappers               |
-| [exceptions.py](../pydantic_ai_skills/exceptions.py) | Exception hierarchy — all inherit from `SkillException`                        |
-| [test_toolset.py](../tests/test_toolset.py)          | Primary test patterns — `sample_skills_dir` fixture shows skill structure      |
-
-## Creating New Skills
-
-**Filesystem skill minimum (examples/skills/arxiv-search/):**
-
-```markdown
 ---
-name: my-skill
-description: Brief description (max 1024 chars)
----
 
-# Instructions
-
-When to use, how to use, example invocations...
-```
-
-**With scripts (scripts/ subdirectory):**
-
-- Python files executed via subprocess
-- Document args in SKILL.md
-- Use `run_skill_script(skill_name, script_name, args)` from agent
-
-**Programmatic skill (see examples/programatic_skills.py):**
-
-- Create `Skill` instance with metadata
-- Use `@skill.resource` decorator for dynamic content
-- Use `@skill.script` decorator for executable functions
-- Both decorators support `takes_ctx=True` for RunContext access
-
-## Progressive Disclosure Flow
-
-1. Agent receives skill list via `get_instructions()` in system prompt
-2. Agent calls `load_skill(name)` to get full SKILL.md content
-3. Optionally calls `read_skill_resource(skill_name, resource)` for FORMS.md, REFERENCE.md
-4. Executes `run_skill_script(skill_name, script, args)` when needed
-
-This pattern keeps initial context small - agents discover capabilities incrementally.
-
-## Priority Order for Skill Sources
-
-1. Programmatic skills (passed via `skills=[]`) — highest priority
-2. Directory-based skills (passed via `directories=[]`)
-3. Registry skills (passed via `registries=[]`) — lowest, never override existing
-
-If neither `skills`, `directories`, nor `registries` are provided, defaults to `./skills` directory.
+**These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
