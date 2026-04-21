@@ -137,7 +137,7 @@ class LocalSkillScriptExecutor:
         """
         self._python_executable = str(python_executable) if python_executable else sys.executable
         self.timeout = timeout
-        self._env_vars = {str(key): str(value) for key, value in (env_vars or {}).items() if key}
+        self._env_vars = self._coerce_mapping_to_env_vars(env_vars)
         self._context_env_vars_extractor = context_env_vars_extractor
 
     @staticmethod
