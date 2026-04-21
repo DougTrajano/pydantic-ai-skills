@@ -226,6 +226,52 @@ safe_args = sanitize_script_args(args)
 # result = toolset.run_skill_script('my-skill', 'analyze', safe_args)
 ```
 
+### Subprocess env_vars Safety
+
+File-based scripts can receive subprocess environment variables from
+`LocalSkillScriptExecutor(env_vars=...)` and optional run-scoped context values.
+
+Recommended context patterns:
+
+- Prefer `context_env_vars_extractor` to map your integration context explicitly.
+- Keep extractor contracts namespaced in your app model (for example, `ctx.deps.integration_context`).
+
+Security recommendations:
+
+- Default deny: keep custom env_vars minimal unless a script needs them.
+- Pass only required values (for example, trace IDs and scoped user session values).
+- Avoid broad forwarding of sensitive auth data unless strictly required.
+- Treat forwarded env_vars as sensitive runtime data and avoid printing them in logs.
+
+Example (least-privilege mapping):
+
+```python
+from pydantic_ai.toolsets.skills import LocalSkillScriptExecutor
+
+executor = LocalSkillScriptExecutor(
+    env_vars={
+        'AWS_REGION': 'us-east-1',
+    },
+)
+```
+
+Custom extractor example:
+
+```python
+def extract_env_vars(ctx) -> dict[str, str]:
+    integration = ctx.deps.integration_context
+    return {
+        'USER_COOKIES': integration.get('cookies', ''),
+        'TRACE_ID': integration.get('trace_id', ''),
+    }
+
+
+executor = LocalSkillScriptExecutor(
+    env_vars={'AWS_REGION': 'us-east-1'},
+    context_env_vars_extractor=extract_env_vars,
+)
+```
+
 ## Path Traversal Prevention
 
 ### How Protection Works

@@ -16,6 +16,7 @@ Implementations:
 
 from __future__ import annotations
 
+import inspect
 import json
 import os
 import shlex
@@ -23,7 +24,7 @@ import shutil
 import signal
 import subprocess as _subprocess
 import sys
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -35,6 +36,8 @@ from pydantic_ai._utils import is_async_callable, run_in_executor
 
 from .exceptions import SkillResourceLoadError, SkillScriptExecutionError
 from .types import SkillResource, SkillScript
+
+ContextEnvVarsExtractor = Callable[[Any], Mapping[str, Any] | None]
 
 
 @dataclass
@@ -118,15 +121,61 @@ class LocalSkillScriptExecutor:
         self,
         python_executable: str | Path | None = None,
         timeout: int = 30,
+        env_vars: dict[str, str] | None = None,
+        context_env_vars_extractor: ContextEnvVarsExtractor | None = None,
     ) -> None:
         """Initialize the local script executor.
 
         Args:
             python_executable: Path to Python executable. If None, uses sys.executable.
             timeout: Execution timeout in seconds (default: 30).
+            env_vars: Optional static environment variables merged into every script
+                subprocess environment.
+            context_env_vars_extractor: Optional callable that extracts context-specific
+                environment variables from run context. When omitted, no context
+                environment variables are forwarded.
         """
         self._python_executable = str(python_executable) if python_executable else sys.executable
         self.timeout = timeout
+        self._env_vars = self._coerce_mapping_to_env_vars(env_vars)
+        self._context_env_vars_extractor = context_env_vars_extractor
+
+    @staticmethod
+    def _coerce_mapping_to_env_vars(value: Any) -> dict[str, str]:
+        """Convert mapping-like values into subprocess environment variables."""
+        if not isinstance(value, Mapping):
+            return {}
+
+        mapping = cast(Mapping[Any, Any], value)
+        env_vars: dict[str, str] = {}
+        for key, item in mapping.items():
+            key_str = str(key)
+            if not key_str:
+                continue
+            if item is None:
+                continue
+            env_vars[key_str] = str(item)
+
+        return env_vars
+
+    def _build_context_env_vars(self, ctx: Any | None) -> dict[str, str]:
+        """Build context-provided environment variables from run context."""
+        if ctx is None or self._context_env_vars_extractor is None:
+            return {}
+
+        extracted = self._context_env_vars_extractor(ctx)
+        return self._coerce_mapping_to_env_vars(extracted)
+
+    def _build_process_env(self, ctx: Any | None) -> dict[str, str] | None:
+        """Build subprocess environment using static and context env vars."""
+        context_env_vars = self._build_context_env_vars(ctx)
+        if not self._env_vars and not context_env_vars:
+            return None
+
+        process_env = os.environ.copy()
+        process_env.update(self._env_vars)
+        process_env.update(context_env_vars)
+        return process_env
 
     @staticmethod
     def _resolve_interpreter(interpreter: str) -> str | None:
@@ -303,6 +352,7 @@ class LocalSkillScriptExecutor:
         cwd: str,
         use_process_group: bool,
         script_name: str,
+        env: dict[str, str] | None = None,
     ) -> anyio.abc.Process:
         """Start script subprocess and normalize startup errors."""
         try:
@@ -312,6 +362,7 @@ class LocalSkillScriptExecutor:
                 stdout=_subprocess.PIPE,
                 stderr=_subprocess.PIPE,
                 cwd=cwd,
+                env=env,
                 start_new_session=use_process_group,
             )
         except OSError as e:
@@ -321,6 +372,7 @@ class LocalSkillScriptExecutor:
         self,
         script: SkillScript,
         args: dict[str, Any] | None = None,
+        ctx: Any | None = None,
     ) -> Any:
         """Run a skill script locally using subprocess.
 
@@ -329,6 +381,8 @@ class LocalSkillScriptExecutor:
             args: Named arguments as a dictionary.
                 Boolean True emits flag only, False/None omits it,
                 lists repeat the flag for each item, other types convert to string.
+            ctx: Optional run context used to merge context-provided env_vars into
+                the subprocess environment.
 
         Returns:
             Combined stdout and stderr output.
@@ -344,9 +398,17 @@ class LocalSkillScriptExecutor:
         if args:
             self._build_args(cmd, args)
 
+        process_env = self._build_process_env(ctx)
+
         cwd = str(script_path.parent)
         use_process_group = sys.platform != 'win32'
-        process = await self._start_process(cmd, cwd, use_process_group, script.name)
+        process = await self._start_process(
+            cmd,
+            cwd,
+            use_process_group,
+            script.name,
+            env=process_env,
+        )
 
         stdout_chunks: list[bytes] = []
         stderr_chunks: list[bytes] = []
@@ -397,31 +459,61 @@ class CallableSkillScriptExecutor:
 
         Args:
             func: Callable that executes scripts. Can be sync or async.
-                Should accept keyword arguments: script (SkillScript) and args (dict[str, Any] | None),
-                and return the script output as a string. The script's uri attribute contains the file path.
+                Should accept keyword arguments: script (SkillScript) and args (dict[str, Any] | None).
+                It may also receive ctx when the callable declares a ctx keyword parameter or accepts
+                arbitrary keyword arguments via **kwargs. Should return the script output as a string.
+                The script's uri attribute contains the file path.
         """
         self._func = func
         self._is_async = is_async_callable(func)
+        self._accepts_ctx = self._callable_accepts_keyword(func, 'ctx')
+
+    @staticmethod
+    def _callable_accepts_keyword(func: Callable[..., Any], keyword: str) -> bool:
+        """Return True if callable accepts the given keyword argument."""
+        try:
+            signature = inspect.signature(func)
+        except (TypeError, ValueError):
+            return False
+
+        for parameter in signature.parameters.values():
+            if parameter.kind == inspect.Parameter.VAR_KEYWORD:
+                return True
+
+        parameter = signature.parameters.get(keyword)
+        if parameter is None:
+            return False
+
+        return parameter.kind != inspect.Parameter.POSITIONAL_ONLY
 
     async def run(
         self,
         script: SkillScript,
         args: dict[str, Any] | None = None,
+        ctx: Any | None = None,
     ) -> Any:
         """Run using the wrapped callable.
 
         Args:
             script: The script to run.
             args: Named arguments as a dictionary.
+            ctx: Optional run context passed to wrapped callable when supported.
 
         Returns:
             Script output (can be any type like str, dict, etc.).
         """
+        kwargs: dict[str, Any] = {
+            'script': script,
+            'args': args,
+        }
+        if ctx is not None and self._accepts_ctx:
+            kwargs['ctx'] = ctx
+
         if self._is_async:
             function = cast(Callable[..., Awaitable[Any]], self._func)
-            return await function(script=script, args=args)
+            return await function(**kwargs)
         else:
-            return await run_in_executor(self._func, script=script, args=args)
+            return await run_in_executor(self._func, **kwargs)
 
 
 def create_file_based_resource(
@@ -463,7 +555,7 @@ class FileBasedSkillScript(SkillScript):
         """Execute script file via subprocess.
 
         Args:
-            ctx: RunContext for accessing dependencies (unused for file-based scripts).
+            ctx: RunContext for accessing dependencies and optional env_vars.
             args: Named arguments passed as command-line arguments.
                 Argument conversion rules:
                 - Boolean True: emits flag only (e.g., --verbose)
@@ -480,7 +572,7 @@ class FileBasedSkillScript(SkillScript):
         if not self.uri:
             raise SkillScriptExecutionError(f"Script '{self.name}' has no URI")
 
-        return await self.executor.run(self, args)
+        return await self.executor.run(self, args, ctx=ctx)
 
 
 def create_file_based_script(
