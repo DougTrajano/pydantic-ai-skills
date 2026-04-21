@@ -3,6 +3,7 @@
 import shutil
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -122,6 +123,159 @@ for i in range(1, len(sys.argv), 2):
 
     assert '--query' in result or 'query' in result
     assert 'test' in result
+
+
+@pytest.mark.asyncio
+async def test_local_script_executor_forwards_static_env_vars(tmp_path: Path) -> None:
+    """Test LocalSkillScriptExecutor forwards static env_vars to subprocesses."""
+    script_file = tmp_path / 'env_script.py'
+    script_file.write_text("""#!/usr/bin/env python3
+import os
+print(os.getenv('TEST_USER_COOKIES', 'missing'))
+print(os.getenv('TEST_REQUEST_ID', 'missing'))
+print(os.getenv('TEST_AUTHORIZATION', 'missing'))
+""")
+
+    executor = LocalSkillScriptExecutor(
+        env_vars={
+            'TEST_USER_COOKIES': 'session=abc123',
+            'TEST_REQUEST_ID': 'req-123',
+        }
+    )
+    script = FileBasedSkillScript(
+        name='env_script',
+        uri=str(script_file),
+        executor=executor,
+    )
+
+    result = await script.run(SimpleNamespace(deps=SimpleNamespace()))
+
+    assert 'session=abc123' in result
+    assert 'req-123' in result
+    assert 'missing' in result
+
+
+@pytest.mark.asyncio
+async def test_local_script_executor_default_does_not_forward_env_vars(tmp_path: Path) -> None:
+    """Test LocalSkillScriptExecutor does not set env vars by default."""
+    script_file = tmp_path / 'env_script_default.py'
+    script_file.write_text("""#!/usr/bin/env python3
+import os
+print(os.getenv('TEST_USER_COOKIES', 'missing'))
+""")
+
+    executor = LocalSkillScriptExecutor()
+    script = FileBasedSkillScript(
+        name='env_script_default',
+        uri=str(script_file),
+        executor=executor,
+    )
+
+    result = await script.run(SimpleNamespace(deps=SimpleNamespace()))
+
+    assert result.strip() == 'missing'
+
+
+@pytest.mark.asyncio
+async def test_local_script_executor_forwards_context_env_vars(tmp_path: Path) -> None:
+    """Test LocalSkillScriptExecutor forwards context env_vars via custom extractor."""
+    script_file = tmp_path / 'env_script_missing_ctx.py'
+    script_file.write_text("""#!/usr/bin/env python3
+import os
+print(os.getenv('TEST_USER_COOKIES', 'missing'))
+""")
+
+    def extract_env_vars(ctx: SimpleNamespace) -> dict[str, str]:
+        return {'TEST_USER_COOKIES': ctx.deps.integration_context['cookies']}
+
+    executor = LocalSkillScriptExecutor(context_env_vars_extractor=extract_env_vars)
+    script = FileBasedSkillScript(
+        name='env_script_missing_ctx',
+        uri=str(script_file),
+        executor=executor,
+    )
+
+    ctx = SimpleNamespace(deps=SimpleNamespace(integration_context={'cookies': 'session=abc123'}))
+
+    result = await script.run(ctx)
+
+    assert result.strip() == 'session=abc123'
+
+
+@pytest.mark.asyncio
+async def test_local_script_executor_context_env_vars_override_static(tmp_path: Path) -> None:
+    """Test context env_vars override static executor env_vars."""
+    script_file = tmp_path / 'env_script_override.py'
+    script_file.write_text("""#!/usr/bin/env python3
+import os
+print(os.getenv('TEST_TOKEN', 'missing'))
+""")
+
+    def extract_env_vars(ctx: SimpleNamespace) -> dict[str, str]:
+        return {'TEST_TOKEN': ctx.deps.integration_context['token']}
+
+    executor = LocalSkillScriptExecutor(
+        env_vars={'TEST_TOKEN': 'static-value'},
+        context_env_vars_extractor=extract_env_vars,
+    )
+    script = FileBasedSkillScript(
+        name='env_script_override',
+        uri=str(script_file),
+        executor=executor,
+    )
+
+    ctx = SimpleNamespace(deps=SimpleNamespace(integration_context={'token': 'context-value'}))
+
+    result = await script.run(ctx)
+
+    assert result.strip() == 'context-value'
+
+
+@pytest.mark.asyncio
+async def test_local_script_executor_uses_custom_context_env_vars_extractor(tmp_path: Path) -> None:
+    """Test LocalSkillScriptExecutor accepts a custom context env var extractor."""
+    script_file = tmp_path / 'env_script_custom.py'
+    script_file.write_text("""#!/usr/bin/env python3
+import os
+print(os.getenv('TEST_CUSTOM_TOKEN', 'missing'))
+""")
+
+    def custom_extractor(ctx: SimpleNamespace) -> dict[str, str]:
+        return {'TEST_CUSTOM_TOKEN': ctx.deps.integration_context['token']}
+
+    executor = LocalSkillScriptExecutor(context_env_vars_extractor=custom_extractor)
+    script = FileBasedSkillScript(
+        name='env_script_custom',
+        uri=str(script_file),
+        executor=executor,
+    )
+
+    ctx = SimpleNamespace(deps=SimpleNamespace(integration_context={'token': 'abc-custom'}))
+    result = await script.run(ctx)
+
+    assert result.strip() == 'abc-custom'
+
+
+@pytest.mark.asyncio
+async def test_local_script_executor_does_not_forward_context_without_extractor(tmp_path: Path) -> None:
+    """Test context values are ignored when no extractor is configured."""
+    script_file = tmp_path / 'env_script_no_extractor.py'
+    script_file.write_text("""#!/usr/bin/env python3
+import os
+print(os.getenv('TEST_USER_COOKIES', 'missing'))
+""")
+
+    executor = LocalSkillScriptExecutor()
+    script = FileBasedSkillScript(
+        name='env_script_no_extractor',
+        uri=str(script_file),
+        executor=executor,
+    )
+
+    ctx = SimpleNamespace(deps=SimpleNamespace(integration_context={'cookies': 'session=abc123'}))
+    result = await script.run(ctx)
+
+    assert result.strip() == 'missing'
 
 
 @pytest.mark.asyncio

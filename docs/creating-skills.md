@@ -278,6 +278,103 @@ if __name__ == "__main__":
     main()
 ```
 
+### Script Environment Variables
+
+For file-based scripts, subprocess environment variables can be supplied in two ways:
+
+- Static `env_vars` configured on `LocalSkillScriptExecutor`
+- Run-scoped values via `context_env_vars_extractor`
+
+For maximum flexibility, you can also provide `context_env_vars_extractor` to define
+your own context contract (for example, values from [Dependencies](https://pydantic.dev/docs/ai/core-concepts/dependencies/) - `ctx.deps`).
+
+```python
+from dataclasses import dataclass
+
+from fastapi import Request
+from pydantic_ai import Agent
+from pydantic_ai.toolsets.skills import LocalSkillScriptExecutor, SkillsDirectory, SkillsToolset
+
+
+@dataclass
+class AppDeps:
+    request: Request
+    integration_context: dict[str, str]
+
+
+executor = LocalSkillScriptExecutor(
+    env_vars={
+        'AWS_REGION': 'us-east-1',
+    },
+    context_env_vars_extractor=lambda ctx: {
+        'USER_COOKIES': ctx.deps.integration_context.get('cookies', ''),
+        'USER_REQUEST_ID': ctx.deps.integration_context.get('request_id', ''),
+    },
+)
+
+skills_dir = SkillsDirectory(
+    path='./skills',
+    script_executor=executor,
+)
+
+skills = SkillsToolset(directories=[skills_dir])
+
+agent = Agent(
+    'openai:gpt-5.2',
+    toolsets=[skills],
+    deps_type=AppDeps,
+)
+```
+
+In your script, read those values from environment variables:
+
+```python
+#!/usr/bin/env python3
+import os
+
+user_cookies = os.getenv('USER_COOKIES', '')
+request_id = os.getenv('USER_REQUEST_ID', '')
+region = os.getenv('AWS_REGION', '')
+
+print(f'cookie={user_cookies}')
+print(f'request_id={request_id}')
+print(f'region={region}')
+```
+
+Run-scoped values can be set when invoking the agent in your FastAPI layer:
+
+```python
+deps = AppDeps(
+    request=request,
+    integration_context={
+        'cookies': request.headers.get('cookie', ''),
+        'request_id': request.headers.get('x-request-id', ''),
+    },
+)
+
+result = await agent.run('Get my recent orders', deps=deps)
+```
+
+Custom extractor example:
+
+```python
+def custom_env_extractor(ctx) -> dict[str, str]:
+    integration = ctx.deps.integration_context
+    return {
+        'USER_COOKIES': integration['cookies'],
+        'USER_REQUEST_ID': integration['request_id'],
+    }
+
+
+executor = LocalSkillScriptExecutor(
+    env_vars={'AWS_REGION': 'us-east-1'},
+    context_env_vars_extractor=custom_env_extractor,
+)
+```
+
+If no env_vars are configured, scripts run with the normal inherited process environment only.
+If no `context_env_vars_extractor` is configured, run-scoped context values are not forwarded.
+
 ### Parsing and Output Formats
 
 **JSON Output (Recommended):**
