@@ -1,6 +1,6 @@
 # Examples
 
-This folder contains runnable examples demonstrating how to use `pydantic-ai-skills` in different scenarios. Each script spins up a Pydantic AI agent as a web server using [uvicorn](https://www.uvicorn.org/) on `http://127.0.0.1:7932`.
+This folder contains runnable examples demonstrating how to use `pydantic-ai-skills` in different scenarios. Most scripts spin up a Pydantic AI agent as a web server using [uvicorn](https://www.uvicorn.org/) on `http://127.0.0.1:7932`.
 
 ## Contents
 
@@ -10,6 +10,7 @@ This folder contains runnable examples demonstrating how to use `pydantic-ai-ski
 | `advanced_usage.py` | Multiple skills directories, DuckDuckGo search tool, `httpx` URL fetcher, and a filesystem sandbox. |
 | `git_registry_usage.py` | Loads skills from a remote Git repository using `GitSkillsRegistry` (clones Anthropic's public skills repo). |
 | `programatic_skills.py` | Defines a skill entirely in Python using `@skill.resource` / `@skill.script` decorators — HR Analytics Agent backed by a HuggingFace dataset. |
+| `debug_local_logging.py` | Development-focused example that runs file-based skill scripts in-process for breakpoint debugging and writes a local execution log file. |
 
 ### Bundled skills
 
