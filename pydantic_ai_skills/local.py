@@ -459,8 +459,10 @@ class CallableSkillScriptExecutor:
 
         Args:
             func: Callable that executes scripts. Can be sync or async.
-                Should accept keyword arguments: script (SkillScript) and args (dict[str, Any] | None),
-                and return the script output as a string. The script's uri attribute contains the file path.
+                Should accept keyword arguments: script (SkillScript) and args (dict[str, Any] | None).
+                It may also receive ctx when the callable declares a ctx keyword parameter or accepts
+                arbitrary keyword arguments via **kwargs. Should return the script output as a string.
+                The script's uri attribute contains the file path.
         """
         self._func = func
         self._is_async = is_async_callable(func)
