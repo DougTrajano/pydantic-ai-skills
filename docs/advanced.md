@@ -384,6 +384,39 @@ def sync_script(ctx: RunContext[MyDeps]) -> str:
 
 ## Custom Script Executors
 
+### Debugging File-Based Scripts Locally
+
+File-based scripts discovered from skill directories run in a subprocess by default (`LocalSkillScriptExecutor`). For local development and debugging, you can switch to an in-process executor that uses `runpy.run_path` to execute script files directly in the same process. This allows you to set breakpoints and inspect variables with your IDE's debugger.
+
+```bash
+python -m examples.debug_local_logging
+```
+
+The example above:
+
+1. Creates a demo skill under `examples/tmp/debug-logging-skill`
+2. Uses `CallableSkillScriptExecutor` to run script files in-process with `runpy.run_path`
+3. Captures stdout/stderr and writes execution traces to `examples/tmp/debug-local-executor.log`
+
+Minimal pattern:
+
+```python
+from pydantic_ai_skills import CallableSkillScriptExecutor, SkillsDirectory
+
+async def in_process_executor(*, script, args=None):
+    # Development-only path for breakpoint debugging.
+    ...
+
+executor = CallableSkillScriptExecutor(func=in_process_executor)
+skills_dir = SkillsDirectory(path='./skills', script_executor=executor)
+```
+
+Important caveats:
+
+- **Not for production**: Running untrusted scripts in-process can be dangerous. Use this pattern only for local development with trusted code.
+- **Limited isolation**: In-process execution means scripts have access to the same memory and environment as your agent. Be cautious of side effects and security implications.
+- **Performance**: In-process execution may be faster for small scripts, but can lead to memory leaks or instability if the script misbehaves. Always test thoroughly when using custom executors.
+
 ### Creating Custom Executors
 
 For advanced use cases, you can provide custom script executors that handle script execution differently than the built-in local executor. This enables:
