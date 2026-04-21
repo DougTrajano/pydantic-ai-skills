@@ -478,7 +478,11 @@ class CallableSkillScriptExecutor:
             if parameter.kind == inspect.Parameter.VAR_KEYWORD:
                 return True
 
-        return keyword in signature.parameters
+        parameter = signature.parameters.get(keyword)
+        if parameter is None:
+            return False
+
+        return parameter.kind != inspect.Parameter.POSITIONAL_ONLY
 
     async def run(
         self,
