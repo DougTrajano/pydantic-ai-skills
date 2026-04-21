@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import io
 import json
+import os
 import runpy
 import sys
 from contextlib import redirect_stderr, redirect_stdout
@@ -23,6 +24,7 @@ EXAMPLES_DIR = Path(__file__).parent
 TMP_DIR = EXAMPLES_DIR / 'tmp'
 SKILL_DIR = TMP_DIR / 'debug-logging-skill'
 LOG_FILE = TMP_DIR / 'debug-local-executor.log'
+_JSON_ARG_TYPES = (dict, list, tuple)
 
 
 def _append_log(message: str) -> None:
@@ -71,14 +73,31 @@ if __name__ == '__main__':
 
 
 def _args_to_argv(args: dict[str, Any] | None) -> list[str]:
-    """Convert named args into CLI-style arguments for the script."""
+    """Convert args using LocalSkillScriptExecutor-style CLI semantics."""
     if not args:
         return []
 
     argv: list[str] = []
     for key, value in args.items():
+        if isinstance(value, bool):
+            if value:
+                argv.append(f'--{key}')
+            continue
+
+        if isinstance(value, list):
+            for item in value:
+                argv.append(f'--{key}')
+                if isinstance(item, _JSON_ARG_TYPES):
+                    argv.append(json.dumps(item))
+                else:
+                    argv.append(str(item))
+            continue
+
+        if value is None:
+            continue
+
         argv.append(f'--{key}')
-        if isinstance(value, dict | list | tuple):
+        if isinstance(value, _JSON_ARG_TYPES):
             argv.append(json.dumps(value))
         else:
             argv.append(str(value))
@@ -104,15 +123,24 @@ async def _in_process_executor(*, script: Any, args: dict[str, Any] | None = Non
     stdout_stream = io.StringIO()
     stderr_stream = io.StringIO()
     original_argv = sys.argv[:]
+    original_cwd = os.getcwd()
+    script_dir = str(Path(script_uri).parent)
+    exit_note = ''
 
     try:
         sys.argv = [script_uri, *argv]
+        os.chdir(script_dir)
         with redirect_stdout(stdout_stream), redirect_stderr(stderr_stream):
-            runpy.run_path(script_uri, run_name='__main__')
+            try:
+                runpy.run_path(script_uri, run_name='__main__')
+            except SystemExit as e:
+                code = e.code if e.code is not None else 0
+                exit_note = f'\nSystemExit: {code}'
     finally:
         sys.argv = original_argv
+        os.chdir(original_cwd)
 
-    stdout_output = stdout_stream.getvalue().strip()
+    stdout_output = stdout_stream.getvalue().strip() + exit_note
     stderr_output = stderr_stream.getvalue().strip()
     _append_log(f'finish script={script.name} stdout_len={len(stdout_output)} stderr_len={len(stderr_output)}')
 
