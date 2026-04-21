@@ -156,8 +156,12 @@ print(os.getenv('TEST_AUTHORIZATION', 'missing'))
 
 
 @pytest.mark.asyncio
-async def test_local_script_executor_default_does_not_forward_env_vars(tmp_path: Path) -> None:
+async def test_local_script_executor_default_does_not_forward_env_vars(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Test LocalSkillScriptExecutor does not set env vars by default."""
+    monkeypatch.delenv('TEST_USER_COOKIES', raising=False)
+
     script_file = tmp_path / 'env_script_default.py'
     script_file.write_text("""#!/usr/bin/env python3
 import os
