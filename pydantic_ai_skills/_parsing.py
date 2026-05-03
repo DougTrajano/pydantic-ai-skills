@@ -63,6 +63,35 @@ def parse_skill_md(content: str) -> tuple[dict[str, Any], str]:
     return frontmatter, instructions
 
 
+def _validate_name_format(name: str, location: str) -> bool:
+    """Validate skill name format and emit warnings. Returns False if any check fails."""
+    is_valid = True
+    if len(name) > 64:
+        warnings.warn(
+            f"Skill name '{name}'{location} exceeds 64 characters ({len(name)} chars) recommendation."
+            f' Consider shortening it.',
+            UserWarning,
+            stacklevel=3,
+        )
+        is_valid = False
+    elif not SKILL_NAME_PATTERN.match(name):
+        warnings.warn(
+            f"Skill name '{name}'{location} should contain only lowercase letters, numbers, and hyphens",
+            UserWarning,
+            stacklevel=3,
+        )
+        is_valid = False
+    for reserved in RESERVED_WORDS:
+        if reserved in name:
+            warnings.warn(
+                f"Skill name '{name}'{location} contains reserved word '{reserved}'",
+                UserWarning,
+                stacklevel=3,
+            )
+            is_valid = False
+    return is_valid
+
+
 def validate_skill_metadata(
     frontmatter: dict[str, Any],
     instructions: str,
@@ -84,9 +113,9 @@ def validate_skill_metadata(
     # Coerce to str — YAML values may be int/list/None for pathological frontmatter
     name = str(frontmatter.get('name') or '')
     description = str(frontmatter.get('description') or '')
+    compatibility = str(frontmatter.get('compatibility') or '')
     location = f' ({uri})' if uri else ''
 
-    # Warn when description is absent
     if not description:
         warnings.warn(
             f"Skill '{name}'{location}: missing recommended 'description' field",
@@ -95,34 +124,9 @@ def validate_skill_metadata(
         )
         is_valid = False
 
-    # Validate name format
-    if name:
-        if len(name) > 64:
-            warnings.warn(
-                f"Skill name '{name}'{location} exceeds 64 characters ({len(name)} chars) recommendation."
-                f' Consider shortening it.',
-                UserWarning,
-                stacklevel=2,
-            )
-            is_valid = False
-        elif not SKILL_NAME_PATTERN.match(name):
-            warnings.warn(
-                f"Skill name '{name}'{location} should contain only lowercase letters, numbers, and hyphens",
-                UserWarning,
-                stacklevel=2,
-            )
-            is_valid = False
-        # Check for reserved words
-        for reserved in RESERVED_WORDS:
-            if reserved in name:
-                warnings.warn(
-                    f"Skill name '{name}'{location} contains reserved word '{reserved}'",
-                    UserWarning,
-                    stacklevel=2,
-                )
-                is_valid = False
+    if name and not _validate_name_format(name, location):
+        is_valid = False
 
-    # Validate description
     if description and len(description) > 1024:
         warnings.warn(
             f"Skill '{name}'{location}: description exceeds 1024 characters ({len(description)} chars)",
@@ -131,8 +135,6 @@ def validate_skill_metadata(
         )
         is_valid = False
 
-    # Validate compatibility (if provided)
-    compatibility = str(frontmatter.get('compatibility') or '')
     if compatibility and len(compatibility) > 500:
         warnings.warn(
             f"Skill '{name}'{location}: compatibility exceeds 500 characters ({len(compatibility)} chars)",
@@ -141,11 +143,9 @@ def validate_skill_metadata(
         )
         is_valid = False
 
-    # Validate instructions length (Anthropic recommends under 500 lines)
-    lines = instructions.split('\n')
-    if len(lines) > 500:
+    if len(instructions.split('\n')) > 500:
         warnings.warn(
-            f"Skill '{name}'{location}: SKILL.md body exceeds recommended 500 lines ({len(lines)} lines). "
+            f"Skill '{name}'{location}: SKILL.md body exceeds recommended 500 lines. "
             f'Consider splitting into separate resource files.',
             UserWarning,
             stacklevel=2,
