@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from pydantic_ai_skills.directory import discover_skills
+from pydantic_ai_skills.exceptions import SkillValidationError
 
 
 def test_discover_skills_single_skill(tmp_path: Path) -> None:
@@ -217,9 +218,9 @@ description: Missing name field
 Content.
 """)
 
-    # With validation, should skip this skill (log warning)
-    skills = discover_skills(tmp_path, validate=True)
-    assert len(skills) == 0
+    # With validation, missing name is an error
+    with pytest.raises(SkillValidationError, match='missing the required "name" field'):
+        discover_skills(tmp_path, validate=True)
 
 
 def test_discover_skills_missing_name_without_validation(tmp_path: Path) -> None:

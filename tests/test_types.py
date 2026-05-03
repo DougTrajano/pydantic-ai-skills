@@ -2,6 +2,9 @@
 
 from pathlib import Path
 
+import pytest
+
+from pydantic_ai_skills.exceptions import SkillValidationError
 from pydantic_ai_skills.types import Skill, SkillResource, SkillScript
 
 
@@ -70,3 +73,68 @@ def test_skill_explicit_uri_preserved() -> None:
     skill = Skill(name='my-skill', description='A skill', content='Instructions', uri='custom://my-uri')
 
     assert skill.uri == 'custom://my-uri'
+
+
+def _write_skill_md(directory: Path, content: str) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / 'SKILL.md').write_text(content)
+
+
+def test_from_file_directory_path(tmp_path: Path) -> None:
+    """Load a skill by passing the directory that contains SKILL.md."""
+    skill_dir = tmp_path / 'my-skill'
+    _write_skill_md(skill_dir, '---\nname: my-skill\ndescription: A skill\n---\n\nInstructions.\n')
+
+    skill = Skill.from_file(skill_dir)
+
+    assert skill.name == 'my-skill'
+    assert skill.description == 'A skill'
+    assert 'Instructions' in skill.content
+    assert skill.uri == str(skill_dir.resolve())
+
+
+def test_from_file_explicit_skill_md_path(tmp_path: Path) -> None:
+    """Load a skill by passing the SKILL.md file path directly."""
+    skill_dir = tmp_path / 'my-skill'
+    _write_skill_md(skill_dir, '---\nname: my-skill\ndescription: A skill\n---\n\nInstructions.\n')
+
+    skill = Skill.from_file(skill_dir / 'SKILL.md')
+
+    assert skill.name == 'my-skill'
+
+
+def test_from_file_missing_skill_md(tmp_path: Path) -> None:
+    """A path without SKILL.md raises SkillValidationError."""
+    with pytest.raises(SkillValidationError, match='SKILL.md not found'):
+        Skill.from_file(tmp_path / 'nonexistent')
+
+
+def test_from_file_missing_name_validate_true(tmp_path: Path) -> None:
+    """Missing name with validate=True raises SkillValidationError."""
+    skill_dir = tmp_path / 'no-name'
+    _write_skill_md(skill_dir, '---\ndescription: No name\n---\n\nContent.\n')
+
+    with pytest.raises(SkillValidationError, match='missing the required "name" field'):
+        Skill.from_file(skill_dir, validate=True)
+
+
+def test_from_file_missing_name_validate_false(tmp_path: Path) -> None:
+    """Missing name with validate=False falls back to the directory name."""
+    skill_dir = tmp_path / 'my-fallback-skill'
+    _write_skill_md(skill_dir, '---\ndescription: No name\n---\n\nContent.\n')
+
+    skill = Skill.from_file(skill_dir, validate=False)
+
+    assert skill.name == 'my-fallback-skill'
+
+
+def test_from_file_with_resources(tmp_path: Path) -> None:
+    """Resource files alongside SKILL.md are discovered and populated."""
+    skill_dir = tmp_path / 'my-skill'
+    _write_skill_md(skill_dir, '---\nname: my-skill\ndescription: A skill\n---\n\nInstructions.\n')
+    (skill_dir / 'schema.json').write_text('{"table": "users"}')
+
+    skill = Skill.from_file(skill_dir)
+
+    assert len(skill.resources) == 1
+    assert skill.resources[0].name == 'schema.json'

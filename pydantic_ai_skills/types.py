@@ -12,19 +12,20 @@ Data classes:
 
 from __future__ import annotations
 
-import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, Generic, TypeVar
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from pydantic.json_schema import GenerateJsonSchema
 from pydantic_ai import _function_schema
 from pydantic_ai.tools import GenerateToolJsonSchema
 
+from ._parsing import SKILL_NAME_PATTERN, parse_skill_md, validate_skill_metadata
 from .exceptions import SkillValidationError
 
-# Skill name pattern: lowercase letters, numbers, and hyphens (no consecutive hyphens)
-SKILL_NAME_PATTERN = re.compile(r'^[a-z0-9]+(-[a-z0-9]+)*$')
+if TYPE_CHECKING:
+    from .local import CallableSkillScriptExecutor, LocalSkillScriptExecutor
 
 # Generic type variable for dependencies
 DepsT = TypeVar('DepsT')
@@ -259,6 +260,72 @@ class Skill:
         """
         if self.uri is None:
             self.uri = f'skill://{self.name}'
+
+    @classmethod
+    def from_file(
+        cls,
+        path: str | Path,
+        validate: bool = True,
+        script_executor: LocalSkillScriptExecutor | CallableSkillScriptExecutor | None = None,
+    ) -> Skill:
+        """Load a :class:`Skill` from a SKILL.md file or its parent directory.
+
+        Args:
+            path: Path to a ``SKILL.md`` file or to the directory that contains one.
+            validate: Whether to validate skill structure (name, description, etc.).
+            script_executor: Optional custom script executor for file-based scripts.
+
+        Returns:
+            A :class:`Skill` instance.
+
+        Raises:
+            SkillValidationError: If the path does not contain a valid SKILL.md or
+                validation fails.
+        """
+        from .directory import _discover_resources, _discover_scripts  # lazy: transitive circular via local.py
+        from .local import LocalSkillScriptExecutor as _LocalExecutor
+
+        skill_path = Path(path).expanduser().resolve()
+        skill_file = skill_path / 'SKILL.md' if skill_path.is_dir() else skill_path
+
+        if not skill_file.exists():
+            raise SkillValidationError(f'SKILL.md not found at {skill_file}')
+
+        skill_folder = skill_file.parent
+        raw = skill_file.read_text(encoding='utf-8')
+        frontmatter, instructions = parse_skill_md(raw)
+
+        name = frontmatter.get('name')
+        if not name:
+            if validate:
+                raise SkillValidationError(f'Skill at {skill_file} is missing the required "name" field')
+            name = skill_folder.name
+
+        description = frontmatter.get('description', '')
+        license_field = frontmatter.get('license')
+        compatibility_field = frontmatter.get('compatibility')
+        metadata = {
+            k: v for k, v in frontmatter.items() if k not in ('name', 'description', 'license', 'compatibility')
+        }
+
+        if validate:
+            validate_skill_metadata(frontmatter, instructions, uri=str(skill_folder))
+
+        executor = script_executor or _LocalExecutor()
+        resources = _discover_resources(skill_folder)
+        scripts = _discover_scripts(skill_folder, name, executor)
+
+        return cls(
+            name=name,
+            description=description,
+            content=instructions,
+            license=license_field,
+            compatibility=compatibility_field,
+            uri=str(skill_folder),
+            resources=resources,
+            scripts=scripts,
+            metadata=metadata if metadata else None,
+        )
 
     def resource(
         self,
