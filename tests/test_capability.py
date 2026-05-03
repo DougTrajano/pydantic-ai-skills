@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from pydantic_ai_skills import SkillsCapability, SkillsToolset
@@ -28,11 +30,14 @@ def test_skills_capability_init_with_directories() -> None:
     assert isinstance(capability.get_toolset(), SkillsToolset)
 
 
-def test_skills_capability_init_with_all_params(tmp_path: object) -> None:
+def test_skills_capability_init_with_all_params(tmp_path: Path) -> None:
     """Constructor should accept all parameters."""
+    skills_dir = tmp_path / 'skills'
+    skills_dir.mkdir()
+
     capability = SkillsCapability(
         skills=[],
-        directories=['./skills'],
+        directories=[skills_dir],
         registries=[],
         validate=False,
         max_depth=5,
