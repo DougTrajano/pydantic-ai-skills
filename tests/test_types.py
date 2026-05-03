@@ -104,9 +104,9 @@ def test_from_file_explicit_skill_md_path(tmp_path: Path) -> None:
 
 
 def test_from_file_missing_skill_md(tmp_path: Path) -> None:
-    """A path without SKILL.md raises SkillValidationError."""
+    """A SKILL.md path that does not exist raises SkillValidationError."""
     with pytest.raises(SkillValidationError, match='SKILL.md not found'):
-        Skill.from_file(tmp_path / 'nonexistent')
+        Skill.from_file(tmp_path / 'nonexistent' / 'SKILL.md')
 
 
 def test_from_file_missing_name_validate_true(tmp_path: Path) -> None:
@@ -138,3 +138,54 @@ def test_from_file_with_resources(tmp_path: Path) -> None:
 
     assert len(skill.resources) == 1
     assert skill.resources[0].name == 'schema.json'
+
+
+def test_from_file_wrong_filename_raises(tmp_path: Path) -> None:
+    """Passing a file that is not named SKILL.md raises SkillValidationError."""
+    other_file = tmp_path / 'README.md'
+    other_file.write_text('# not a skill')
+
+    with pytest.raises(SkillValidationError, match='SKILL.md'):
+        Skill.from_file(other_file)
+
+
+def test_from_file_non_dict_frontmatter_raises(tmp_path: Path) -> None:
+    """YAML frontmatter that is a list (not a mapping) raises SkillValidationError."""
+    skill_dir = tmp_path / 'bad-skill'
+    _write_skill_md(skill_dir, '---\n- item1\n- item2\n---\n\nContent.\n')
+
+    with pytest.raises(SkillValidationError, match='mapping'):
+        Skill.from_file(skill_dir, validate=False)
+
+
+def test_from_file_custom_script_executor(tmp_path: Path) -> None:
+    """A custom script_executor is passed through to script discovery."""
+    import sys
+
+    from pydantic_ai_skills.local import LocalSkillScriptExecutor
+
+    skill_dir = tmp_path / 'my-skill'
+    _write_skill_md(skill_dir, '---\nname: my-skill\ndescription: A skill\n---\n\nInstructions.\n')
+
+    scripts_dir = skill_dir / 'scripts'
+    scripts_dir.mkdir()
+    script = scripts_dir / 'run.py'
+    script.write_text('#!/usr/bin/env python3\nprint("hello")\n')
+    if sys.platform != 'win32':
+        script.chmod(0o755)
+
+    executor = LocalSkillScriptExecutor(timeout=120)
+    skill = Skill.from_file(skill_dir, script_executor=executor)
+
+    assert len(skill.scripts) == 1
+    assert skill.scripts[0].name == 'scripts/run.py'
+
+
+def test_from_file_integer_name_field(tmp_path: Path) -> None:
+    """A numeric name in YAML (e.g. name: 123) is coerced to str, not TypeError."""
+    skill_dir = tmp_path / 'numeric-name'
+    _write_skill_md(skill_dir, '---\nname: 123\ndescription: A skill\n---\n\nContent.\n')
+
+    skill = Skill.from_file(skill_dir, validate=False)
+
+    assert skill.name == '123'

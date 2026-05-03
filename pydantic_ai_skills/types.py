@@ -281,12 +281,18 @@ class Skill:
         Raises:
             SkillValidationError: If the path does not contain a valid SKILL.md or
                 validation fails.
+            OSError: If the file cannot be read (permissions, I/O error, etc.).
         """
         from .directory import _discover_resources, _discover_scripts  # lazy: transitive circular via local.py
         from .local import LocalSkillScriptExecutor as _LocalExecutor
 
         skill_path = Path(path).expanduser().resolve()
-        skill_file = skill_path / 'SKILL.md' if skill_path.is_dir() else skill_path
+        if skill_path.is_dir():
+            skill_file = skill_path / 'SKILL.md'
+        else:
+            if skill_path.name.upper() != 'SKILL.MD':
+                raise SkillValidationError(f"Expected a SKILL.md file or its parent directory, got '{skill_path.name}'")
+            skill_file = skill_path
 
         if not skill_file.exists():
             raise SkillValidationError(f'SKILL.md not found at {skill_file}')
@@ -300,10 +306,14 @@ class Skill:
             if validate:
                 raise SkillValidationError(f'Skill at {skill_file} is missing the required "name" field')
             name = skill_folder.name
+        name = str(name)  # coerce int/float YAML values to str
 
-        description = frontmatter.get('description', '')
+        # Coerce YAML scalar fields to str — YAML may return int/float/None
+        description = str(frontmatter.get('description') or '')
         license_field = frontmatter.get('license')
+        license_field = str(license_field) if license_field is not None else None
         compatibility_field = frontmatter.get('compatibility')
+        compatibility_field = str(compatibility_field) if compatibility_field is not None else None
         metadata = {
             k: v for k, v in frontmatter.items() if k not in ('name', 'description', 'license', 'compatibility')
         }

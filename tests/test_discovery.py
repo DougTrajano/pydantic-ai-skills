@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from pydantic_ai_skills.directory import discover_skills
+from pydantic_ai_skills.directory import SkillsDirectory, discover_skills
 from pydantic_ai_skills.exceptions import SkillValidationError
 
 
@@ -282,3 +282,26 @@ Content.
     assert 'resources/schema.json' in resource_names
     assert 'resources/template.txt' in resource_names
     assert 'resources/nested/data.csv' in resource_names
+
+
+def test_skills_directory_missing_name_with_validation(tmp_path: Path) -> None:
+    """SkillsDirectory with validate=True raises on a skill missing its name."""
+    skill_dir = tmp_path / 'nameless'
+    skill_dir.mkdir()
+    (skill_dir / 'SKILL.md').write_text('---\ndescription: No name\n---\n\nContent.\n')
+
+    with pytest.raises(SkillValidationError, match='missing the required "name" field'):
+        SkillsDirectory(path=tmp_path, validate=True)
+
+
+def test_skills_directory_missing_name_without_validation(tmp_path: Path) -> None:
+    """SkillsDirectory with validate=False falls back to the directory name."""
+    skill_dir = tmp_path / 'my-skill'
+    skill_dir.mkdir()
+    (skill_dir / 'SKILL.md').write_text('---\ndescription: No name\n---\n\nContent.\n')
+
+    sd = SkillsDirectory(path=tmp_path, validate=False)
+    skills = list(sd.get_skills().values())
+
+    assert len(skills) == 1
+    assert skills[0].name == 'my-skill'

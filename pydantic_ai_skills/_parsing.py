@@ -55,9 +55,12 @@ def parse_skill_md(content: str) -> tuple[dict[str, Any], str]:
 
     try:
         frontmatter = yaml.safe_load(frontmatter_yaml)
-        return frontmatter, instructions
     except yaml.YAMLError as e:
         raise SkillValidationError(f'Failed to parse YAML frontmatter: {e}') from e
+
+    if not isinstance(frontmatter, dict):
+        raise SkillValidationError(f'YAML frontmatter must be a mapping, got {type(frontmatter).__name__}')
+    return frontmatter, instructions
 
 
 def validate_skill_metadata(
@@ -78,9 +81,19 @@ def validate_skill_metadata(
         True if validation passed with no issues, False if warnings were emitted.
     """
     is_valid = True
-    name = frontmatter.get('name', '')
-    description = frontmatter.get('description', '')
+    # Coerce to str — YAML values may be int/list/None for pathological frontmatter
+    name = str(frontmatter.get('name') or '')
+    description = str(frontmatter.get('description') or '')
     location = f' ({uri})' if uri else ''
+
+    # Warn when description is absent
+    if not description:
+        warnings.warn(
+            f"Skill '{name}'{location}: missing recommended 'description' field",
+            UserWarning,
+            stacklevel=2,
+        )
+        is_valid = False
 
     # Validate name format
     if name:
@@ -119,7 +132,7 @@ def validate_skill_metadata(
         is_valid = False
 
     # Validate compatibility (if provided)
-    compatibility = frontmatter.get('compatibility', '')
+    compatibility = str(frontmatter.get('compatibility') or '')
     if compatibility and len(compatibility) > 500:
         warnings.warn(
             f"Skill '{name}'{location}: compatibility exceeds 500 characters ({len(compatibility)} chars)",
