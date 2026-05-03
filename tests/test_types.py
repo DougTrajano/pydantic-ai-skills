@@ -159,10 +159,10 @@ def test_from_file_non_dict_frontmatter_raises(tmp_path: Path) -> None:
 
 
 def test_from_file_custom_script_executor(tmp_path: Path) -> None:
-    """A custom script_executor is passed through to script discovery."""
+    """The supplied script_executor is wired into every discovered script."""
     import sys
 
-    from pydantic_ai_skills.local import LocalSkillScriptExecutor
+    from pydantic_ai_skills.local import FileBasedSkillScript, LocalSkillScriptExecutor
 
     skill_dir = tmp_path / 'my-skill'
     _write_skill_md(skill_dir, '---\nname: my-skill\ndescription: A skill\n---\n\nInstructions.\n')
@@ -179,6 +179,9 @@ def test_from_file_custom_script_executor(tmp_path: Path) -> None:
 
     assert len(skill.scripts) == 1
     assert skill.scripts[0].name == 'scripts/run.py'
+    # Verify the supplied executor is actually stored on the script object
+    assert isinstance(skill.scripts[0], FileBasedSkillScript)
+    assert skill.scripts[0].executor is executor
 
 
 def test_from_file_integer_name_field(tmp_path: Path) -> None:

@@ -272,16 +272,23 @@ class Skill:
 
         Args:
             path: Path to a ``SKILL.md`` file or to the directory that contains one.
-            validate: Whether to validate skill structure (name, description, etc.).
+                When a file path is given it must be named exactly ``SKILL.md``.
+            validate: When ``True`` (default), raises :exc:`SkillValidationError` for
+                structural problems (missing ``SKILL.md``, YAML errors, absent ``name``
+                field).  Metadata quality issues (bad name format, missing description,
+                overlong body) emit :class:`UserWarning` regardless of this flag.
             script_executor: Optional custom script executor for file-based scripts.
 
         Returns:
             A :class:`Skill` instance.
 
         Raises:
-            SkillValidationError: If the path does not contain a valid SKILL.md or
-                validation fails.
-            OSError: If the file cannot be read (permissions, I/O error, etc.).
+            SkillValidationError: For structural problems: wrong filename, missing
+                ``SKILL.md``, invalid YAML frontmatter, or (when *validate* is
+                ``True``) a missing ``name`` field.
+            OSError: Propagated directly for unreadable files, permission errors, or
+                I/O failures.  :func:`discover_skills` catches this and re-raises it
+                as :exc:`SkillValidationError`, so direct callers should handle both.
         """
         from .directory import _discover_resources, _discover_scripts  # lazy: transitive circular via local.py
         from .local import LocalSkillScriptExecutor as _LocalExecutor
@@ -290,7 +297,7 @@ class Skill:
         if skill_path.is_dir():
             skill_file = skill_path / 'SKILL.md'
         else:
-            if skill_path.name.upper() != 'SKILL.MD':
+            if skill_path.name != 'SKILL.md':
                 raise SkillValidationError(f"Expected a SKILL.md file or its parent directory, got '{skill_path.name}'")
             skill_file = skill_path
 
@@ -301,12 +308,14 @@ class Skill:
         raw = skill_file.read_text(encoding='utf-8')
         frontmatter, instructions = parse_skill_md(raw)
 
-        name = frontmatter.get('name')
+        # Coerce before the empty check so YAML scalars like `name: 0` load as '0'
+        # rather than being treated as missing.  Only None/empty-string falls back.
+        raw_name = frontmatter.get('name')
+        name = str(raw_name) if raw_name is not None else ''
         if not name:
             if validate:
                 raise SkillValidationError(f'Skill at {skill_file} is missing the required "name" field')
             name = skill_folder.name
-        name = str(name)  # coerce int/float YAML values to str
 
         # Coerce YAML scalar fields to str — YAML may return int/float/None
         description = str(frontmatter.get('description') or '')

@@ -143,9 +143,10 @@ def validate_skill_metadata(
         )
         is_valid = False
 
-    if len(instructions.split('\n')) > 500:
+    line_count = len(instructions.split('\n'))
+    if line_count > 500:
         warnings.warn(
-            f"Skill '{name}'{location}: SKILL.md body exceeds recommended 500 lines. "
+            f"Skill '{name}'{location}: SKILL.md body exceeds recommended 500 lines ({line_count} lines). "
             f'Consider splitting into separate resource files.',
             UserWarning,
             stacklevel=2,
