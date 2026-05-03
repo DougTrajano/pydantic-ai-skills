@@ -31,14 +31,24 @@ def parse_skill_md(content: str) -> tuple[dict[str, Any], str]:
     Raises:
         SkillValidationError: If YAML parsing fails.
     """
-    frontmatter_pattern = r'^---\s*\n(.*?)^---\s*\n'
-    match = re.search(frontmatter_pattern, content, re.DOTALL | re.MULTILINE)
+    lines = content.split('\n')
 
-    if not match:
+    # Frontmatter must open at line 0
+    if not lines or lines[0].rstrip() != '---':
         return {}, content.strip()
 
-    frontmatter_yaml = match.group(1).strip()
-    instructions = content[match.end() :].strip()
+    # Linear scan for the closing --- (no backtracking risk)
+    closing_idx: int | None = None
+    for i in range(1, len(lines)):
+        if lines[i].rstrip() == '---':
+            closing_idx = i
+            break
+
+    if closing_idx is None:
+        return {}, content.strip()
+
+    frontmatter_yaml = '\n'.join(lines[1:closing_idx]).strip()
+    instructions = '\n'.join(lines[closing_idx + 1 :]).strip()
 
     if not frontmatter_yaml:
         return {}, instructions

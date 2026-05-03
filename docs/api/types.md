@@ -37,6 +37,7 @@ The package uses dataclasses for type-safe skill representation:
 
 | Method | Description |
 |--------|-------------|
+| `from_file(path, validate=True, script_executor=None)` | Classmethod — load a skill from a `SKILL.md` file or its parent directory. Raises `SkillValidationError` if the file is missing or the skill is invalid. |
 | `@resource` | Decorator to attach a callable resource to the skill. |
 | `@script` | Decorator to attach a callable script to the skill. |
 
