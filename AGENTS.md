@@ -22,7 +22,7 @@ Core boundaries:
 - Type layer (dataclasses and normalization): [pydantic_ai_skills/types.py](pydantic_ai_skills/types.py)
 - Tool integration layer: [pydantic_ai_skills/toolset.py](pydantic_ai_skills/toolset.py)
 - Local execution and script dispatch: [pydantic_ai_skills/local.py](pydantic_ai_skills/local.py)
-- Capability adapter for pydantic-ai >=1.71: [pydantic_ai_skills/capability.py](pydantic_ai_skills/capability.py)
+- Capability adapter: [pydantic_ai_skills/capability.py](pydantic_ai_skills/capability.py)
 - Registry implementations and composition wrappers: [pydantic_ai_skills/registries/](pydantic_ai_skills/registries/)
 
 Behavioral constraints to preserve:

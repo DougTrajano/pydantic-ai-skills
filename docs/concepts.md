@@ -36,27 +36,18 @@ Skills can also be loaded from remote sources via **skill registries**. For exam
 
 You can integrate skills in two ways:
 
-1. `SkillsToolset` (works across supported pydantic-ai versions)
-2. `SkillsCapability` (uses the `capabilities=[...]` API in pydantic-ai >= 1.71)
+1. `SkillsToolset` (uses the `toolsets=[...]` API)
+2. `SkillsCapability` (uses the `capabilities=[...]` API)
 
-For pydantic-ai >= 1.71, prefer `SkillsCapability`.
-
-`SkillsCapability` wraps an internal `SkillsToolset` so behavior is consistent across both approaches, and it bundles instruction injection automatically through the Capability API.
+`SkillsCapability` is the preferred integration path. It wraps an internal `SkillsToolset` so behavior is consistent across both approaches, and it bundles instruction injection through the Capability API.
 
 ### SkillsToolset mode
 
-Use this mode when your app is built around `toolsets=[...]`.
-
-When using `SkillsToolset` directly:
-
-- For pydantic-ai < 1.74, you must add an instructions hook to inject the skills instructions into the agent's context.
-- On pydantic-ai >= 1.74, this is automatic.
+Use this mode when your app is built around `toolsets=[...]`. Skills instructions are injected into the agent's context automatically.
 
 ### SkillsCapability mode
 
-Use this mode when your app is built around `capabilities=[...]`.
-
-This is the recommended mode on pydantic-ai >= 1.71 because skills tools and skills instructions are bundled in one capability.
+Use this mode when your app is built around `capabilities=[...]`. Skills tools and skills instructions are bundled in one capability.
 
 ```python
 from pydantic_ai import Agent

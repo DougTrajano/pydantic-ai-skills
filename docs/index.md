@@ -15,7 +15,7 @@ Agent Skills are **modular collections of instructions, scripts, and resources**
 - **Resource Management**: Support for documentation and data files
 - **Type-Safe**: Built on Pydantic AI's type-safe foundation
 - **Simple Integration**: Drop-in toolset for Pydantic AI agents
-- **Capabilities Integration**: Preferred on pydantic-ai >= 1.71 via `SkillsCapability` and `capabilities=[...]`
+- **Capabilities Integration**: Preferred via `SkillsCapability` and `capabilities=[...]`
 
 ## Quick Example
 
@@ -23,7 +23,7 @@ Agent Skills are **modular collections of instructions, scripts, and resources**
 from pydantic_ai import Agent
 from pydantic_ai_skills import SkillsCapability
 
-# Create agent with skills (preferred on pydantic-ai >= 1.71)
+# Create agent with skills
 agent = Agent(
     model='openai:gpt-5.2',
     instructions="You are a helpful research assistant.",
@@ -37,15 +37,12 @@ result = await agent.run(
 print(result.output)
 ```
 
-## Capabilities API Example (pydantic-ai >= 1.71)
+## Capabilities API Example
 
-`SkillsCapability` is the preferred integration path on pydantic-ai >= 1.71.
+`SkillsCapability` is the preferred integration path.
 
 It bundles `SkillsToolset` behavior and instruction injection through Pydantic AI's Capability API.
-If you use `SkillsToolset` directly:
-
-- For pydantic-ai < 1.74, you must add an instructions hook to inject the skills instructions into the agent's context.
-- On pydantic-ai >= 1.74, this is automatic.
+If you use `SkillsToolset` directly, instructions are injected automatically.
 
 ```python
 from pydantic_ai import Agent
@@ -61,10 +58,10 @@ agent = Agent(
 
 ## Direct SkillsToolset Example
 
-For earlier versions of Pydantic AI, you can use `SkillsToolset`.
+You can also use `SkillsToolset` directly when you need explicit control.
 
 ```python
-from pydantic_ai import Agent, RunContext
+from pydantic_ai import Agent
 from pydantic_ai_skills import SkillsToolset
 
 skills_toolset = SkillsToolset(directories=['./skills'])
@@ -74,12 +71,6 @@ agent = Agent(
     instructions='You are a helpful research assistant.',
     toolsets=[skills_toolset],
 )
-
-# For pydantic-ai<1.74, you must add an instructions hook to inject the skills instructions into the agent's context
-# On pydantic-ai >= 1.74, this is automatic and you can omit the following instructions hook
-# @agent.instructions
-# async def add_skills(ctx: RunContext) -> str | None:
-#     return await skills_toolset.get_instructions(ctx)
 ```
 
 ## How It Works

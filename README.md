@@ -65,7 +65,7 @@ Create dynamic skills with Python:
 
 ## Quick Start
 
-If you are using `pydantic-ai>=1.71`, we recommend using `SkillsCapability`, which is based on the Pydantic AI [Capabilities API](https://ai.pydantic.dev/capabilities/). It bundles the skills tools and instructions into a single object that can be added to agents. This provides a more streamlined and integrated way to use agent skills.
+We recommend using `SkillsCapability`, which is based on the Pydantic AI [Capabilities API](https://ai.pydantic.dev/capabilities/). It bundles the skills tools and instructions into a single object that can be added to agents. This provides a more streamlined and integrated way to use agent skills.
 
 ```python
 from pydantic_ai import Agent
@@ -78,10 +78,10 @@ agent = Agent(
 )
 ```
 
-For earlier versions of Pydantic AI, you can use the `SkillsToolset`.
+Alternatively, use `SkillsToolset` directly when your app is built around `toolsets=[...]`.
 
 ```python
-from pydantic_ai import Agent, RunContext
+from pydantic_ai import Agent
 from pydantic_ai_skills import SkillsToolset
 
 # Initialize Skills Toolset with one or more skill directories
@@ -93,13 +93,6 @@ agent = Agent(
     instructions='You are a helpful research assistant.',
     toolsets=[skills_toolset]
 )
-
-# For pydantic-ai<1.74, you must add an instructions hook to inject the skills instructions into the agent's context
-# On pydantic-ai >= 1.74, this is automatic and you can omit the following instructions hook
-# @agent.instructions
-# async def add_skills(ctx: RunContext) -> str | None:
-#     """Add skills instructions to the agent's context."""
-#     return await skills_toolset.get_instructions(ctx)
 
 # Use agent - skills tools are available for the agent to call
 user_prompt = "What are the last 3 papers on arXiv about machine learning?"
