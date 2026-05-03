@@ -10,13 +10,10 @@ internal helper functions for skill validation, metadata parsing, and resource/s
 from __future__ import annotations
 
 import os
-import re
 import warnings
 from pathlib import Path
-from typing import Any
 
-import yaml
-
+from ._parsing import parse_skill_md, validate_skill_metadata
 from .exceptions import (
     SkillNotFoundError,
     SkillValidationError,
@@ -76,123 +73,6 @@ def _resolve_script_path(script_file: Path, skill_folder_resolved: Path) -> Path
 
 
 __all__ = ['SkillsDirectory', 'discover_skills', 'parse_skill_md', 'validate_skill_metadata']
-
-# agentskills.io naming convention: lowercase letters, numbers, and hyphens only (no consecutive hyphens)
-SKILL_NAME_PATTERN = re.compile(r'^[a-z0-9]+(-[a-z0-9]+)*$')
-RESERVED_WORDS = {'anthropic', 'claude'}
-
-
-def validate_skill_metadata(
-    frontmatter: dict[str, Any],
-    instructions: str,
-    uri: str | None = None,
-) -> bool:
-    """Validate skill metadata against Anthropic's requirements.
-
-    Emits warnings for any validation issues found.
-
-    Args:
-        frontmatter: Parsed YAML frontmatter.
-        instructions: The skill instructions content.
-        uri: Optional URI or path identifying the skill source for diagnostics.
-
-    Returns:
-        True if validation passed with no issues, False if warnings were emitted.
-    """
-    is_valid = True
-    name = frontmatter.get('name', '')
-    description = frontmatter.get('description', '')
-    location = f' ({uri})' if uri else ''
-
-    # Validate name format
-    if name:
-        if len(name) > 64:
-            warnings.warn(
-                f"Skill name '{name}'{location} exceeds 64 characters ({len(name)} chars) recommendation."
-                f' Consider shortening it.',
-                UserWarning,
-                stacklevel=2,
-            )
-            is_valid = False
-        elif not SKILL_NAME_PATTERN.match(name):
-            warnings.warn(
-                f"Skill name '{name}'{location} should contain only lowercase letters, numbers, and hyphens",
-                UserWarning,
-                stacklevel=2,
-            )
-            is_valid = False
-        # Check for reserved words
-        for reserved in RESERVED_WORDS:
-            if reserved in name:
-                warnings.warn(
-                    f"Skill name '{name}'{location} contains reserved word '{reserved}'",
-                    UserWarning,
-                    stacklevel=2,
-                )
-                is_valid = False
-
-    # Validate description
-    if description and len(description) > 1024:
-        warnings.warn(
-            f"Skill '{name}'{location}: description exceeds 1024 characters ({len(description)} chars)",
-            UserWarning,
-            stacklevel=2,
-        )
-        is_valid = False
-
-    # Validate compatibility (if provided)
-    compatibility = frontmatter.get('compatibility', '')
-    if compatibility and len(compatibility) > 500:
-        warnings.warn(
-            f"Skill '{name}'{location}: compatibility exceeds 500 characters ({len(compatibility)} chars)",
-            UserWarning,
-            stacklevel=2,
-        )
-        is_valid = False
-
-    # Validate instructions length (Anthropic recommends under 500 lines)
-    lines = instructions.split('\n')
-    if len(lines) > 500:
-        warnings.warn(
-            f"Skill '{name}'{location}: SKILL.md body exceeds recommended 500 lines ({len(lines)} lines). "
-            f'Consider splitting into separate resource files.',
-            UserWarning,
-            stacklevel=2,
-        )
-        is_valid = False
-
-    return is_valid
-
-
-def parse_skill_md(content: str) -> tuple[dict[str, Any], str]:
-    """Parse a SKILL.md file into frontmatter and instructions.
-
-    Args:
-        content: Full content of the SKILL.md file.
-
-    Returns:
-        Tuple of (frontmatter_dict, instructions_markdown).
-
-    Raises:
-        SkillValidationError: If YAML parsing fails.
-    """
-    frontmatter_pattern = r'^---\s*\n(.*?)^---\s*\n'
-    match = re.search(frontmatter_pattern, content, re.DOTALL | re.MULTILINE)
-
-    if not match:
-        return {}, content.strip()
-
-    frontmatter_yaml = match.group(1).strip()
-    instructions = content[match.end() :].strip()
-
-    if not frontmatter_yaml:
-        return {}, instructions
-
-    try:
-        frontmatter = yaml.safe_load(frontmatter_yaml)
-        return frontmatter, instructions
-    except yaml.YAMLError as e:
-        raise SkillValidationError(f'Failed to parse YAML frontmatter: {e}') from e
 
 
 def _discover_resources(skill_folder: Path) -> list[SkillResource]:
@@ -309,61 +189,6 @@ def _discover_scripts(
     return scripts
 
 
-def _load_skill_from_file(
-    skill_file: Path,
-    validate: bool,
-    script_executor: LocalSkillScriptExecutor | CallableSkillScriptExecutor,
-) -> Skill | None:
-    """Parse and build a single :class:`Skill` from a SKILL.md file.
-
-    Args:
-        skill_file: Path to the SKILL.md file.
-        validate: Whether to validate skill structure.
-        script_executor: Executor used for file-based scripts.
-
-    Returns:
-        A :class:`Skill` instance, or ``None`` if the skill should be skipped.
-
-    Raises:
-        SkillValidationError: When validation fails and *validate* is ``True``.
-    """
-    skill_folder = skill_file.parent
-    content = skill_file.read_text(encoding='utf-8')
-    frontmatter, instructions = parse_skill_md(content)
-
-    name = frontmatter.get('name')
-    description = frontmatter.get('description', '')
-
-    if not name:
-        if validate:
-            warnings.warn(f'Skipping skill at {skill_file}: missing required "name" field.', UserWarning, stacklevel=3)
-            return None
-        else:
-            name = skill_folder.name
-
-    license_field = frontmatter.get('license')
-    compatibility_field = frontmatter.get('compatibility')
-    metadata = {k: v for k, v in frontmatter.items() if k not in ('name', 'description', 'license', 'compatibility')}
-
-    if validate:
-        validate_skill_metadata(frontmatter, instructions, uri=str(skill_folder.resolve()))
-
-    resources = _discover_resources(skill_folder)
-    scripts = _discover_scripts(skill_folder, name, script_executor)
-
-    return Skill(
-        name=name,
-        description=description,
-        content=instructions,
-        license=license_field,
-        compatibility=compatibility_field,
-        uri=str(skill_folder.resolve()),
-        resources=resources,
-        scripts=scripts,
-        metadata=metadata if metadata else None,
-    )
-
-
 def discover_skills(
     path: str | Path,
     validate: bool = True,
@@ -401,9 +226,8 @@ def discover_skills(
     skill_files = _find_skill_files(dir_path, max_depth)
     for skill_file in skill_files:
         try:
-            skill = _load_skill_from_file(skill_file, validate, executor)
-            if skill is not None:
-                skills.append(skill)
+            skill = Skill.from_file(skill_file, validate=validate, script_executor=executor)
+            skills.append(skill)
         except SkillValidationError as sve:
             if validate:
                 raise

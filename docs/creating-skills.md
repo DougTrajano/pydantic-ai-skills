@@ -676,6 +676,22 @@ toolset = SkillsToolset(directories=[
 ])
 ```
 
+### Loading a Single Skill
+
+When you know the exact path to a skill, use `Skill.from_file()` instead of `SkillsDirectory`:
+
+```python
+from pydantic_ai_skills import Skill
+
+# Pass the directory that contains SKILL.md …
+skill = Skill.from_file("./skills/research/arxiv-search")
+
+# … or pass the SKILL.md file directly
+skill = Skill.from_file("./skills/research/arxiv-search/SKILL.md")
+```
+
+`from_file()` raises `SkillValidationError` if the file is missing or the `name` field is absent (when `validate=True`, the default).
+
 ## Skill Metadata
 
 Add useful metadata to help organize and discover skills:
