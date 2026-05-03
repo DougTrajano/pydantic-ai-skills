@@ -37,7 +37,7 @@ agent = Agent(
 ### Direct SkillsToolset Integration
 
 ```python
-from pydantic_ai import Agent, RunContext
+from pydantic_ai import Agent
 from pydantic_ai_skills import SkillsToolset
 
 skills_toolset = SkillsToolset(registries=[registry])
@@ -47,12 +47,6 @@ agent = Agent(
     instructions='You are a helpful assistant with access to a variety of skills.',
     toolsets=[skills_toolset],
 )
-
-# For pydantic-ai<1.74, you must add an instructions hook to inject the skills instructions into the agent's context
-# On pydantic-ai >= 1.74, this is automatic and you can omit the following instructions hook
-# @agent.instructions
-# async def add_skills(ctx: RunContext) -> str | None:
-#     return await skills_toolset.get_instructions(ctx)
 ```
 
 **View the complete example:** [git_registry_usage.py](https://github.com/DougTrajano/pydantic-ai-skills/blob/main/examples/git_registry_usage.py)

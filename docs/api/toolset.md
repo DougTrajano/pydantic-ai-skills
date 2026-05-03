@@ -1,11 +1,8 @@
 # SkillsToolset API Reference
 
-For pydantic-ai >= 1.71, prefer [SkillsCapability API](capability.md).
+Prefer the [SkillsCapability API](capability.md) when your app uses `capabilities=[...]`.
 
-When using `SkillsToolset` directly:
-
-- For pydantic-ai < 1.74, you must add an instructions hook to inject the skills instructions into the agent's context.
-- On pydantic-ai >= 1.74, this is automatic.
+When using `SkillsToolset` directly with `toolsets=[...]`, skill instructions are injected into the agent's context automatically.
 
 ::: pydantic_ai_skills.toolset.SkillsToolset
 options:
@@ -38,7 +35,7 @@ The `SkillsToolset.__init__()` accepts the following parameters:
 | Method | Description |
 |--------|-------------|
 | `get_skill(skill_name: str) -> Skill` | Retrieve a specific skill by name. Raises `SkillNotFoundError` if not found. |
-| `get_instructions(ctx: RunContext[Any]) -> str | None` | Returns formatted system prompt with skills instructions, or `None` if no skills are loaded. Called automatically on pydantic-ai >= 1.74. |
+| `get_instructions(ctx: RunContext[Any]) -> str | None` | Returns formatted system prompt with skills instructions, or `None` if no skills are loaded. Called automatically by the agent. |
 
 ## Usage Examples
 
@@ -218,7 +215,7 @@ Load the full skill with `load_skill` to see available resources and scripts.
 ### Get Skills Instructions for Agent
 
 ```python
-from pydantic_ai import Agent, RunContext
+from pydantic_ai import Agent
 from pydantic_ai_skills import SkillsToolset
 
 toolset = SkillsToolset(directories=["./skills"])
@@ -229,14 +226,7 @@ agent = Agent(
     toolsets=[toolset]
 )
 
-# For pydantic-ai<1.74, you must add an instructions hook to inject the skills instructions into the agent's context
-# On pydantic-ai >= 1.74, this is automatic and you can omit the following instructions hook
-# @agent.instructions
-# async def add_skills(ctx: RunContext) -> str | None:
-#     """Inject skills instructions into agent context."""
-#     return await toolset.get_instructions(ctx)
-
-# The agent will receive skill metadata in system prompt
+# Skill instructions are injected into the agent's system prompt automatically.
 result = agent.run_sync('Analyze the quarterly data')
 ```
 

@@ -2,9 +2,7 @@
 
 `SkillsCapability` integrates pydantic-ai-skills with Pydantic AI's capabilities API.
 
-For pydantic-ai >= 1.71, this is the preferred integration path.
-
-Use this when your agent uses `capabilities=[...]`.
+This is the preferred integration path. Use it when your agent uses `capabilities=[...]`.
 
 ::: pydantic_ai_skills.capability.SkillsCapability
     options:

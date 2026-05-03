@@ -1,58 +1,28 @@
 """Capability integration for pydantic-ai-skills.
 
 This module provides [`SkillsCapability`][pydantic_ai_skills.SkillsCapability],
-an alternative integration path for Pydantic AI users on versions that support
-the capabilities API (pydantic-ai >= 1.71).
+the preferred integration path for Pydantic AI users via the `capabilities=[...]` API.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Generic, TypeVar
+from typing import Any
 
-if TYPE_CHECKING:
-    from pydantic_ai.agent.abstract import AgentInstructions
-    from pydantic_ai.tools import AgentDepsT, RunContext
-else:
-    try:
-        from pydantic_ai.agent.abstract import AgentInstructions
-    except ImportError:
-        AgentInstructions = Any
-
-    try:
-        from pydantic_ai.tools import AgentDepsT, RunContext
-    except ImportError:
-        AgentDepsT = Any
-        RunContext = Any
+from pydantic_ai.agent.abstract import AgentInstructions
+from pydantic_ai.capabilities import AbstractCapability
+from pydantic_ai.tools import AgentDepsT
 
 from .directory import SkillsDirectory
 from .registries._base import SkillRegistry
 from .toolset import SkillsToolset
 from .types import Skill
 
-_AgentDepsT = TypeVar('_AgentDepsT')
 
-if TYPE_CHECKING:
-    from pydantic_ai.capabilities import AbstractCapability as _AbstractCapabilityBase
-
-    _CAPABILITIES_AVAILABLE = True
-else:
-    try:
-        from pydantic_ai.capabilities import AbstractCapability as _AbstractCapabilityBase
-
-        _CAPABILITIES_AVAILABLE = True
-    except ImportError:
-        _CAPABILITIES_AVAILABLE = False
-
-        class _AbstractCapabilityBase(Generic[_AgentDepsT]):
-            """Fallback placeholder when pydantic-ai capabilities are unavailable."""
-
-
-class SkillsCapability(_AbstractCapabilityBase[Any]):
+class SkillsCapability(AbstractCapability[Any]):
     """Capability wrapper for `SkillsToolset`.
 
-    Use this class with the agent `capabilities=[...]` API introduced in
-    pydantic-ai 1.71+.
+    Use this class with the agent `capabilities=[...]` API.
 
     Example:
         ```python
@@ -91,17 +61,7 @@ class SkillsCapability(_AbstractCapabilityBase[Any]):
             instruction_template: Optional custom instructions template.
             exclude_tools: Tool names to exclude.
             auto_reload: Re-scan directories before each run.
-
-        Raises:
-            RuntimeError: If capabilities API is unavailable in installed
-                pydantic-ai version.
         """
-        if not _CAPABILITIES_AVAILABLE:
-            raise RuntimeError(
-                'SkillsCapability requires pydantic-ai>=1.71 with capabilities support. '
-                'Use SkillsToolset instead or upgrade pydantic-ai.'
-            )
-
         self._toolset = SkillsToolset(
             skills=skills,
             directories=directories,
@@ -119,24 +79,8 @@ class SkillsCapability(_AbstractCapabilityBase[Any]):
         return self._toolset
 
     def get_instructions(self) -> AgentInstructions[AgentDepsT] | None:
-        """Return dynamic instructions via the underlying skills toolset.
-
-        For pydantic-ai >= 1.74, instructions are natively extracted from the toolset
-        by the agent, so we return None here to avoid injecting duplicate instructions.
-        For older versions (pydantic-ai>=1.71), we return a function that delegates to the toolset.
-        """
-        try:
-            from pydantic_ai.toolsets import AbstractToolset
-
-            if hasattr(AbstractToolset, 'get_instructions'):
-                return None
-        except ImportError:
-            pass
-
-        async def _instructions(ctx: RunContext[AgentDepsT]) -> str | None:
-            return await self._toolset.get_instructions(ctx)
-
-        return _instructions
+        """Return None — instructions are pulled natively from the toolset by the agent."""
+        return None
 
     @property
     def toolset(self) -> SkillsToolset:

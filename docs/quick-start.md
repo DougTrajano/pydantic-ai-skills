@@ -75,7 +75,7 @@ async def my_tool(ctx: RunContext[str]) -> str:
 
 ### 2. Create an Agent with Skills
 
-For pydantic-ai >= 1.71, use `SkillsCapability` as the default integration path.
+Use `SkillsCapability` as the default integration path.
 
 Create `agent.py`:
 
@@ -97,14 +97,13 @@ print(result.output)
 ### Alternative: Direct SkillsToolset
 
 Use direct `SkillsToolset` integration when your app is built around `toolsets=[...]`.
-For pydantic-ai < 1.74, you must add an instructions hook to inject the skills instructions into the agent's context.
-On pydantic-ai >= 1.74, this is automatic.
+Skill instructions are injected into the agent's context automatically.
 
 Create `agent.py`:
 
 ```python
 import asyncio
-from pydantic_ai import Agent, RunContext
+from pydantic_ai import Agent
 from pydantic_ai_skills import SkillsToolset
 
 async def main():
@@ -117,13 +116,6 @@ async def main():
         instructions="You are a helpful assistant.",
         toolsets=[skills_toolset]
     )
-
-    # For pydantic-ai<1.74, you must add an instructions hook to inject the skills instructions into the agent's context
-    # On pydantic-ai >= 1.74, this is automatic and you can omit the following instructions hook
-    # @agent.instructions
-    # async def add_skills(ctx: RunContext) -> str | None:
-    #     """Add skills instructions to the agent's context."""
-    #     return await skills_toolset.get_instructions(ctx)
 
     # Run the agent
     result = await agent.run("How do I create a Pydantic AI agent with tools?")
@@ -153,7 +145,7 @@ When you initialize skills support (via `SkillsCapability` or `SkillsToolset`):
 
 1. **Discovery**: Scans `./skills/` for skill directories with `SKILL.md` files
 2. **Registration**: Registers four tools (`list_skills`, `load_skill`, `read_skill_resource`, `run_skill_script`)
-3. **Instructions**: Skills overview is added automatically (`SkillsCapability` always; `SkillsToolset` on pydantic-ai >= 1.74). For pydantic-ai < 1.74 with `SkillsToolset`, add a manual compatibility hook.
+3. **Instructions**: Skills overview is added automatically by both `SkillsCapability` and `SkillsToolset`.
 4. **Execution**: Agent discovers, loads, and uses skills as needed
 
 ## Add a Script-Based Skill
