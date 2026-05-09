@@ -3,7 +3,6 @@
 import pytest
 
 from pydantic_ai_skills.directory import parse_skill_md
-from pydantic_ai_skills.exceptions import SkillValidationError
 
 
 def test_parse_skill_md_with_frontmatter() -> None:
@@ -66,7 +65,7 @@ description: [unclosed array
 Content.
 """
 
-    with pytest.raises(SkillValidationError, match='Failed to parse YAML frontmatter'):
+    with pytest.raises(ValueError, match='Failed to parse YAML frontmatter'):
         parse_skill_md(content)
 
 

@@ -17,7 +17,6 @@ from typing import Any
 from urllib.parse import urlparse, urlunparse
 
 from pydantic_ai_skills.directory import discover_skills
-from pydantic_ai_skills.exceptions import SkillNotFoundError, SkillRegistryError
 from pydantic_ai_skills.registries._base import SkillRegistry
 from pydantic_ai_skills.types import Skill
 
@@ -395,7 +394,7 @@ class GitSkillsRegistry(SkillRegistry):
             )
         except git.exc.GitCommandError as exc:
             sanitized = _sanitize_error_message(exc, self._clone_url, self._clean_repo_url)
-            raise SkillRegistryError(f'Failed to clone repository {self._clean_repo_url!r}: {sanitized}') from exc
+            raise RuntimeError(f'Failed to clone repository {self._clean_repo_url!r}: {sanitized}') from exc
 
         # Apply sparse checkout if requested
         if opts.sparse_paths:
@@ -404,7 +403,7 @@ class GitSkillsRegistry(SkillRegistry):
                 repo.git.sparse_checkout('set', *opts.sparse_paths)
             except git.exc.GitCommandError as exc:
                 sanitized = _sanitize_error_message(exc, self._clone_url, self._clean_repo_url)
-                raise SkillRegistryError(f'Failed to configure sparse checkout: {sanitized}') from exc
+                raise RuntimeError(f'Failed to configure sparse checkout: {sanitized}') from exc
 
     def _pull(self) -> None:
         """Perform ``git pull`` on the existing clone."""
@@ -424,9 +423,7 @@ class GitSkillsRegistry(SkillRegistry):
             self._clone()
         except git.exc.GitCommandError as exc:
             sanitized = _sanitize_error_message(exc, self._clone_url, self._clean_repo_url)
-            raise SkillRegistryError(
-                f'Failed to pull latest changes from {self._clean_repo_url!r}: {sanitized}'
-            ) from exc
+            raise RuntimeError(f'Failed to pull latest changes from {self._clean_repo_url!r}: {sanitized}') from exc
 
     def _ensure_cloned(self) -> None:
         """Clone or pull the repository to ensure the local cache is up to date."""
@@ -539,12 +536,12 @@ class GitSkillsRegistry(SkillRegistry):
             containing ``"source_url"``.
 
         Raises:
-            SkillNotFoundError: When no skill with ``skill_name`` exists.
+            KeyError: When no skill with ``skill_name`` exists.
         """
         for skill in self.get_skills():
             if skill.name == skill_name:
                 return skill
-        raise SkillNotFoundError(f"Skill '{skill_name}' not found in registry {self._clean_repo_url!r}.")
+        raise KeyError(f"Skill '{skill_name}' not found in registry {self._clean_repo_url!r}.")
 
     async def install(self, skill_name: str, target_dir: str | Path) -> Path:
         """Copy a skill from the cloned repository into ``target_dir``.
@@ -562,8 +559,10 @@ class GitSkillsRegistry(SkillRegistry):
             Path to the installed skill directory (``target_dir/skill_name``).
 
         Raises:
-            SkillNotFoundError: When ``skill_name`` is not found in the registry.
-            SkillRegistryError: On git or filesystem errors.
+            KeyError: When ``skill_name`` is not found in the registry.
+            ValueError: When the destination or source path escapes its expected
+                directory (path traversal protection).
+            RuntimeError: On git or filesystem errors.
         """
         # Ensure we have skills loaded (already parsed and validated by discover_skills)
         self._ensure_skills_loaded()
@@ -576,7 +575,7 @@ class GitSkillsRegistry(SkillRegistry):
                 break
 
         if src_skill_dir is None:
-            raise SkillNotFoundError(f"Skill '{skill_name}' not found in repository {self._clean_repo_url!r}.")
+            raise KeyError(f"Skill '{skill_name}' not found in repository {self._clean_repo_url!r}.")
 
         dest_root = Path(target_dir).expanduser().resolve()
         dest_root.mkdir(parents=True, exist_ok=True)
@@ -584,7 +583,7 @@ class GitSkillsRegistry(SkillRegistry):
 
         # Path traversal check on destination
         if not dest_skill_dir.resolve().is_relative_to(dest_root):
-            raise SkillRegistryError(f"Destination path '{dest_skill_dir}' escapes target directory '{dest_root}'.")
+            raise ValueError(f"Destination path '{dest_skill_dir}' escapes target directory '{dest_root}'.")
 
         # Validate no source symlinks escape the skill directory
         src_resolved = src_skill_dir.resolve()
@@ -593,7 +592,7 @@ class GitSkillsRegistry(SkillRegistry):
                 try:
                     src_file.resolve().relative_to(src_resolved)
                 except ValueError as exc:
-                    raise SkillRegistryError(
+                    raise ValueError(
                         f"Source path '{src_file}' escapes skill directory (path traversal detected)."
                     ) from exc
 
@@ -618,8 +617,8 @@ class GitSkillsRegistry(SkillRegistry):
             Path to the updated skill directory.
 
         Raises:
-            SkillNotFoundError: When ``skill_name`` is not found after the pull.
-            SkillRegistryError: On git or network errors.
+            KeyError: When ``skill_name`` is not found after the pull.
+            RuntimeError: On git or network errors.
         """
         dest = Path(target_dir).expanduser().resolve() / skill_name
         if not dest.exists():

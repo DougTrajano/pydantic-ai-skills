@@ -8,7 +8,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from pydantic_ai_skills.exceptions import SkillNotFoundError, SkillRegistryError
 from pydantic_ai_skills.registries.git import GitCloneOptions, GitSkillsRegistry
 
 # ---------------------------------------------------------------------------
@@ -211,7 +210,7 @@ def test_pull_called_when_already_cloned(fake_clone: Path) -> None:
 
 
 def test_network_failure_raises_skill_registry_error(tmp_path: Path) -> None:
-    """GitCommandError is mapped to SkillRegistryError."""
+    """GitCommandError is mapped to RuntimeError."""
     import git
 
     clone_dir = tmp_path / 'clone'
@@ -222,12 +221,12 @@ def test_network_failure_raises_skill_registry_error(tmp_path: Path) -> None:
     )
 
     with patch('git.Repo.clone_from', side_effect=git.exc.GitCommandError('clone', 128)):
-        with pytest.raises(SkillRegistryError, match='Failed to clone'):
+        with pytest.raises(RuntimeError, match='Failed to clone'):
             registry._clone()
 
 
 def test_pull_network_failure_raises_skill_registry_error(fake_clone: Path) -> None:
-    """GitCommandError on pull is mapped to SkillRegistryError."""
+    """GitCommandError on pull is mapped to RuntimeError."""
     import git
 
     mock_repo = MagicMock()
@@ -235,7 +234,7 @@ def test_pull_network_failure_raises_skill_registry_error(fake_clone: Path) -> N
 
     with patch('git.Repo', return_value=mock_repo):
         registry = _make_registry(fake_clone, auto_install=False)
-        with pytest.raises(SkillRegistryError, match='Failed to pull'):
+        with pytest.raises(RuntimeError, match='Failed to pull'):
             registry._pull()
 
 
@@ -333,9 +332,9 @@ async def test_get_returns_skill_by_name(fake_clone: Path) -> None:
 
 
 async def test_get_raises_for_unknown_skill(fake_clone: Path) -> None:
-    """get() raises SkillNotFoundError for an unknown skill name."""
+    """get() raises KeyError for an unknown skill name."""
     registry = _make_registry(fake_clone)
-    with pytest.raises(SkillNotFoundError):
+    with pytest.raises(KeyError):
         await registry.get('unknown-skill')
 
 
@@ -364,9 +363,9 @@ async def test_install_copies_skill_directory(fake_clone: Path, tmp_path: Path) 
 
 
 async def test_install_raises_for_unknown_skill(fake_clone: Path, tmp_path: Path) -> None:
-    """install() raises SkillNotFoundError when the skill does not exist."""
+    """install() raises KeyError when the skill does not exist."""
     registry = _make_registry(fake_clone)
-    with pytest.raises(SkillNotFoundError):
+    with pytest.raises(KeyError):
         await registry.install('ghost', tmp_path)
 
 
@@ -413,7 +412,7 @@ async def test_install_path_traversal_attempt(fake_clone: Path, tmp_path: Path) 
         pytest.skip('Symlinks not supported on this platform')
 
     registry = _make_registry(fake_clone)
-    # install should succeed; the symlink is either copied or raises SkillRegistryError
+    # install should succeed; the symlink is either copied or raises ValueError
     # (the security check resolves dest paths against target)
     try:
         await registry.install('pdf', install_dir)
@@ -421,7 +420,7 @@ async def test_install_path_traversal_attempt(fake_clone: Path, tmp_path: Path) 
         escaped = install_dir / 'pdf' / 'escape.txt'
         if escaped.exists():
             assert escaped.read_text() != 'TOP SECRET'
-    except SkillRegistryError:
+    except ValueError:
         pass  # also acceptable
 
 
@@ -477,10 +476,10 @@ async def test_filtered_get_passes_predicate(fake_clone: Path) -> None:
 
 
 async def test_filtered_get_raises_for_excluded_skill(fake_clone: Path) -> None:
-    """filtered().get() raises SkillNotFoundError for excluded skills."""
+    """filtered().get() raises KeyError for excluded skills."""
     registry = _make_registry(fake_clone)
     filtered = registry.filtered(lambda s: s.name == 'pdf')
-    with pytest.raises(SkillNotFoundError):
+    with pytest.raises(KeyError):
         await filtered.get('xlsx')
 
 
@@ -516,11 +515,11 @@ async def test_prefixed_get_with_prefix(fake_clone: Path) -> None:
 
 
 async def test_prefixed_get_original_name_not_found(fake_clone: Path) -> None:
-    """prefixed().get() raises SkillNotFoundError when prefix is missing."""
+    """prefixed().get() raises KeyError when prefix is missing."""
     registry = _make_registry(fake_clone)
     prefixed = registry.prefixed('anthropic-')
     # 'pdf' without prefix should not be found — prefix must be present
-    with pytest.raises(SkillNotFoundError):
+    with pytest.raises(KeyError):
         await prefixed.get('pdf')
 
 
@@ -641,13 +640,12 @@ async def test_subpath_skills_discovery(tmp_path: Path) -> None:
 
 
 def test_top_level_imports() -> None:
-    """SkillRegistry, GitSkillsRegistry, GitCloneOptions and SkillRegistryError are top-level exports."""
-    from pydantic_ai_skills import GitCloneOptions, GitSkillsRegistry, SkillRegistry, SkillRegistryError
+    """SkillRegistry, GitSkillsRegistry and GitCloneOptions are top-level exports."""
+    from pydantic_ai_skills import GitCloneOptions, GitSkillsRegistry, SkillRegistry
 
     assert GitSkillsRegistry is not None
     assert GitCloneOptions is not None
     assert SkillRegistry is not None
-    assert SkillRegistryError is not None
 
 
 def test_registries_module_imports() -> None:
@@ -903,7 +901,7 @@ def test_clone_with_sparse_checkout(tmp_path: Path) -> None:
 
 
 def test_clone_sparse_checkout_failure_raises(tmp_path: Path) -> None:
-    """Sparse checkout failure raises SkillRegistryError."""
+    """Sparse checkout failure raises RuntimeError."""
     import git
 
     clone_dir = tmp_path / 'clone'
@@ -919,7 +917,7 @@ def test_clone_sparse_checkout_failure_raises(tmp_path: Path) -> None:
             clone_options=opts,
             auto_install=False,
         )
-        with pytest.raises(SkillRegistryError, match='sparse checkout'):
+        with pytest.raises(RuntimeError, match='sparse checkout'):
             registry._clone()
 
 
@@ -1289,7 +1287,7 @@ def test_str_without_token(fake_clone: Path) -> None:
 
 
 async def test_install_destination_path_traversal_raises(fake_clone: Path, tmp_path: Path) -> None:
-    """install() raises SkillRegistryError when skill name would escape target_dir."""
+    """install() raises ValueError when skill name would escape target_dir."""
     from dataclasses import replace as dc_replace
 
     registry = _make_registry(fake_clone)
@@ -1300,7 +1298,7 @@ async def test_install_destination_path_traversal_raises(fake_clone: Path, tmp_p
     evil_skill = dc_replace(real_skill, name='../escape')
     registry._cached_skills.append(evil_skill)
 
-    with pytest.raises(SkillRegistryError, match='escapes target directory'):
+    with pytest.raises(ValueError, match='escapes target directory'):
         await registry.install('../escape', tmp_path / 'installed')
 
 

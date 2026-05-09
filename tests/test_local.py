@@ -7,7 +7,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from pydantic_ai_skills.exceptions import SkillResourceLoadError, SkillScriptExecutionError
 from pydantic_ai_skills.local import (
     CallableSkillScriptExecutor,
     FileBasedSkillResource,
@@ -47,7 +46,7 @@ def test_file_based_resource_no_uri() -> None:
 
     import asyncio
 
-    with pytest.raises(SkillResourceLoadError, match='has no URI'):
+    with pytest.raises(ValueError, match='has no URI'):
         asyncio.run(resource.load(None))
 
 
@@ -85,7 +84,7 @@ def test_file_based_resource_file_not_found(tmp_path: Path) -> None:
 
     import asyncio
 
-    with pytest.raises(SkillResourceLoadError, match='Failed to read resource'):
+    with pytest.raises(OSError, match='Failed to read resource'):
         asyncio.run(resource.load(None))
 
 
@@ -97,7 +96,7 @@ async def test_local_script_executor_no_uri() -> None:
     script = FileBasedSkillScript(name='test', uri='/temp')
     script.uri = None
 
-    with pytest.raises(SkillScriptExecutionError, match='has no URI'):
+    with pytest.raises(ValueError, match='has no URI'):
         await executor.run(script)
 
 
@@ -299,7 +298,7 @@ print("Done")
         uri=str(script_file),
     )
 
-    with pytest.raises(SkillScriptExecutionError, match='timed out'):
+    with pytest.raises(TimeoutError, match='timed out'):
         await executor.run(script)
 
 
@@ -391,7 +390,7 @@ echo "Done"
         uri=str(script_file),
     )
 
-    with pytest.raises(SkillScriptExecutionError, match='timed out'):
+    with pytest.raises(TimeoutError, match='timed out'):
         await executor.run(script)
 
 
@@ -578,5 +577,5 @@ async def test_local_script_executor_ps1_without_powershell_falls_back_to_direct
         uri=str(script_file),
     )
 
-    with pytest.raises(SkillScriptExecutionError, match='Failed to execute script'):
+    with pytest.raises(RuntimeError, match='Failed to execute script'):
         await executor.run(script)

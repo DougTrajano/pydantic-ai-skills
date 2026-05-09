@@ -22,7 +22,6 @@ from pydantic_ai import _function_schema
 from pydantic_ai.tools import GenerateToolJsonSchema
 
 from ._parsing import SKILL_NAME_PATTERN, parse_skill_md, validate_skill_metadata
-from .exceptions import SkillValidationError
 
 if TYPE_CHECKING:
     from .local import CallableSkillScriptExecutor, LocalSkillScriptExecutor
@@ -43,13 +42,13 @@ def normalize_skill_name(func_name: str) -> str:
         Normalized skill name (lowercase, underscores replaced with hyphens).
 
     Raises:
-        SkillValidationError: If the name contains invalid characters after normalization.
+        ValueError: If the name contains invalid characters after normalization.
 
     Example:
         ```python
         normalize_skill_name('data_analyzer')  # Returns 'data-analyzer'
         normalize_skill_name('my_cool_skill')  # Returns 'my-cool-skill'
-        normalize_skill_name('InvalidName')  # Raises SkillValidationError
+        normalize_skill_name('InvalidName')  # Raises ValueError
         ```
     """
     # Replace underscores with hyphens and convert to lowercase
@@ -57,7 +56,7 @@ def normalize_skill_name(func_name: str) -> str:
 
     # Validate against pattern
     if not SKILL_NAME_PATTERN.match(normalized):
-        raise SkillValidationError(
+        raise ValueError(
             f"Skill name '{normalized}' (derived from function '{func_name}') is invalid. "
             'Skill names must contain only lowercase letters, numbers, and hyphens '
             '(no consecutive hyphens).'
@@ -65,7 +64,7 @@ def normalize_skill_name(func_name: str) -> str:
 
     # Check length
     if len(normalized) > 64:
-        raise SkillValidationError(f"Skill name '{normalized}' exceeds 64 characters ({len(normalized)} chars).")
+        raise ValueError(f"Skill name '{normalized}' exceeds 64 characters ({len(normalized)} chars).")
 
     return normalized
 
@@ -273,7 +272,7 @@ class Skill:
         Args:
             path: Path to a ``SKILL.md`` file or to the directory that contains one.
                 When a file path is given it must be named exactly ``SKILL.md``.
-            validate: When ``True`` (default), raises :exc:`SkillValidationError` for
+            validate: When ``True`` (default), raises :exc:`ValueError` for
                 structural problems (missing ``SKILL.md``, YAML errors, absent ``name``
                 field).  Metadata quality issues (bad name format, missing description,
                 overlong body) emit :class:`UserWarning` regardless of this flag.
@@ -283,12 +282,13 @@ class Skill:
             A :class:`Skill` instance.
 
         Raises:
-            SkillValidationError: For structural problems: wrong filename, missing
-                ``SKILL.md``, invalid YAML frontmatter, or (when *validate* is
-                ``True``) a missing ``name`` field.
+            ValueError: For structural problems: wrong filename, invalid YAML
+                frontmatter, or (when *validate* is ``True``) a missing ``name``
+                field.
+            FileNotFoundError: When ``SKILL.md`` does not exist at the expected path.
             OSError: Propagated directly for unreadable files, permission errors, or
                 I/O failures.  :func:`discover_skills` catches this and re-raises it
-                as :exc:`SkillValidationError`, so direct callers should handle both.
+                as :exc:`ValueError`, so direct callers should handle both.
         """
         from .directory import _discover_resources, _discover_scripts  # lazy: transitive circular via local.py
         from .local import LocalSkillScriptExecutor as _LocalExecutor
@@ -298,11 +298,11 @@ class Skill:
             skill_file = skill_path / 'SKILL.md'
         else:
             if skill_path.name != 'SKILL.md':
-                raise SkillValidationError(f"Expected a SKILL.md file or its parent directory, got '{skill_path.name}'")
+                raise ValueError(f"Expected a SKILL.md file or its parent directory, got '{skill_path.name}'")
             skill_file = skill_path
 
         if not skill_file.exists():
-            raise SkillValidationError(f'SKILL.md not found at {skill_file}')
+            raise FileNotFoundError(f'SKILL.md not found at {skill_file}')
 
         skill_folder = skill_file.parent
         raw = skill_file.read_text(encoding='utf-8')
@@ -314,7 +314,7 @@ class Skill:
         name = str(raw_name) if raw_name is not None else ''
         if not name:
             if validate:
-                raise SkillValidationError(f'Skill at {skill_file} is missing the required "name" field')
+                raise ValueError(f'Skill at {skill_file} is missing the required "name" field')
             name = skill_folder.name
 
         # Coerce YAML scalar fields to str — YAML may return int/float/None

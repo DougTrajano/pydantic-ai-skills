@@ -6,7 +6,6 @@ from pathlib import Path
 import pytest
 
 from pydantic_ai_skills.directory import SkillsDirectory, discover_skills
-from pydantic_ai_skills.exceptions import SkillValidationError
 
 
 def test_discover_skills_single_skill(tmp_path: Path) -> None:
@@ -219,7 +218,7 @@ Content.
 """)
 
     # With validation, missing name is an error
-    with pytest.raises(SkillValidationError, match='missing the required "name" field'):
+    with pytest.raises(ValueError, match='missing the required "name" field'):
         discover_skills(tmp_path, validate=True)
 
 
@@ -290,7 +289,7 @@ def test_skills_directory_missing_name_with_validation(tmp_path: Path) -> None:
     skill_dir.mkdir()
     (skill_dir / 'SKILL.md').write_text('---\ndescription: No name\n---\n\nContent.\n')
 
-    with pytest.raises(SkillValidationError, match='missing the required "name" field'):
+    with pytest.raises(ValueError, match='missing the required "name" field'):
         SkillsDirectory(path=tmp_path, validate=True)
 
 

@@ -19,12 +19,12 @@ from inspect import signature as get_signature
 from pathlib import Path
 from typing import Any
 
+from pydantic_ai import ModelRetry
 from pydantic_ai._griffe import doc_descriptions
 from pydantic_ai._run_context import RunContext
 from pydantic_ai.toolsets import FunctionToolset
 
 from .directory import SkillsDirectory
-from .exceptions import SkillNotFoundError, SkillResourceNotFoundError, SkillValidationError
 from .registries._base import SkillRegistry
 from .types import (
     SKILL_NAME_PATTERN,
@@ -151,6 +151,7 @@ class SkillsToolset(FunctionToolset[Any]):
         instruction_template: str | None = None,
         exclude_tools: set[str] | list[str] | None = None,
         auto_reload: bool = False,
+        max_retries: int = 1,
     ) -> None:
         """Initialize the skills toolset.
 
@@ -179,6 +180,11 @@ class SkillsToolset(FunctionToolset[Any]):
                 skills are preserved from the initial load cache (no network calls are made on
                 each run). To re-fetch fresh skills from registries, call :meth:`reload` with
                 ``include_registries=True`` explicitly. Defaults to False.
+            max_retries: Maximum number of times the model is allowed to retry a tool call when
+                the tool raises ``ModelRetry`` (e.g. when the LLM passes an unknown
+                ``skill_name``, ``resource_name``, or ``script_name``). Forwarded to
+                :class:`pydantic_ai.toolsets.FunctionToolset` so every registered tool inherits
+                this retry budget. Defaults to 1 (matching Pydantic AI's default).
 
         Example:
             ```python
@@ -216,7 +222,7 @@ class SkillsToolset(FunctionToolset[Any]):
             toolset = SkillsToolset(registries=[registry])
             ```
         """
-        super().__init__(id=id)
+        super().__init__(id=id, max_retries=max_retries)
 
         self._instruction_template = instruction_template
 
@@ -292,11 +298,11 @@ class SkillsToolset(FunctionToolset[Any]):
             The requested Skill object.
 
         Raises:
-            SkillNotFoundError: If skill is not found.
+            KeyError: If skill is not found.
         """
         if name not in self._skills:
             available = ', '.join(sorted(self._skills.keys())) or 'none'
-            raise SkillNotFoundError(f"Skill '{name}' not found. Available: {available}")
+            raise KeyError(f"Skill '{name}' not found. Available: {available}")
         return self._skills[name]
 
     def _load_directory_skills(self, directories: list[str | Path | SkillsDirectory]) -> None:
@@ -525,7 +531,10 @@ class SkillsToolset(FunctionToolset[Any]):
             _ = ctx  # Required by Pydantic AI toolset protocol
             if skill_name not in self._skills:
                 available = ', '.join(sorted(self._skills.keys())) or 'none'
-                raise SkillNotFoundError(f"Skill '{skill_name}' not found. Available: {available}")
+                raise ModelRetry(
+                    f"Skill '{skill_name}' not found. Available skills: {available}. "
+                    'Call list_skills to see options and try again with an exact name.'
+                )
 
             skill = self._skills[skill_name]
 
@@ -593,7 +602,11 @@ class SkillsToolset(FunctionToolset[Any]):
             - Static files don't need args; callables may require them
             """
             if skill_name not in self._skills:
-                raise SkillNotFoundError(f"Skill '{skill_name}' not found.")
+                available = ', '.join(sorted(self._skills.keys())) or 'none'
+                raise ModelRetry(
+                    f"Skill '{skill_name}' not found. Available skills: {available}. "
+                    'Call list_skills first and try again with an exact name.'
+                )
 
             skill = self._skills[skill_name]
 
@@ -601,9 +614,10 @@ class SkillsToolset(FunctionToolset[Any]):
             resource = self._find_skill_resource(skill, resource_name)
 
             if resource is None:
-                available = [r.name for r in skill.resources] if skill.resources else []
-                raise SkillResourceNotFoundError(
-                    f"Resource '{resource_name}' not found in skill '{skill_name}'. Available: {available}"
+                available_resources = [r.name for r in skill.resources] if skill.resources else []
+                raise ModelRetry(
+                    f"Resource '{resource_name}' not found in skill '{skill_name}'. "
+                    f'Available resources: {available_resources}. Use the exact name from load_skill output.'
                 )
 
             # Use resource.load() interface - implementation handles the details
@@ -651,7 +665,11 @@ class SkillsToolset(FunctionToolset[Any]):
             - Execution errors are included in the output
             """
             if skill_name not in self._skills:
-                raise SkillNotFoundError(f"Skill '{skill_name}' not found.")
+                available = ', '.join(sorted(self._skills.keys())) or 'none'
+                raise ModelRetry(
+                    f"Skill '{skill_name}' not found. Available skills: {available}. "
+                    'Call list_skills first and try again with an exact name.'
+                )
 
             skill = self._skills[skill_name]
 
@@ -659,9 +677,10 @@ class SkillsToolset(FunctionToolset[Any]):
             script = self._find_skill_script(skill, script_name)
 
             if script is None:
-                available = [s.name for s in skill.scripts] if skill.scripts else []
-                raise SkillResourceNotFoundError(
-                    f"Script '{script_name}' not found in skill '{skill_name}'. Available: {available}"
+                available_scripts = [s.name for s in skill.scripts] if skill.scripts else []
+                raise ModelRetry(
+                    f"Script '{script_name}' not found in skill '{skill_name}'. "
+                    f'Available scripts: {available_scripts}. Use the exact name from load_skill output.'
                 )
 
             # Use script.run() interface - implementation handles the details
@@ -767,15 +786,13 @@ class SkillsToolset(FunctionToolset[Any]):
                 skill_name = name
                 # Validate the explicit name
                 if not SKILL_NAME_PATTERN.match(skill_name):
-                    raise SkillValidationError(
+                    raise ValueError(
                         f"Skill name '{skill_name}' is invalid. "
                         'Skill names must contain only lowercase letters, numbers, and hyphens '
                         '(no consecutive hyphens).'
                     )
                 if len(skill_name) > 64:
-                    raise SkillValidationError(
-                        f"Skill name '{skill_name}' exceeds 64 characters ({len(skill_name)} chars)."
-                    )
+                    raise ValueError(f"Skill name '{skill_name}' exceeds 64 characters ({len(skill_name)} chars).")
             else:
                 # Derive and normalize from function name
                 skill_name = normalize_skill_name(f.__name__)

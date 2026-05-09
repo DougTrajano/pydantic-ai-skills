@@ -11,7 +11,6 @@ import pytest
 from pydantic.json_schema import GenerateJsonSchema
 
 from pydantic_ai_skills import SkillsToolset
-from pydantic_ai_skills.exceptions import SkillValidationError
 from pydantic_ai_skills.types import Skill, SkillResource, SkillScript, SkillWrapper, normalize_skill_name
 
 
@@ -53,7 +52,7 @@ def test_normalize_skill_name_mixed_case_and_underscores() -> None:
 
 def test_normalize_skill_name_invalid_characters() -> None:
     """Test normalize_skill_name raises error for invalid characters."""
-    with pytest.raises(SkillValidationError, match='is invalid'):
+    with pytest.raises(ValueError, match='is invalid'):
         normalize_skill_name('invalid!name')
 
 
@@ -69,19 +68,19 @@ def test_normalize_skill_name_consecutive_hyphens() -> None:
 def test_normalize_skill_name_exceeds_max_length() -> None:
     """Test normalize_skill_name raises error for names exceeding 64 chars."""
     long_name = 'a' * 65
-    with pytest.raises(SkillValidationError, match='exceeds 64 characters'):
+    with pytest.raises(ValueError, match='exceeds 64 characters'):
         normalize_skill_name(long_name)
 
 
 def test_normalize_skill_name_starts_with_hyphen() -> None:
     """Test normalize_skill_name raises error for names starting with hyphen."""
-    with pytest.raises(SkillValidationError, match='is invalid'):
+    with pytest.raises(ValueError, match='is invalid'):
         normalize_skill_name('-invalid')
 
 
 def test_normalize_skill_name_ends_with_hyphen() -> None:
     """Test normalize_skill_name raises error for names ending with hyphen."""
-    with pytest.raises(SkillValidationError, match='is invalid'):
+    with pytest.raises(ValueError, match='is invalid'):
         normalize_skill_name('invalid-')
 
 
@@ -592,7 +591,7 @@ def test_toolset_skill_decorator_invalid_name() -> None:
     """Test SkillsToolset.skill decorator with invalid explicit name."""
     toolset = SkillsToolset(skills=[], directories=[])
 
-    with pytest.raises(SkillValidationError, match='is invalid'):
+    with pytest.raises(ValueError, match='is invalid'):
 
         @toolset.skill(name='InvalidName')
         def my_skill() -> str:
@@ -604,7 +603,7 @@ def test_toolset_skill_decorator_name_too_long() -> None:
     """Test SkillsToolset.skill decorator with name exceeding 64 chars."""
     toolset = SkillsToolset(skills=[], directories=[])
 
-    with pytest.raises(SkillValidationError, match='exceeds 64 characters'):
+    with pytest.raises(ValueError, match='exceeds 64 characters'):
 
         @toolset.skill(name='a' * 65)
         def my_skill() -> str:

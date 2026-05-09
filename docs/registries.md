@@ -168,7 +168,7 @@ Avoid name collisions when combining multiple registries:
 anthropic = registry.prefixed('anthropic-')
 
 skill = await anthropic.get('anthropic-pdf')  # works
-skill = await anthropic.get('pdf')            # raises SkillNotFoundError
+skill = await anthropic.get('pdf')            # raises KeyError
 ```
 
 ### Renaming Skills

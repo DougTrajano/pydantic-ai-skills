@@ -653,8 +653,7 @@ prod_toolset = create_production_toolset(production_config)
 ### Health Checks
 
 ```python
-from pydantic_ai.toolsets.skills import SkillsToolset
-from pydantic_ai_skills import SkillNotFoundError
+from pydantic_ai_skills import SkillsToolset
 
 def check_skills_health(toolset: SkillsToolset) -> dict:
     """Check health of skills system."""

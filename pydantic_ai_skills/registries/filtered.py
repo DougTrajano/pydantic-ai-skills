@@ -11,7 +11,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from pydantic_ai_skills.exceptions import SkillNotFoundError
 from pydantic_ai_skills.registries.wrapper import WrapperRegistry
 from pydantic_ai_skills.types import Skill
 
@@ -47,7 +46,7 @@ class FilteredRegistry(WrapperRegistry):
         """Get a skill by name, raising if it doesn't pass the predicate."""
         skill = await self.wrapped.get(skill_name)
         if not self.predicate(skill):
-            raise SkillNotFoundError(f"Skill '{skill_name}' not found in filtered registry.")
+            raise KeyError(f"Skill '{skill_name}' not found in filtered registry.")
         return skill
 
     async def install(self, skill_name: str, target_dir: str | Path) -> Path:

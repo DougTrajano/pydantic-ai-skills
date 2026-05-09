@@ -14,10 +14,6 @@ from pydantic_ai_skills.directory import (
     discover_skills,
     validate_skill_metadata,
 )
-from pydantic_ai_skills.exceptions import (
-    SkillNotFoundError,
-    SkillValidationError,
-)
 from pydantic_ai_skills.local import FileBasedSkillResource, LocalSkillScriptExecutor
 from pydantic_ai_skills.types import normalize_skill_name
 
@@ -28,25 +24,25 @@ from pydantic_ai_skills.types import normalize_skill_name
 
 def test_normalize_skill_name_with_consecutive_hyphens() -> None:
     """Test that consecutive hyphens are invalid."""
-    with pytest.raises(SkillValidationError, match='consecutive hyphens'):
+    with pytest.raises(ValueError, match='consecutive hyphens'):
         normalize_skill_name('test--skill')
 
 
 def test_normalize_skill_name_starts_with_hyphen() -> None:
     """Test that skill names starting with hyphen are invalid."""
-    with pytest.raises(SkillValidationError, match='invalid'):
+    with pytest.raises(ValueError, match='invalid'):
         normalize_skill_name('-test-skill')
 
 
 def test_normalize_skill_name_ends_with_hyphen() -> None:
     """Test that skill names ending with hyphen are invalid."""
-    with pytest.raises(SkillValidationError, match='invalid'):
+    with pytest.raises(ValueError, match='invalid'):
         normalize_skill_name('test-skill-')
 
 
 def test_normalize_skill_name_with_special_chars() -> None:
     """Test that special characters are invalid."""
-    with pytest.raises(SkillValidationError, match='invalid'):
+    with pytest.raises(ValueError, match='invalid'):
         normalize_skill_name('test.skill!')
 
 
@@ -61,7 +57,7 @@ def test_normalize_skill_name_exactly_64_chars() -> None:
 def test_normalize_skill_name_exceeds_64_chars() -> None:
     """Test skill name exceeding 64 character limit."""
     name_65 = 'a' * 65
-    with pytest.raises(SkillValidationError, match='exceeds 64 characters'):
+    with pytest.raises(ValueError, match='exceeds 64 characters'):
         normalize_skill_name(name_65)
 
 
@@ -295,8 +291,8 @@ def test_discover_skills_os_error_handling(tmp_path: Path) -> None:
     try:
         skill_md.chmod(0o000)
 
-        # Should raise SkillValidationError
-        with pytest.raises(SkillValidationError):
+        # Should raise ValueError (wrapping the underlying OSError)
+        with pytest.raises(ValueError):
             discover_skills(tmp_path, validate=False)
     finally:
         # Restore permissions for cleanup
@@ -676,7 +672,7 @@ async def test_read_skill_resource_with_missing_skill() -> None:
     # Verify error would be raised
     assert toolset.get_skill('existing-skill').name == 'existing-skill'
 
-    with pytest.raises(SkillNotFoundError):
+    with pytest.raises(KeyError):
         toolset.get_skill('nonexistent-skill')
 
 
@@ -692,7 +688,7 @@ async def test_run_skill_script_with_missing_skill() -> None:
     toolset = SkillsToolset(skills=[skill])
 
     # Verify error would be raised
-    with pytest.raises(SkillNotFoundError):
+    with pytest.raises(KeyError):
         toolset.get_skill('nonexistent-skill')
 
 
@@ -772,5 +768,5 @@ def test_skills_directory_load_skill_not_found(tmp_path: Path) -> None:
     skills_dir = SkillsDirectory(path=tmp_path)
 
     # Try to load non-existent skill
-    with pytest.raises(SkillNotFoundError):
+    with pytest.raises(KeyError):
         skills_dir.load_skill('/nonexistent/path')

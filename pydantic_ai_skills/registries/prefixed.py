@@ -10,7 +10,6 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from pydantic_ai_skills.exceptions import SkillNotFoundError
 from pydantic_ai_skills.registries.wrapper import WrapperRegistry
 from pydantic_ai_skills.types import Skill
 
@@ -54,11 +53,10 @@ class PrefixedRegistry(WrapperRegistry):
         """Get a skill by its prefixed name.
 
         Raises:
-            SkillNotFoundError: When the name doesn't start with the
-                expected prefix.
+            KeyError: When the name doesn't start with the expected prefix.
         """
         if not skill_name.startswith(self.prefix):
-            raise SkillNotFoundError(f"Skill '{skill_name}' not found — expected prefix '{self.prefix}'.")
+            raise KeyError(f"Skill '{skill_name}' not found — expected prefix '{self.prefix}'.")
         inner_name = self._strip_prefix(skill_name)
         skill = await self.wrapped.get(inner_name)
         return self._add_prefix(skill)
