@@ -34,7 +34,6 @@ import anyio.abc
 import yaml
 from pydantic_ai._utils import is_async_callable, run_in_executor
 
-from .exceptions import SkillResourceLoadError, SkillScriptExecutionError
 from .types import SkillResource, SkillScript
 
 ContextEnvVarsExtractor = Callable[[Any], Mapping[str, Any] | None]
@@ -62,17 +61,17 @@ class FileBasedSkillResource(SkillResource):
             Parsed dict (JSON/YAML) or UTF-8 text string.
 
         Raises:
-            SkillResourceLoadError: If file cannot be read or path is invalid.
+            ValueError: If the resource has no URI configured.
+            OSError: If the file cannot be read. The original ``OSError`` subclass
+                (``FileNotFoundError``, ``PermissionError``, etc.) is preserved
+                along with ``errno``/``filename`` so callers can branch on the
+                error kind.
         """
         if not self.uri:
-            raise SkillResourceLoadError(f"Resource '{self.name}' has no URI")
+            raise ValueError(f"Resource '{self.name}' has no URI")
 
         resource_path = Path(self.uri)
-
-        try:
-            content = resource_path.read_text(encoding='utf-8')
-        except OSError as e:
-            raise SkillResourceLoadError(f"Failed to read resource '{self.name}': {e}") from e
+        content = resource_path.read_text(encoding='utf-8')
 
         file_extension = Path(self.name).suffix.lower()
 
@@ -366,7 +365,7 @@ class LocalSkillScriptExecutor:
                 start_new_session=use_process_group,
             )
         except OSError as e:
-            raise SkillScriptExecutionError(f"Failed to execute script '{script_name}': {e}") from e
+            raise RuntimeError(f"Failed to execute script '{script_name}': {e}") from e
 
     async def run(
         self,
@@ -388,10 +387,12 @@ class LocalSkillScriptExecutor:
             Combined stdout and stderr output.
 
         Raises:
-            SkillScriptExecutionError: If execution fails or times out.
+            ValueError: If the script has no URI configured.
+            RuntimeError: If execution fails to start.
+            TimeoutError: If execution exceeds the configured timeout.
         """
         if script.uri is None:
-            raise SkillScriptExecutionError(f"Script '{script.name}' has no URI for subprocess execution")
+            raise ValueError(f"Script '{script.name}' has no URI for subprocess execution")
 
         script_path = Path(script.uri)
         cmd = self._build_command(script_path)
@@ -429,7 +430,7 @@ class LocalSkillScriptExecutor:
                 pass
 
         if timed_out:
-            raise SkillScriptExecutionError(f"Script '{script.name}' timed out after {self.timeout} seconds")
+            raise TimeoutError(f"Script '{script.name}' timed out after {self.timeout} seconds")
 
         return self._format_output(stdout_chunks, stderr_chunks, return_code)
 
@@ -567,10 +568,10 @@ class FileBasedSkillScript(SkillScript):
             Script output (stdout + stderr).
 
         Raises:
-            SkillScriptExecutionError: If execution fails.
+            ValueError: If the script has no URI configured.
         """
         if not self.uri:
-            raise SkillScriptExecutionError(f"Script '{self.name}' has no URI")
+            raise ValueError(f"Script '{self.name}' has no URI")
 
         return await self.executor.run(self, args, ctx=ctx)
 

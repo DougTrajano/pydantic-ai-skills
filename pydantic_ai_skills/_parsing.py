@@ -12,8 +12,6 @@ from typing import Any
 
 import yaml
 
-from .exceptions import SkillValidationError
-
 # agentskills.io naming convention: lowercase letters, numbers, and hyphens only (no consecutive hyphens)
 SKILL_NAME_PATTERN = re.compile(r'^[a-z0-9]+(-[a-z0-9]+)*$')
 RESERVED_WORDS = {'anthropic', 'claude'}
@@ -29,7 +27,7 @@ def parse_skill_md(content: str) -> tuple[dict[str, Any], str]:
         Tuple of (frontmatter_dict, instructions_markdown).
 
     Raises:
-        SkillValidationError: If YAML parsing fails.
+        ValueError: If YAML parsing fails or frontmatter is not a mapping.
     """
     lines = content.split('\n')
 
@@ -56,10 +54,10 @@ def parse_skill_md(content: str) -> tuple[dict[str, Any], str]:
     try:
         frontmatter = yaml.safe_load(frontmatter_yaml)
     except yaml.YAMLError as e:
-        raise SkillValidationError(f'Failed to parse YAML frontmatter: {e}') from e
+        raise ValueError(f'Failed to parse YAML frontmatter: {e}') from e
 
     if not isinstance(frontmatter, dict):
-        raise SkillValidationError(f'YAML frontmatter must be a mapping, got {type(frontmatter).__name__}')
+        raise ValueError(f'YAML frontmatter must be a mapping, got {type(frontmatter).__name__}')
     return frontmatter, instructions
 
 

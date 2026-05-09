@@ -690,7 +690,7 @@ skill = Skill.from_file("./skills/research/arxiv-search")
 skill = Skill.from_file("./skills/research/arxiv-search/SKILL.md")
 ```
 
-`from_file()` raises `SkillValidationError` if the file is missing or the `name` field is absent (when `validate=True`, the default).
+`from_file()` raises `FileNotFoundError` if the `SKILL.md` is missing, or `ValueError` for structural problems (wrong filename, malformed YAML frontmatter, or absent `name` field when `validate=True`, the default).
 
 ## Skill Metadata
 

@@ -12,7 +12,6 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from pydantic_ai_skills.exceptions import SkillNotFoundError
 from pydantic_ai_skills.registries._base import SkillRegistry
 from pydantic_ai_skills.types import Skill
 
@@ -55,48 +54,50 @@ class CombinedRegistry(SkillRegistry):
                     return merged
         return merged
 
+    def _find_owner(self, skill_name: str) -> SkillRegistry | None:
+        """Return the first child registry that holds ``skill_name``, or None.
+
+        Uses the synchronous ``get_skills()`` cache so we don't swallow
+        unrelated ``KeyError``s from a child registry's internal logic.
+        """
+        for reg in self.registries:
+            for skill in reg.get_skills():
+                if skill.name == skill_name:
+                    return reg
+        return None
+
     async def get(self, skill_name: str) -> Skill:
         """Try each registry in order and return the first match.
 
         Raises:
-            SkillNotFoundError: When no registry contains the skill.
+            KeyError: When no registry contains the skill.
         """
-        for reg in self.registries:
-            try:
-                return await reg.get(skill_name)
-            except SkillNotFoundError:
-                continue
-        raise SkillNotFoundError(
-            f"Skill '{skill_name}' not found in any of the {len(self.registries)} combined registries."
-        )
+        owner = self._find_owner(skill_name)
+        if owner is None:
+            raise KeyError(f"Skill '{skill_name}' not found in any of the {len(self.registries)} combined registries.")
+        return await owner.get(skill_name)
 
     async def install(self, skill_name: str, target_dir: str | Path) -> Path:
         """Install from the first registry that contains the skill.
 
         Raises:
-            SkillNotFoundError: When no registry contains the skill.
+            KeyError: When no registry contains the skill.
         """
-        for reg in self.registries:
-            try:
-                await reg.get(skill_name)
-                return await reg.install(skill_name, target_dir)
-            except SkillNotFoundError:
-                continue
-        raise SkillNotFoundError(f"Skill '{skill_name}' not found in any combined registry for install.")
+        owner = self._find_owner(skill_name)
+        if owner is None:
+            raise KeyError(f"Skill '{skill_name}' not found in any combined registry for install.")
+        return await owner.install(skill_name, target_dir)
 
     async def update(self, skill_name: str, target_dir: str | Path) -> Path:
         """Update from the first registry that contains the skill.
 
         Raises:
-            SkillNotFoundError: When no registry contains the skill.
+            KeyError: When no registry contains the skill.
         """
-        for reg in self.registries:
-            try:
-                await reg.get(skill_name)
-                return await reg.update(skill_name, target_dir)
-            except SkillNotFoundError:
-                continue
-        raise SkillNotFoundError(f"Skill '{skill_name}' not found in any combined registry for update.")
+        owner = self._find_owner(skill_name)
+        if owner is None:
+            raise KeyError(f"Skill '{skill_name}' not found in any combined registry for update.")
+        return await owner.update(skill_name, target_dir)
 
     def get_skills(self) -> list[Skill]:
         """Return skills from all child registries, deduplicated by name.

@@ -23,6 +23,7 @@ The `SkillsToolset.__init__()` accepts the following parameters:
 | `max_depth` | `int \| None` | `3` | Maximum depth for skill discovery. `None` for unlimited depth. Used when creating SkillsDirectory from str/Path entries. |
 | `id` | `str \| None` | `None` | Unique identifier for this toolset. |
 | `instruction_template` | `str \| None` | `None` | Custom instruction template for skills system prompt. Must include `{skills_list}` placeholder. If None, uses default template. |
+| `max_retries` | `int` | `1` | Maximum number of times the model is allowed to retry a tool call when the tool raises `ModelRetry` (e.g. unknown skill / resource / script name). Forwarded to `FunctionToolset` so every registered tool inherits this retry budget. |
 
 ### Properties
 
@@ -34,7 +35,7 @@ The `SkillsToolset.__init__()` accepts the following parameters:
 
 | Method | Description |
 |--------|-------------|
-| `get_skill(skill_name: str) -> Skill` | Retrieve a specific skill by name. Raises `SkillNotFoundError` if not found. |
+| `get_skill(skill_name: str) -> Skill` | Retrieve a specific skill by name. Raises `KeyError` if not found. |
 | `get_instructions(ctx: RunContext[Any]) -> str | None` | Returns formatted system prompt with skills instructions, or `None` if no skills are loaded. Called automatically by the agent. |
 
 ## Usage Examples
@@ -310,9 +311,10 @@ Executes a skill script with optional arguments.
 
 **Raises**:
 
-- `SkillNotFoundError`: If the skill doesn't exist
-- `SkillScriptNotFoundError`: If the script doesn't exist in the skill
-- `SkillScriptExecutionError`: If script execution fails or times out
+- `pydantic_ai.ModelRetry`: If the skill or script doesn't exist (the LLM gets a retry prompt with the available names; respects the `max_retries` budget configured on `SkillsToolset`)
+- `RuntimeError`: If subprocess execution fails to start
+- `TimeoutError`: If script execution exceeds the configured timeout
+- `ValueError`: If the script has no URI configured
 
 **Example**:
 
@@ -398,4 +400,3 @@ See [Advanced Features](../advanced.md) for detailed decorator documentation.
 - [Skill Registries](../registries.md) - Load skills from Git repos and remote sources
 - [Types Reference](types.md) - Type definitions and data structures
 - [Registries Reference](registries.md) - Registry API documentation
-- [Exceptions Reference](exceptions.md) - Exception classes

@@ -65,7 +65,7 @@ class SkillRegistry(ABC):
             The matching :class:`~pydantic_ai_skills.Skill`.
 
         Raises:
-            SkillNotFoundError: When no skill with ``skill_name`` exists.
+            KeyError: When no skill with ``skill_name`` exists.
         """
 
     @abstractmethod

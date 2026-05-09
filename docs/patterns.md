@@ -426,38 +426,36 @@ async def export_results(
 
 ### Catching Skill Errors
 
+The package raises plain stdlib exceptions outside tool execution:
+
+| Operation | Exception |
+|---|---|
+| Unknown skill / resource / script lookup outside of agent tools | `KeyError` |
+| Malformed `SKILL.md` frontmatter or invalid skill name | `ValueError` |
+| Missing `SKILL.md` file | `FileNotFoundError` |
+| Resource read I/O failure | `OSError` |
+| Script subprocess failure / git registry failure | `RuntimeError` |
+| Script execution timeout | `TimeoutError` |
+
+Inside the tools registered by `SkillsToolset` (`load_skill`, `read_skill_resource`, `run_skill_script`), unknown skill / resource / script names raise `pydantic_ai.ModelRetry` so the LLM can correct itself within the configured retry budget (see `max_retries`).
+
 ```python
-from pydantic_ai.toolsets.skills import SkillsToolset
-from pydantic_ai_skills import (
-    SkillNotFoundError,
-    SkillResourceNotFoundError,
-    SkillScriptNotFoundError,
-    SkillScriptExecutionError
-)
+from pydantic_ai_skills import SkillsToolset
 
 toolset = SkillsToolset(directories=['./skills'])
 
-# Handle missing skills
+# Direct lookup raises KeyError
 try:
     skill = toolset.get_skill('non-existent')
-except SkillNotFoundError as e:
+except KeyError as e:
     print(f"Skill not found: {e}")
-
-# Handle missing resources/scripts in tools
-try:
-    resource = toolset._find_skill_resource(skill, 'unknown-resource')
-    if resource is None:
-        raise SkillResourceNotFoundError(...)
-except SkillResourceNotFoundError as e:
-    print(f"Resource not found: {e}")
 ```
 
 ### Graceful Degradation
 
 ```python
 from pydantic_ai import Agent, RunContext
-from pydantic_ai.toolsets.skills import SkillsToolset
-from pydantic_ai_skills import SkillNotFoundError
+from pydantic_ai_skills import SkillsToolset
 
 toolset = SkillsToolset(directories=['./skills'])
 
@@ -469,7 +467,7 @@ async def safe_load_skill(ctx: RunContext, skill_name: str) -> str:
     try:
         skill = toolset.get_skill(skill_name)
         return f"Loaded {skill_name}: {skill.description}"
-    except SkillNotFoundError:
+    except KeyError:
         available = list(toolset.skills.keys())
         return f"Skill '{skill_name}' not found. Available: {available}"
 
@@ -482,8 +480,7 @@ For long-running scripts:
 
 ```python
 from pydantic_ai import RunContext
-from pydantic_ai.toolsets.skills import SkillsToolset
-from pydantic_ai_skills import SkillScriptExecutionError
+from pydantic_ai_skills import SkillsToolset
 
 class MyDeps:
     database: Database

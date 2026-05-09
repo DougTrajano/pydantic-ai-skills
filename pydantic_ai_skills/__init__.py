@@ -38,15 +38,6 @@ Example:
 
 from pydantic_ai_skills.capability import SkillsCapability
 from pydantic_ai_skills.directory import SkillsDirectory, discover_skills, parse_skill_md
-from pydantic_ai_skills.exceptions import (
-    SkillException,
-    SkillNotFoundError,
-    SkillRegistryError,
-    SkillResourceLoadError,
-    SkillResourceNotFoundError,
-    SkillScriptExecutionError,
-    SkillValidationError,
-)
 from pydantic_ai_skills.local import CallableSkillScriptExecutor, LocalSkillScriptExecutor
 from pydantic_ai_skills.registries import GitCloneOptions, GitSkillsRegistry, SkillRegistry
 from pydantic_ai_skills.toolset import SkillsToolset
@@ -65,14 +56,6 @@ __all__ = [
     'Skill',
     'SkillResource',
     'SkillScript',
-    # Exceptions
-    'SkillException',
-    'SkillNotFoundError',
-    'SkillRegistryError',
-    'SkillResourceLoadError',
-    'SkillResourceNotFoundError',
-    'SkillScriptExecutionError',
-    'SkillValidationError',
     # Registries
     'SkillRegistry',
     'GitSkillsRegistry',

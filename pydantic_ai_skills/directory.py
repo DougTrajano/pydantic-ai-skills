@@ -14,10 +14,6 @@ import warnings
 from pathlib import Path
 
 from ._parsing import parse_skill_md, validate_skill_metadata
-from .exceptions import (
-    SkillNotFoundError,
-    SkillValidationError,
-)
 from .local import (
     CallableSkillScriptExecutor,
     LocalSkillScriptExecutor,
@@ -211,7 +207,8 @@ def discover_skills(
         List of discovered Skill objects.
 
     Raises:
-        SkillValidationError: If validation is enabled and a skill is invalid.
+        ValueError: If validation is enabled and a skill is invalid, or if a
+            skill file fails to load due to malformed contents or I/O errors.
     """
     skills: list[Skill] = []
     dir_path = Path(path).expanduser().resolve()
@@ -228,13 +225,13 @@ def discover_skills(
         try:
             skill = Skill.from_file(skill_file, validate=validate, script_executor=executor)
             skills.append(skill)
-        except SkillValidationError as sve:
+        except ValueError as ve:
             if validate:
                 raise
             else:
-                warnings.warn(f'Skipping invalid skill at {skill_file}: {sve}', UserWarning, stacklevel=2)
-        except (OSError, ValueError, KeyError) as e:
-            raise SkillValidationError(f'Failed to load skill from {skill_file}: {e}') from e
+                warnings.warn(f'Skipping invalid skill at {skill_file}: {ve}', UserWarning, stacklevel=2)
+        except (OSError, KeyError) as e:
+            raise ValueError(f'Failed to load skill from {skill_file}: {e}') from e
 
     return skills
 
@@ -330,11 +327,11 @@ class SkillsDirectory:
             Loaded Skill object.
 
         Raises:
-            SkillNotFoundError: If skill is not found.
+            KeyError: If skill is not found.
         """
         skill = self._skills.get(skill_uri)
 
         if skill is None:
-            raise SkillNotFoundError(f"Skill '{skill_uri}' not found in {self._path.as_posix()}.")
+            raise KeyError(f"Skill '{skill_uri}' not found in {self._path.as_posix()}.")
 
         return skill

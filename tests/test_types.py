@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 
-from pydantic_ai_skills.exceptions import SkillValidationError
 from pydantic_ai_skills.types import Skill, SkillResource, SkillScript
 
 
@@ -104,17 +103,17 @@ def test_from_file_explicit_skill_md_path(tmp_path: Path) -> None:
 
 
 def test_from_file_missing_skill_md(tmp_path: Path) -> None:
-    """A SKILL.md path that does not exist raises SkillValidationError."""
-    with pytest.raises(SkillValidationError, match='SKILL.md not found'):
+    """A SKILL.md path that does not exist raises FileNotFoundError."""
+    with pytest.raises(FileNotFoundError, match='SKILL.md not found'):
         Skill.from_file(tmp_path / 'nonexistent' / 'SKILL.md')
 
 
 def test_from_file_missing_name_validate_true(tmp_path: Path) -> None:
-    """Missing name with validate=True raises SkillValidationError."""
+    """Missing name with validate=True raises ValueError."""
     skill_dir = tmp_path / 'no-name'
     _write_skill_md(skill_dir, '---\ndescription: No name\n---\n\nContent.\n')
 
-    with pytest.raises(SkillValidationError, match='missing the required "name" field'):
+    with pytest.raises(ValueError, match='missing the required "name" field'):
         Skill.from_file(skill_dir, validate=True)
 
 
@@ -141,20 +140,20 @@ def test_from_file_with_resources(tmp_path: Path) -> None:
 
 
 def test_from_file_wrong_filename_raises(tmp_path: Path) -> None:
-    """Passing a file that is not named SKILL.md raises SkillValidationError."""
+    """Passing a file that is not named SKILL.md raises ValueError."""
     other_file = tmp_path / 'README.md'
     other_file.write_text('# not a skill')
 
-    with pytest.raises(SkillValidationError, match='SKILL.md'):
+    with pytest.raises(ValueError, match='SKILL.md'):
         Skill.from_file(other_file)
 
 
 def test_from_file_non_dict_frontmatter_raises(tmp_path: Path) -> None:
-    """YAML frontmatter that is a list (not a mapping) raises SkillValidationError."""
+    """YAML frontmatter that is a list (not a mapping) raises ValueError."""
     skill_dir = tmp_path / 'bad-skill'
     _write_skill_md(skill_dir, '---\n- item1\n- item2\n---\n\nContent.\n')
 
-    with pytest.raises(SkillValidationError, match='mapping'):
+    with pytest.raises(ValueError, match='mapping'):
         Skill.from_file(skill_dir, validate=False)
 
 

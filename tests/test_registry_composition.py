@@ -11,7 +11,6 @@ from pathlib import Path
 
 import pytest
 
-from pydantic_ai_skills.exceptions import SkillNotFoundError
 from pydantic_ai_skills.registries._base import SkillRegistry
 from pydantic_ai_skills.registries.combined import CombinedRegistry
 from pydantic_ai_skills.registries.filtered import FilteredRegistry
@@ -39,7 +38,7 @@ class StubRegistry(SkillRegistry):
         for s in self.skills:
             if s.name == skill_name:
                 return s
-        raise SkillNotFoundError(f"Skill '{skill_name}' not found.")
+        raise KeyError(f"Skill '{skill_name}' not found.")
 
     async def install(self, skill_name: str, target_dir: str | Path) -> Path:
         await self.get(skill_name)  # validate exists
@@ -105,9 +104,9 @@ async def test_wrapper_delegates_update(stub_registry: StubRegistry, tmp_path: P
 
 
 async def test_wrapper_get_raises_not_found(stub_registry: StubRegistry) -> None:
-    """WrapperRegistry.get() propagates SkillNotFoundError."""
+    """WrapperRegistry.get() propagates KeyError."""
     wrapper = WrapperRegistry(wrapped=stub_registry)
-    with pytest.raises(SkillNotFoundError):
+    with pytest.raises(KeyError):
         await wrapper.get('nonexistent')
 
 
@@ -138,9 +137,9 @@ async def test_filtered_get_passes_predicate(stub_registry: StubRegistry) -> Non
 
 
 async def test_filtered_get_rejects_excluded(stub_registry: StubRegistry) -> None:
-    """FilteredRegistry.get() raises SkillNotFoundError for excluded skills."""
+    """FilteredRegistry.get() raises KeyError for excluded skills."""
     filtered = FilteredRegistry(wrapped=stub_registry, predicate=lambda s: s.name == 'pdf')
-    with pytest.raises(SkillNotFoundError):
+    with pytest.raises(KeyError):
         await filtered.get('xlsx')
 
 
@@ -154,7 +153,7 @@ async def test_filtered_install_validates(stub_registry: StubRegistry, tmp_path:
 async def test_filtered_install_rejects_excluded(stub_registry: StubRegistry, tmp_path: Path) -> None:
     """FilteredRegistry.install() raises for excluded skills."""
     filtered = FilteredRegistry(wrapped=stub_registry, predicate=lambda s: s.name == 'pdf')
-    with pytest.raises(SkillNotFoundError):
+    with pytest.raises(KeyError):
         await filtered.install('xlsx', tmp_path)
 
 
@@ -168,7 +167,7 @@ async def test_filtered_update_validates(stub_registry: StubRegistry, tmp_path: 
 async def test_filtered_update_rejects_excluded(stub_registry: StubRegistry, tmp_path: Path) -> None:
     """FilteredRegistry.update() raises for excluded skills."""
     filtered = FilteredRegistry(wrapped=stub_registry, predicate=lambda s: s.name == 'pdf')
-    with pytest.raises(SkillNotFoundError):
+    with pytest.raises(KeyError):
         await filtered.update('xlsx', tmp_path)
 
 
@@ -203,7 +202,7 @@ async def test_prefixed_get_with_prefix(stub_registry: StubRegistry) -> None:
 async def test_prefixed_get_without_prefix_raises(stub_registry: StubRegistry) -> None:
     """PrefixedRegistry.get() raises when prefix is missing."""
     prefixed = PrefixedRegistry(wrapped=stub_registry, prefix='acme-')
-    with pytest.raises(SkillNotFoundError):
+    with pytest.raises(KeyError):
         await prefixed.get('pdf')
 
 
@@ -330,7 +329,7 @@ async def test_combined_get_raises_when_missing() -> None:
     """CombinedRegistry.get() raises when no registry has the skill."""
     reg1 = StubRegistry(skills=[Skill(name='pdf', description='PDF.', content='')])
     combined = CombinedRegistry(registries=[reg1])
-    with pytest.raises(SkillNotFoundError):
+    with pytest.raises(KeyError):
         await combined.get('nonexistent')
 
 
@@ -347,7 +346,7 @@ async def test_combined_install_routes_to_owner(tmp_path: Path) -> None:
 async def test_combined_install_raises_when_missing(tmp_path: Path) -> None:
     """CombinedRegistry.install() raises when no registry has the skill."""
     combined = CombinedRegistry(registries=[StubRegistry(skills=[])])
-    with pytest.raises(SkillNotFoundError):
+    with pytest.raises(KeyError):
         await combined.install('nonexistent', tmp_path)
 
 
@@ -362,7 +361,7 @@ async def test_combined_update_routes_to_owner(tmp_path: Path) -> None:
 async def test_combined_update_raises_when_missing(tmp_path: Path) -> None:
     """CombinedRegistry.update() raises when no registry has the skill."""
     combined = CombinedRegistry(registries=[StubRegistry(skills=[])])
-    with pytest.raises(SkillNotFoundError):
+    with pytest.raises(KeyError):
         await combined.update('nonexistent', tmp_path)
 
 

@@ -115,7 +115,7 @@ def discover_skills(
         List of discovered Skill objects.
 
     Raises:
-        SkillValidationError: If validation enabled and skill is invalid.
+        ValueError: If validation enabled and skill is invalid.
 
     Example:
         ```python
@@ -142,7 +142,7 @@ def discover_skills(
 
 ```python
 import pytest
-from pydantic_ai_skills import SkillsToolset, SkillNotFoundError
+from pydantic_ai_skills import SkillsToolset
 
 def test_toolset_init():
     """Test SkillsToolset initialization."""
@@ -153,7 +153,7 @@ def test_get_skill_not_found():
     """Test get_skill raises error for non-existent skill."""
     toolset = SkillsToolset(directories=["./test_skills"])
 
-    with pytest.raises(SkillNotFoundError):
+    with pytest.raises(KeyError):
         toolset.get_skill("non-existent")
 ```
 
