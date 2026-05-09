@@ -62,17 +62,16 @@ class FileBasedSkillResource(SkillResource):
 
         Raises:
             ValueError: If the resource has no URI configured.
-            OSError: If file cannot be read.
+            OSError: If the file cannot be read. The original ``OSError`` subclass
+                (``FileNotFoundError``, ``PermissionError``, etc.) is preserved
+                along with ``errno``/``filename`` so callers can branch on the
+                error kind.
         """
         if not self.uri:
             raise ValueError(f"Resource '{self.name}' has no URI")
 
         resource_path = Path(self.uri)
-
-        try:
-            content = resource_path.read_text(encoding='utf-8')
-        except OSError as e:
-            raise OSError(f"Failed to read resource '{self.name}': {e}") from e
+        content = resource_path.read_text(encoding='utf-8')
 
         file_extension = Path(self.name).suffix.lower()
 

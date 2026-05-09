@@ -55,7 +55,7 @@ Implement a trust hierarchy for skills:
 
 ```python
 from enum import Enum
-from pydantic_ai.toolsets.skills import SkillsToolset, Skill
+from pydantic_ai_skills import SkillsToolset, Skill
 
 class SkillTrustLevel(Enum):
     """Trust levels for skills."""
@@ -115,7 +115,7 @@ safe_toolset = registry.create_safe_toolset(
 ```python
 import hashlib
 from pathlib import Path
-from pydantic_ai.toolsets.skills import Skill, SkillsDirectory
+from pydantic_ai_skills import Skill, SkillsDirectory
 
 class VerifiedSkill:
     """Skill with integrity verification."""
@@ -168,7 +168,7 @@ By default, scripts run in isolated subprocesses (not in-process):
 # Crashes, infinite loops, or resource exhaustion
 # don't affect the main agent process
 
-from pydantic_ai.toolsets.skills import SkillScript, LocalSkillScriptExecutor
+from pydantic_ai_skills import SkillScript, LocalSkillScriptExecutor
 
 executor = LocalSkillScriptExecutor(
     python_executable=None,  # Uses default Python
@@ -215,7 +215,7 @@ def sanitize_script_args(args: dict[str, Any]) -> dict[str, str]:
     return sanitized
 
 # Usage
-from pydantic_ai.toolsets.skills import SkillsToolset
+from pydantic_ai_skills import SkillsToolset
 
 toolset = SkillsToolset(directories=['./skills'])
 
@@ -246,7 +246,7 @@ Security recommendations:
 Example (least-privilege mapping):
 
 ```python
-from pydantic_ai.toolsets.skills import LocalSkillScriptExecutor
+from pydantic_ai_skills import LocalSkillScriptExecutor
 
 executor = LocalSkillScriptExecutor(
     env_vars={
@@ -350,7 +350,7 @@ Files outside the skill directory or with unsupported extensions are not accessi
 ### Configuration
 
 ```python
-from pydantic_ai.toolsets.skills import SkillsToolset, LocalSkillScriptExecutor
+from pydantic_ai_skills import SkillsToolset, LocalSkillScriptExecutor
 
 # Default timeout: 30 seconds
 toolset = SkillsToolset(directories=['./skills'])
@@ -414,7 +414,7 @@ For additional security or to limit agent capabilities, you can exclude specific
 
 ```python
 from pydantic_ai import Agent
-from pydantic_ai.toolsets.skills import SkillsToolset
+from pydantic_ai_skills import SkillsToolset
 
 # Disable script execution only
 toolset = SkillsToolset(
@@ -493,7 +493,7 @@ toolset = SkillsToolset(
 ```python
 from typing import TypedDict
 from pydantic_ai import RunContext
-from pydantic_ai.toolsets.skills import SkillsToolset
+from pydantic_ai_skills import SkillsToolset
 
 class SafeDeps(TypedDict):
     """Carefully curated dependencies."""
@@ -537,7 +537,7 @@ agent = Agent(
 ```python
 import os
 from functools import cached_property
-from pydantic_ai.toolsets.skills import SkillsToolset
+from pydantic_ai_skills import SkillsToolset
 
 class SecureSkillDeps:
     """Dependencies with secrets managed safely."""
@@ -587,7 +587,7 @@ async def get_api_docs(ctx: RunContext[SecureSkillDeps]) -> str:
 ```python
 from dataclasses import dataclass
 from pathlib import Path
-from pydantic_ai.toolsets.skills import SkillsToolset, SkillsDirectory
+from pydantic_ai_skills import SkillsToolset, SkillsDirectory
 
 @dataclass
 class SkillsConfig:
@@ -708,7 +708,7 @@ if health['issues']:
 import json
 import logging
 from datetime import datetime
-from pydantic_ai.toolsets.skills import SkillsToolset
+from pydantic_ai_skills import SkillsToolset
 
 logger = logging.getLogger('skills')
 
@@ -755,7 +755,7 @@ class AuditedSkillsToolset(SkillsToolset):
 ```python
 import time
 from typing import Any
-from pydantic_ai.toolsets.skills import SkillsToolset
+from pydantic_ai_skills import SkillsToolset
 
 class MetricsCollector:
     """Collect skill execution metrics."""

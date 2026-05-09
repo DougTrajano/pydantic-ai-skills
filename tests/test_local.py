@@ -73,7 +73,7 @@ def test_file_based_resource_path_traversal(tmp_path: Path) -> None:
 
 
 def test_file_based_resource_file_not_found(tmp_path: Path) -> None:
-    """Test file-based resource with non-existent file."""
+    """Missing file raises FileNotFoundError (preserved from Path.read_text)."""
     skill_dir = tmp_path / 'skill'
     skill_dir.mkdir()
 
@@ -84,7 +84,7 @@ def test_file_based_resource_file_not_found(tmp_path: Path) -> None:
 
     import asyncio
 
-    with pytest.raises(OSError, match='Failed to read resource'):
+    with pytest.raises(FileNotFoundError):
         asyncio.run(resource.load(None))
 
 
