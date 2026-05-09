@@ -230,7 +230,7 @@ def discover_skills(
                 raise
             else:
                 warnings.warn(f'Skipping invalid skill at {skill_file}: {ve}', UserWarning, stacklevel=2)
-        except (OSError, KeyError, FileNotFoundError) as e:
+        except (OSError, KeyError) as e:
             raise ValueError(f'Failed to load skill from {skill_file}: {e}') from e
 
     return skills
