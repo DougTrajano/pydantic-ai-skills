@@ -659,3 +659,38 @@ def test_max_retries_propagates_to_each_tool(sample_skills_dir: Path) -> None:
     assert toolset.max_retries == 3
     for name in ('list_skills', 'load_skill', 'read_skill_resource', 'run_skill_script'):
         assert toolset.tools[name].max_retries == 3, name
+
+
+# ============================================================================
+# JSON string args compatibility — _coerce_to_dict helper
+# ============================================================================
+
+
+def test_coerce_to_dict_parses_json_string() -> None:
+    """_coerce_to_dict should parse a valid JSON string to dict."""
+    from pydantic_ai_skills.toolset import _coerce_to_dict
+
+    assert _coerce_to_dict('{"key": "value"}') == {'key': 'value'}
+
+
+def test_coerce_to_dict_passes_dict_through() -> None:
+    """_coerce_to_dict should return dict unchanged."""
+    from pydantic_ai_skills.toolset import _coerce_to_dict
+
+    d = {'key': 'value'}
+    assert _coerce_to_dict(d) is d
+
+
+def test_coerce_to_dict_passes_none_through() -> None:
+    """_coerce_to_dict should return None unchanged."""
+    from pydantic_ai_skills.toolset import _coerce_to_dict
+
+    assert _coerce_to_dict(None) is None
+
+
+def test_coerce_to_dict_raises_non_object() -> None:
+    """_coerce_to_dict should raise ValueError for non-object JSON."""
+    from pydantic_ai_skills.toolset import _coerce_to_dict
+
+    with pytest.raises(ValueError, match='must be a JSON object'):
+        _coerce_to_dict('[1, 2, 3]')
