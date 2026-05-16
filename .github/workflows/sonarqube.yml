@@ -1,0 +1,73 @@
+name: SonarCloud Analysis
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types:
+      - completed
+
+jobs:
+  sonarcloud:
+    name: SonarCloud Scan
+    runs-on: ubuntu-latest
+    # Run on success or failure so SonarCloud can report quality gate status either way.
+    # Skipped/cancelled runs are excluded — no artifacts would exist to download.
+    if: >
+      github.event.workflow_run.conclusion == 'success' ||
+      github.event.workflow_run.conclusion == 'failure'
+    steps:
+      - name: Download coverage artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+        # The test job may not have run (e.g. lint-only failure), so no artifact exists.
+        continue-on-error: true
+
+      - name: Download PR metadata artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: pr-metadata-${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+        continue-on-error: true
+
+      - name: Load PR metadata
+        id: pr_meta
+        run: |
+          if [ -f pr-metadata.env ]; then source pr-metadata.env; fi
+          echo "pr_number=${PR_NUMBER}" >> $GITHUB_OUTPUT
+          echo "pr_head_sha=${PR_HEAD_SHA}" >> $GITHUB_OUTPUT
+          echo "pr_base_ref=${PR_BASE_REF}" >> $GITHUB_OUTPUT
+          echo "pr_head_ref=${PR_HEAD_REF}" >> $GITHUB_OUTPUT
+
+      # Check out the exact commit that was tested. For fork PRs, head_repository
+      # is the fork so this correctly checks out the contributor's code.
+      - name: Checkout code at tested SHA
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.workflow_run.head_repository.full_name }}
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+
+      # Artifacts are downloaded to the workspace root; move coverage into the repo.
+      - name: Place coverage report
+        run: mv ../coverage.xml coverage.xml 2>/dev/null || true
+
+      - name: SonarCloud Scan (PR)
+        if: steps.pr_meta.outputs.pr_number != ''
+        uses: SonarSource/sonarqube-scan-action@v6
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.pullrequest.key=${{ steps.pr_meta.outputs.pr_number }}
+            -Dsonar.pullrequest.branch=${{ steps.pr_meta.outputs.pr_head_ref }}
+            -Dsonar.pullrequest.base=${{ steps.pr_meta.outputs.pr_base_ref }}
+
+      - name: SonarCloud Scan (push to main)
+        if: steps.pr_meta.outputs.pr_number == ''
+        uses: SonarSource/sonarqube-scan-action@v6
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
