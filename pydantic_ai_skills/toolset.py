@@ -80,7 +80,7 @@ def _coerce_to_dict(v: Any) -> Any:
         try:
             parsed = json.loads(v)
         except json.JSONDecodeError as e:
-            # 捕获 JSON 解析错误，抛出更直观的错误信息
+            # Catch JSON parsing errors and throw a more intuitive error message
             raise ValueError(
                 f"Invalid JSON string. Error: {e.msg} at line {e.lineno} col {e.colno}. Input snippet: {v[:100]}")
         if not isinstance(parsed, dict):
