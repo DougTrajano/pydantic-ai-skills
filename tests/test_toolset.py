@@ -705,11 +705,13 @@ def test_run_skill_script_coerces_json_string_args(sample_skills_dir: Path) -> N
 
     # JSON string args are coerced to dict
     args_json = json.dumps({'key': 'value'})
-    result = validator.validate_python({
-        'skill_name': 'skill-three',
-        'script_name': 'scripts/hello.py',
-        'args': args_json,
-    })
+    result = validator.validate_python(
+        {
+            'skill_name': 'skill-three',
+            'script_name': 'scripts/hello.py',
+            'args': args_json,
+        }
+    )
     assert result['args'] == {'key': 'value'}
     assert isinstance(result['args'], dict)
 
@@ -720,11 +722,13 @@ def test_run_skill_script_dict_args_pass_through(sample_skills_dir: Path) -> Non
     validator = toolset.tools['run_skill_script'].function_schema.validator
 
     args_dict = {'key': 'value'}
-    result = validator.validate_python({
-        'skill_name': 'skill-three',
-        'script_name': 'scripts/hello.py',
-        'args': args_dict,
-    })
+    result = validator.validate_python(
+        {
+            'skill_name': 'skill-three',
+            'script_name': 'scripts/hello.py',
+            'args': args_dict,
+        }
+    )
     assert result['args'] == args_dict
 
 
@@ -733,11 +737,13 @@ def test_run_skill_script_none_args_allowed(sample_skills_dir: Path) -> None:
     toolset = SkillsToolset(directories=[sample_skills_dir])
     validator = toolset.tools['run_skill_script'].function_schema.validator
 
-    result = validator.validate_python({
-        'skill_name': 'skill-three',
-        'script_name': 'scripts/hello.py',
-        'args': None,
-    })
+    result = validator.validate_python(
+        {
+            'skill_name': 'skill-three',
+            'script_name': 'scripts/hello.py',
+            'args': None,
+        }
+    )
     assert result['args'] is None
 
 
@@ -749,8 +755,10 @@ def test_run_skill_script_rejects_non_object_json(sample_skills_dir: Path) -> No
     validator = toolset.tools['run_skill_script'].function_schema.validator
 
     with pytest.raises(ValidationError, match='must be a JSON object'):
-        validator.validate_python({
-            'skill_name': 'skill-three',
-            'script_name': 'scripts/hello.py',
-            'args': '[1, 2, 3]',
-        })
+        validator.validate_python(
+            {
+                'skill_name': 'skill-three',
+                'script_name': 'scripts/hello.py',
+                'args': '[1, 2, 3]',
+            }
+        )

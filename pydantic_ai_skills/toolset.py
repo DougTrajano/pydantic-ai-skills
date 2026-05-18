@@ -82,7 +82,8 @@ def _coerce_to_dict(v: Any) -> Any:
         except json.JSONDecodeError as e:
             # Catch JSON parsing errors and throw a more intuitive error message
             raise ValueError(
-                f"Invalid JSON string. Error: {e.msg} at line {e.lineno} col {e.colno}. Input snippet: {v[:100]}")
+                f'Invalid JSON string. Error: {e.msg} at line {e.lineno} col {e.colno}. Input snippet: {v[:100]}'
+            )
         if not isinstance(parsed, dict):
             raise ValueError(f'args must be a JSON object, got {type(parsed).__name__}')
         return parsed
