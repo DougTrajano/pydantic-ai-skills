@@ -74,12 +74,15 @@ LOAD_SKILL_TEMPLATE = """<skill>
 """
 
 
-def _coerce_to_dict(v: Any) -> dict[str, Any] | None:
-    """Convert JSON string to dict if needed, pass through dict/None unchanged."""
-    if isinstance(v, dict) or v is None:
-        return v
+def _coerce_to_dict(v: Any) -> Any:
+    """Convert JSON string to dict if needed, pass through non-string values unchanged."""
     if isinstance(v, str):
-        parsed = json.loads(v)
+        try:
+            parsed = json.loads(v)
+        except json.JSONDecodeError as e:
+            # 捕获 JSON 解析错误，抛出更直观的错误信息
+            raise ValueError(
+                f"Invalid JSON string. Error: {e.msg} at line {e.lineno} col {e.colno}. Input snippet: {v[:100]}")
         if not isinstance(parsed, dict):
             raise ValueError(f'args must be a JSON object, got {type(parsed).__name__}')
         return parsed
