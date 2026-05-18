@@ -696,6 +696,14 @@ def test_coerce_to_dict_raises_non_object() -> None:
         _coerce_to_dict('[1, 2, 3]')
 
 
+def test_coerce_to_dict_raises_invalid_json() -> None:
+    """_coerce_to_dict should raise a specific ValueError format when JSON parsing fails."""
+    from pydantic_ai_skills.toolset import _coerce_to_dict
+
+    with pytest.raises(ValueError, match=r'Invalid JSON string\. Error: .* at line 1 col \d+\.'):
+        _coerce_to_dict('{"key": "value", }')
+
+
 def test_run_skill_script_coerces_json_string_args(sample_skills_dir: Path) -> None:
     """Pydantic tool arg validation should coerce JSON string args into dict."""
     import json
