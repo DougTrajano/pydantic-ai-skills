@@ -659,3 +659,114 @@ def test_max_retries_propagates_to_each_tool(sample_skills_dir: Path) -> None:
     assert toolset.max_retries == 3
     for name in ('list_skills', 'load_skill', 'read_skill_resource', 'run_skill_script'):
         assert toolset.tools[name].max_retries == 3, name
+
+
+# ============================================================================
+# JSON string args compatibility — _coerce_to_dict helper
+# ============================================================================
+
+
+def test_coerce_to_dict_parses_json_string() -> None:
+    """_coerce_to_dict should parse a valid JSON string to dict."""
+    from pydantic_ai_skills.toolset import _coerce_to_dict
+
+    assert _coerce_to_dict('{"key": "value"}') == {'key': 'value'}
+
+
+def test_coerce_to_dict_passes_dict_through() -> None:
+    """_coerce_to_dict should return dict unchanged."""
+    from pydantic_ai_skills.toolset import _coerce_to_dict
+
+    d = {'key': 'value'}
+    assert _coerce_to_dict(d) is d
+
+
+def test_coerce_to_dict_passes_none_through() -> None:
+    """_coerce_to_dict should return None unchanged."""
+    from pydantic_ai_skills.toolset import _coerce_to_dict
+
+    assert _coerce_to_dict(None) is None
+
+
+def test_coerce_to_dict_raises_non_object() -> None:
+    """_coerce_to_dict should raise ValueError for non-object JSON."""
+    from pydantic_ai_skills.toolset import _coerce_to_dict
+
+    with pytest.raises(ValueError, match='must be a JSON object'):
+        _coerce_to_dict('[1, 2, 3]')
+
+
+def test_coerce_to_dict_raises_invalid_json() -> None:
+    """_coerce_to_dict should raise a specific ValueError format when JSON parsing fails."""
+    from pydantic_ai_skills.toolset import _coerce_to_dict
+
+    with pytest.raises(ValueError, match=r'Invalid JSON string\. Error: .* at line 1 col \d+\.'):
+        _coerce_to_dict('{"key": "value", }')
+
+
+def test_run_skill_script_coerces_json_string_args(sample_skills_dir: Path) -> None:
+    """Pydantic tool arg validation should coerce JSON string args into dict."""
+    import json
+
+    toolset = SkillsToolset(directories=[sample_skills_dir])
+    validator = toolset.tools['run_skill_script'].function_schema.validator
+
+    # JSON string args are coerced to dict
+    args_json = json.dumps({'key': 'value'})
+    result = validator.validate_python(
+        {
+            'skill_name': 'skill-three',
+            'script_name': 'scripts/hello.py',
+            'args': args_json,
+        }
+    )
+    assert result['args'] == {'key': 'value'}
+    assert isinstance(result['args'], dict)
+
+
+def test_run_skill_script_dict_args_pass_through(sample_skills_dir: Path) -> None:
+    """Dict args should pass through unchanged during validation."""
+    toolset = SkillsToolset(directories=[sample_skills_dir])
+    validator = toolset.tools['run_skill_script'].function_schema.validator
+
+    args_dict = {'key': 'value'}
+    result = validator.validate_python(
+        {
+            'skill_name': 'skill-three',
+            'script_name': 'scripts/hello.py',
+            'args': args_dict,
+        }
+    )
+    assert result['args'] == args_dict
+
+
+def test_run_skill_script_none_args_allowed(sample_skills_dir: Path) -> None:
+    """None args should be accepted during validation."""
+    toolset = SkillsToolset(directories=[sample_skills_dir])
+    validator = toolset.tools['run_skill_script'].function_schema.validator
+
+    result = validator.validate_python(
+        {
+            'skill_name': 'skill-three',
+            'script_name': 'scripts/hello.py',
+            'args': None,
+        }
+    )
+    assert result['args'] is None
+
+
+def test_run_skill_script_rejects_non_object_json(sample_skills_dir: Path) -> None:
+    """Non-object JSON strings (e.g. arrays) should be rejected during validation."""
+    from pydantic import ValidationError
+
+    toolset = SkillsToolset(directories=[sample_skills_dir])
+    validator = toolset.tools['run_skill_script'].function_schema.validator
+
+    with pytest.raises(ValidationError, match='must be a JSON object'):
+        validator.validate_python(
+            {
+                'skill_name': 'skill-three',
+                'script_name': 'scripts/hello.py',
+                'args': '[1, 2, 3]',
+            }
+        )

@@ -17,8 +17,9 @@ import warnings
 from collections.abc import Callable
 from inspect import signature as get_signature
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
+from pydantic import BeforeValidator
 from pydantic_ai import ModelRetry
 from pydantic_ai._griffe import doc_descriptions
 from pydantic_ai._run_context import RunContext
@@ -71,6 +72,22 @@ LOAD_SKILL_TEMPLATE = """<skill>
 </instructions>
 </skill>
 """
+
+
+def _coerce_to_dict(v: Any) -> Any:
+    """Convert JSON string to dict if needed, pass through non-string values unchanged."""
+    if isinstance(v, str):
+        try:
+            parsed = json.loads(v)
+        except json.JSONDecodeError as e:
+            # Catch JSON parsing errors and throw a more intuitive error message
+            raise ValueError(
+                f'Invalid JSON string. Error: {e.msg} at line {e.lineno} col {e.colno}. Input snippet: {v[:100]}'
+            ) from e
+        if not isinstance(parsed, dict):
+            raise ValueError(f'args must be a JSON object, got {type(parsed).__name__}')
+        return parsed
+    return v
 
 
 class SkillsToolset(FunctionToolset[Any]):
@@ -631,7 +648,7 @@ class SkillsToolset(FunctionToolset[Any]):
             ctx: RunContext[Any],
             skill_name: str,
             script_name: str,
-            args: dict[str, Any] | None = None,
+            args: Annotated[dict[str, Any] | None, BeforeValidator(_coerce_to_dict)] = None,
         ) -> str:
             """Execute a skill script that performs actions or computations.
 
