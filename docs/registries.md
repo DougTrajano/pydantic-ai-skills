@@ -10,6 +10,12 @@ Git-backed registries require [GitPython](https://gitpython.readthedocs.io/):
 pip install pydantic-ai-skills[git]
 ```
 
+S3-backed registries require [boto3](https://boto3.amazonaws.com/v1/documentation/api/latest/index.html):
+
+```bash
+pip install pydantic-ai-skills[s3]
+```
+
 ## Quick Start
 
 ### Load Skills from a Git Repository
@@ -138,6 +144,88 @@ print(skill.metadata)
 #     'registry': 'GitSkillsRegistry',
 #     'repo': 'https://github.com/anthropics/skills',
 #     'version': 'abc123...',  # HEAD commit SHA
+# }
+```
+
+## S3SkillsRegistry
+
+`S3SkillsRegistry` downloads skills from an Amazon S3 bucket — or any S3-compatible store such as MinIO, Ceph, or Cloudflare R2 — into a local cache, then discovers `SKILL.md` files the same way the Git registry does.
+
+Install the optional dependency:
+
+```bash
+pip install pydantic-ai-skills[s3]
+```
+
+All connection details (credentials, `endpoint_url`, region, TLS, path-style addressing) live on the **boto3 client** you supply via `boto3_client`. When omitted, a default `boto3.client("s3")` is built, which uses boto3's standard credential resolution chain (environment variables, `~/.aws/credentials`, IAM roles, etc.).
+
+### Constructor Parameters
+
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `bucket` | `str` | *required* | Name of the S3 bucket containing the skills. |
+| `prefix` | `str` | `""` | Key prefix inside the bucket where skill directories live. |
+| `target_dir` | `str \| Path \| None` | `None` | Local cache directory. A temp directory is used when `None`. |
+| `boto3_client` | `Any \| None` | `None` | Pre-built boto3 S3 client. A default client is created when `None`. |
+| `validate` | `bool` | `True` | Validate every discovered `SKILL.md` after syncing. |
+| `auto_install` | `bool` | `True` | Sync on construction (and on `search`/`get`). Set `False` for offline use. |
+
+### Amazon S3 (Default Client)
+
+```python
+from pydantic_ai_skills.registries import S3SkillsRegistry
+
+# Uses the ambient AWS credential chain.
+registry = S3SkillsRegistry(bucket="my-skills", prefix="skills")
+```
+
+### MinIO (and Other S3-Compatible Stores)
+
+Build a boto3 client pointed at your endpoint and pass it in. MinIO requires path-style addressing:
+
+```python
+import boto3
+from botocore.config import Config
+from pydantic_ai_skills.registries import S3SkillsRegistry
+
+client = boto3.client(
+    "s3",
+    endpoint_url="http://localhost:9000",
+    aws_access_key_id="minioadmin",
+    aws_secret_access_key="minioadmin",
+    config=Config(s3={"addressing_style": "path"}),
+)
+
+registry = S3SkillsRegistry(bucket="skills", boto3_client=client)
+```
+
+The same pattern works for Ceph RadosGW and Cloudflare R2 — only the `endpoint_url` and credentials change.
+
+### Offline / Air-Gapped Mode
+
+Set `auto_install=False` so the registry never reaches S3 and reads only from `target_dir`:
+
+```python
+registry = S3SkillsRegistry(
+    bucket="skills",
+    target_dir="/opt/skills-mirror",
+    auto_install=False,
+)
+```
+
+### Skill Metadata Enrichment
+
+Skills loaded from S3 receive registry-specific metadata:
+
+```python
+skill = await registry.get('pdf')
+print(skill.metadata)
+# {
+#     'source_url': 's3://my-skills/skills/pdf',
+#     'registry': 'S3SkillsRegistry',
+#     'bucket': 'my-skills',
+#     'prefix': 'skills',
+#     'version': '2024-01-01T00:00:00+00:00',  # latest object LastModified
 # }
 ```
 

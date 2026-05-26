@@ -39,7 +39,7 @@ Example:
 from pydantic_ai_skills.capability import SkillsCapability
 from pydantic_ai_skills.directory import SkillsDirectory, discover_skills, parse_skill_md
 from pydantic_ai_skills.local import CallableSkillScriptExecutor, LocalSkillScriptExecutor
-from pydantic_ai_skills.registries import GitCloneOptions, GitSkillsRegistry, SkillRegistry
+from pydantic_ai_skills.registries import GitCloneOptions, GitSkillsRegistry, S3SkillsRegistry, SkillRegistry
 from pydantic_ai_skills.toolset import SkillsToolset
 from pydantic_ai_skills.types import Skill, SkillResource, SkillScript
 
@@ -60,6 +60,7 @@ __all__ = [
     'SkillRegistry',
     'GitSkillsRegistry',
     'GitCloneOptions',
+    'S3SkillsRegistry',
     # Utility functions
     'discover_skills',
     'parse_skill_md',

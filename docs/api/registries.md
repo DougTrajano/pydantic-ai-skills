@@ -30,6 +30,13 @@
 
 ---
 
+::: pydantic_ai_skills.registries.s3.S3SkillsRegistry
+    options:
+        show_source: true
+        heading_level: 2
+
+---
+
 ## Composition Wrappers
 
 ::: pydantic_ai_skills.registries.wrapper.WrapperRegistry
