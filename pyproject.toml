@@ -111,3 +111,11 @@ quote-style = "single"
 
 [tool.hatch.build.targets.wheel]
 packages = ["pydantic_ai_skills"]
+
+[tool.coverage.run]
+# Emit repo-root-relative file paths (e.g. pydantic_ai_skills/registries/s3.py)
+# so SonarCloud can map coverage entries onto the indexed sources. Without this,
+# coverage.xml records paths relative to the package dir (registries/s3.py),
+# which Sonar resolves from the repo root and fails to match -> 0% coverage.
+relative_files = true
+source = ["pydantic_ai_skills"]
