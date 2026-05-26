@@ -18,6 +18,7 @@ from urllib.parse import urlparse, urlunparse
 
 from pydantic_ai_skills.directory import discover_skills
 from pydantic_ai_skills.registries._base import SkillRegistry
+from pydantic_ai_skills.registries._copy import copy_skill_directory
 from pydantic_ai_skills.types import Skill
 
 __all__ = ['GitCloneOptions', 'GitSkillsRegistry']
@@ -577,31 +578,7 @@ class GitSkillsRegistry(SkillRegistry):
         if src_skill_dir is None:
             raise KeyError(f"Skill '{skill_name}' not found in repository {self._clean_repo_url!r}.")
 
-        dest_root = Path(target_dir).expanduser().resolve()
-        dest_root.mkdir(parents=True, exist_ok=True)
-        dest_skill_dir = dest_root / skill_name
-
-        # Path traversal check on destination
-        if not dest_skill_dir.resolve().is_relative_to(dest_root):
-            raise ValueError(f"Destination path '{dest_skill_dir}' escapes target directory '{dest_root}'.")
-
-        # Validate no source symlinks escape the skill directory
-        src_resolved = src_skill_dir.resolve()
-        for src_file in src_resolved.rglob('*'):
-            if src_file.is_symlink() or src_file.is_file():
-                try:
-                    src_file.resolve().relative_to(src_resolved)
-                except ValueError as exc:
-                    raise ValueError(
-                        f"Source path '{src_file}' escapes skill directory (path traversal detected)."
-                    ) from exc
-
-        # Copy the skill directory
-        if dest_skill_dir.exists():
-            shutil.rmtree(dest_skill_dir)
-        shutil.copytree(src_resolved, dest_skill_dir)
-
-        return dest_skill_dir
+        return copy_skill_directory(src_skill_dir, target_dir, skill_name)
 
     async def update(self, skill_name: str, target_dir: str | Path) -> Path:
         """Pull the latest changes and re-copy the skill to ``target_dir``.

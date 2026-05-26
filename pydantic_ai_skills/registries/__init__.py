@@ -3,6 +3,8 @@
 Available registries:
 - :class:`~pydantic_ai_skills.registries.git.GitSkillsRegistry`: Clone a Git repository
   and expose its skills.
+- :class:`~pydantic_ai_skills.registries.s3.S3SkillsRegistry`: Download skills from an S3
+  bucket (or S3-compatible store such as MinIO).
 
 Composition wrappers:
 - :class:`~pydantic_ai_skills.registries.wrapper.WrapperRegistry`: Base delegation wrapper.
@@ -21,6 +23,7 @@ from pydantic_ai_skills.registries.filtered import FilteredRegistry
 from pydantic_ai_skills.registries.git import GitCloneOptions, GitSkillsRegistry
 from pydantic_ai_skills.registries.prefixed import PrefixedRegistry
 from pydantic_ai_skills.registries.renamed import RenamedRegistry
+from pydantic_ai_skills.registries.s3 import S3SkillsRegistry
 from pydantic_ai_skills.registries.wrapper import WrapperRegistry
 
 __all__ = [
@@ -32,4 +35,5 @@ __all__ = [
     'CombinedRegistry',
     'GitSkillsRegistry',
     'GitCloneOptions',
+    'S3SkillsRegistry',
 ]
