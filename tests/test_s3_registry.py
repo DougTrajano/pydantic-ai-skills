@@ -208,6 +208,49 @@ async def test_update_resyncs_and_reinstalls(client: FakeS3Client, tmp_path: Pat
     assert (dest / 'SKILL.md').exists()
 
 
+async def test_update_mirrors_removed_skill(client: FakeS3Client, tmp_path: Path) -> None:
+    """A skill deleted from the bucket disappears locally after the next sync."""
+    registry = _make_registry(client)
+    assert {s.name for s in registry.get_skills()} == {'pdf', 'xlsx'}
+
+    target = tmp_path / 'installed'
+    await registry.install('pdf', target)
+
+    # Remove xlsx from the bucket, then trigger a re-sync via update.
+    del client.store['skills/xlsx/SKILL.md']
+    await registry.update('pdf', target)
+
+    assert {s.name for s in registry.get_skills()} == {'pdf'}
+
+
+# ---------------------------------------------------------------------------
+# Error handling
+# ---------------------------------------------------------------------------
+
+
+def test_list_failure_wrapped_in_runtime_error(tmp_path: Path) -> None:
+    """A client error during listing is wrapped in RuntimeError with context."""
+
+    class FailingListClient(FakeS3Client):
+        def get_paginator(self, name: str) -> Any:
+            raise RuntimeError('boom: access denied')
+
+    with pytest.raises(RuntimeError, match="Failed to list objects in bucket 'my-bucket'"):
+        S3SkillsRegistry(bucket='my-bucket', prefix='skills', boto3_client=FailingListClient())
+
+
+def test_download_failure_wrapped_in_runtime_error(client: FakeS3Client) -> None:
+    """A client error during download is wrapped in RuntimeError with context."""
+
+    class FailingDownloadClient(FakeS3Client):
+        def download_file(self, Bucket: str, Key: str, Filename: str) -> None:
+            raise RuntimeError('boom: timeout')
+
+    failing = FailingDownloadClient(client.store)
+    with pytest.raises(RuntimeError, match="Failed to download .* from bucket 'my-bucket'"):
+        S3SkillsRegistry(bucket='my-bucket', prefix='skills', boto3_client=failing)
+
+
 # ---------------------------------------------------------------------------
 # auto_install
 # ---------------------------------------------------------------------------

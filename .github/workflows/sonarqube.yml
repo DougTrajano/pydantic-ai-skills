@@ -16,6 +16,18 @@ jobs:
       github.event.workflow_run.conclusion == 'success' ||
       github.event.workflow_run.conclusion == 'failure'
     steps:
+      # Check out the exact commit that was tested first. For fork PRs,
+      # head_repository is the fork so this correctly checks out the
+      # contributor's code. Checking out before downloading artifacts is
+      # important: actions/checkout runs `git clean -ffdx`, which would delete
+      # any artifacts (e.g. coverage.xml) downloaded into the workspace first.
+      - name: Checkout code at tested SHA
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.workflow_run.head_repository.full_name }}
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+
       - name: Download coverage artifact
         uses: actions/download-artifact@v4
         with:
@@ -41,19 +53,6 @@ jobs:
           echo "pr_head_sha=${PR_HEAD_SHA}" >> $GITHUB_OUTPUT
           echo "pr_base_ref=${PR_BASE_REF}" >> $GITHUB_OUTPUT
           echo "pr_head_ref=${PR_HEAD_REF}" >> $GITHUB_OUTPUT
-
-      # Check out the exact commit that was tested. For fork PRs, head_repository
-      # is the fork so this correctly checks out the contributor's code.
-      - name: Checkout code at tested SHA
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ github.event.workflow_run.head_repository.full_name }}
-          ref: ${{ github.event.workflow_run.head_sha }}
-          fetch-depth: 0
-
-      # Artifacts are downloaded to the workspace root; move coverage into the repo.
-      - name: Place coverage report
-        run: mv ../coverage.xml coverage.xml 2>/dev/null || true
 
       - name: SonarCloud Scan (PR)
         if: steps.pr_meta.outputs.pr_number != ''

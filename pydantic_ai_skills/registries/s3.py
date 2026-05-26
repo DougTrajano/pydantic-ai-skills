@@ -8,7 +8,6 @@ exposing them to :class:`~pydantic_ai_skills.SkillsToolset`.
 from __future__ import annotations
 
 import shutil
-import tempfile
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
@@ -16,6 +15,7 @@ from typing import Any
 
 from pydantic_ai_skills.directory import discover_skills
 from pydantic_ai_skills.registries._base import SkillRegistry
+from pydantic_ai_skills.registries._copy import copy_skill_directory
 from pydantic_ai_skills.types import Skill
 
 __all__ = ['S3SkillsRegistry']
@@ -27,7 +27,9 @@ class S3SkillsRegistry(SkillRegistry):
     Lists and downloads every object under ``bucket/prefix`` into a local cache
     directory on the first call to ``search``/``get``/``install`` (or eagerly
     during ``__init__`` when ``auto_install=True``), then parses the synced tree
-    with :func:`~pydantic_ai_skills.discover_skills`. Re-syncs on ``update``.
+    with :func:`~pydantic_ai_skills.discover_skills`. Each sync mirrors the
+    remote prefix — the cached subtree is cleared first, so skills removed from
+    the bucket no longer appear locally. Re-syncs on ``update``.
 
     Works with Amazon S3 and any S3-compatible store (MinIO, Ceph, Cloudflare R2,
     etc.). All connection details — credentials, ``endpoint_url``, region, TLS,
@@ -58,8 +60,9 @@ class S3SkillsRegistry(SkillRegistry):
             :class:`~pydantic_ai_skills.SkillsDirectory`. Defaults to ``True``.
         auto_install: When ``True`` (default), ``search`` and ``get`` trigger a
             sync automatically so the local copy is always up to date. Set to
-            ``False`` to require explicit ``install`` / ``update`` calls, which is
-            preferable in offline or air-gapped environments.
+            ``False`` to skip syncing on construction and on ``search`` / ``get``;
+            the registry then reads only what already exists in ``target_dir``.
+            Note that an explicit ``update()`` call always contacts S3.
 
     Examples:
         Amazon S3 with the ambient credential chain:
@@ -118,9 +121,13 @@ class S3SkillsRegistry(SkillRegistry):
         self._prefix = prefix.strip('/')
         self._validate = validate
         self._auto_install = auto_install
-        self._tmp_dir: tempfile.TemporaryDirectory[str] | None = None
+        self._tmp_dir: Any | None = None
+        # Cache of the most recent object listing (Key -> LastModified), populated by _sync.
+        self._object_modified: dict[str, datetime | None] = {}
 
         if target_dir is None:
+            import tempfile
+
             self._tmp_dir = tempfile.TemporaryDirectory()
             self._target_dir = Path(self._tmp_dir.name)
         else:
@@ -152,18 +159,36 @@ class S3SkillsRegistry(SkillRegistry):
     def _list_objects(self) -> list[dict[str, Any]]:
         """Return all object summaries under ``bucket/prefix`` via pagination."""
         list_prefix = f'{self._prefix}/' if self._prefix else ''
-        paginator = self._client.get_paginator('list_objects_v2')
-        objects: list[dict[str, Any]] = []
-        for page in paginator.paginate(Bucket=self._bucket, Prefix=list_prefix):
-            objects.extend(page.get('Contents', []))
-        return objects
+        try:
+            paginator = self._client.get_paginator('list_objects_v2')
+            objects: list[dict[str, Any]] = []
+            for page in paginator.paginate(Bucket=self._bucket, Prefix=list_prefix):
+                objects.extend(page.get('Contents', []))
+            return objects
+        except Exception as exc:  # surface any boto3/botocore error with context
+            raise RuntimeError(
+                f"Failed to list objects in bucket '{self._bucket}' (prefix '{self._prefix}'): {exc}"
+            ) from exc
 
     def _sync(self) -> None:
-        """Download all objects under ``bucket/prefix`` into ``target_dir``."""
+        """Mirror all objects under ``bucket/prefix`` into ``target_dir``.
+
+        Clears the cached prefix subtree first so skills removed from the bucket
+        do not linger locally, then downloads the current objects. The listing is
+        fetched once and cached for metadata enrichment.
+        """
+        objects = self._list_objects()
+        self._object_modified = {obj['Key']: obj.get('LastModified') for obj in objects}
+
+        # Mirror the remote: drop the previously synced subtree before re-downloading.
+        skills_root = self._skills_root()
+        if skills_root.exists():
+            shutil.rmtree(skills_root)
+
         self._target_dir.mkdir(parents=True, exist_ok=True)
         target_resolved = self._target_dir.resolve()
 
-        for obj in self._list_objects():
+        for obj in objects:
             key = obj['Key']
             if key.endswith('/'):
                 # Directory marker — nothing to download.
@@ -175,12 +200,10 @@ class S3SkillsRegistry(SkillRegistry):
                 raise ValueError(f"Object key '{key}' escapes target directory '{target_resolved}'.")
 
             dest.parent.mkdir(parents=True, exist_ok=True)
-            self._client.download_file(self._bucket, key, str(dest))
-
-    def _ensure_synced(self) -> None:
-        """Sync the cache when ``auto_install`` is enabled; otherwise trust on-disk state."""
-        if self._auto_install:
-            self._sync()
+            try:
+                self._client.download_file(self._bucket, key, str(dest))
+            except Exception as exc:  # surface any boto3/botocore error with context
+                raise RuntimeError(f"Failed to download '{key}' from bucket '{self._bucket}': {exc}") from exc
 
     def _load_skills(self) -> list[Skill]:
         """Discover all skills from the synced cache path."""
@@ -190,8 +213,12 @@ class S3SkillsRegistry(SkillRegistry):
         return discover_skills(path=skills_root, validate=self._validate, max_depth=2)
 
     def _skill_version(self, skill: Skill) -> str | None:
-        """Return the latest LastModified across the skill's objects, ISO-formatted."""
-        if not skill.uri:
+        """Return the latest LastModified across the skill's objects, ISO-formatted.
+
+        Uses the cached object listing from the most recent :meth:`_sync`, so it
+        performs no additional S3 calls.
+        """
+        if not skill.uri or not self._object_modified:
             return None
         try:
             skill_dir = Path(skill.uri).resolve().relative_to(self._target_dir.resolve())
@@ -199,11 +226,9 @@ class S3SkillsRegistry(SkillRegistry):
             return None
         key_prefix = f'{skill_dir.as_posix()}/'
         latest: datetime | None = None
-        for obj in self._list_objects():
-            if obj['Key'].startswith(key_prefix):
-                modified = obj.get('LastModified')
-                if modified is not None and (latest is None or modified > latest):
-                    latest = modified
+        for key, modified in self._object_modified.items():
+            if key.startswith(key_prefix) and modified is not None and (latest is None or modified > latest):
+                latest = modified
         return latest.isoformat() if latest is not None else None
 
     def _enrich_metadata(self, skill: Skill) -> Skill:
@@ -311,28 +336,7 @@ class S3SkillsRegistry(SkillRegistry):
         if src_skill_dir is None:
             raise KeyError(f"Skill '{skill_name}' not found in bucket '{self._bucket}'.")
 
-        dest_root = Path(target_dir).expanduser().resolve()
-        dest_root.mkdir(parents=True, exist_ok=True)
-        dest_skill_dir = dest_root / skill_name
-
-        if not dest_skill_dir.resolve().is_relative_to(dest_root):
-            raise ValueError(f"Destination path '{dest_skill_dir}' escapes target directory '{dest_root}'.")
-
-        src_resolved = src_skill_dir.resolve()
-        for src_file in src_resolved.rglob('*'):
-            if src_file.is_symlink() or src_file.is_file():
-                try:
-                    src_file.resolve().relative_to(src_resolved)
-                except ValueError as exc:
-                    raise ValueError(
-                        f"Source path '{src_file}' escapes skill directory (path traversal detected)."
-                    ) from exc
-
-        if dest_skill_dir.exists():
-            shutil.rmtree(dest_skill_dir)
-        shutil.copytree(src_resolved, dest_skill_dir)
-
-        return dest_skill_dir
+        return copy_skill_directory(src_skill_dir, target_dir, skill_name)
 
     async def update(self, skill_name: str, target_dir: str | Path) -> Path:
         """Re-sync from S3 and re-copy the skill to ``target_dir``.

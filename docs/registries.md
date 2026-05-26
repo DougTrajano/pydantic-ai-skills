@@ -203,7 +203,7 @@ The same pattern works for Ceph RadosGW and Cloudflare R2 — only the `endpoint
 
 ### Offline / Air-Gapped Mode
 
-Set `auto_install=False` so the registry never reaches S3 and reads only from `target_dir`:
+Set `auto_install=False` to disable automatic syncing on construction and on `search`/`get` — the registry then reads only what already exists in `target_dir` (e.g. a pre-mirrored copy). Note that an explicit `update()` call still contacts S3.
 
 ```python
 registry = S3SkillsRegistry(
