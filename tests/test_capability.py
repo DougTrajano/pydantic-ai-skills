@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
 
 import pytest
@@ -145,7 +146,7 @@ def test_skills_capability_get_description_none_when_no_skills() -> None:
 
 def test_skills_capability_is_dataclass() -> None:
     """SkillsCapability must be a dataclass so it can register as a custom capability type."""
-    assert '__dataclass_fields__' in SkillsCapability.__dict__
+    assert dataclasses.is_dataclass(SkillsCapability)
 
 
 def test_skills_capability_rejects_positional_args() -> None:
@@ -202,7 +203,13 @@ def test_skills_capability_loaded_from_agent_spec(tmp_path: Path) -> None:
         ],
     }
     agent = Agent.from_spec(spec, custom_capability_types=[SkillsCapability])
-    assert isinstance(agent, Agent)
+
+    leaves: list[object] = []
+    agent._root_capability.apply(leaves.append)
+    skills_caps = [c for c in leaves if isinstance(c, SkillsCapability)]
+    assert len(skills_caps) == 1
+    assert skills_caps[0].id == 'skills'
+    assert isinstance(skills_caps[0].get_toolset(), SkillsToolset)
 
 
 def test_skills_capability_spec_schema_generation() -> None:
