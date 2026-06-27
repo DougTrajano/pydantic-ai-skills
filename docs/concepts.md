@@ -197,7 +197,7 @@ from pydantic_ai_skills import SkillResource
 resource = SkillResource(
     name="reference.md",
     description="Reference material",
-    content=None,  # Lazy-loaded for file-based resources
+    content="# Schema definitions...",  # or pass a file `uri` / callable `function`
 )
 ```
 
@@ -209,6 +209,7 @@ from pydantic_ai_skills import SkillScript
 script = SkillScript(
     name="my_script",
     description="Runs an analysis",
+    uri="scripts/my_script.py",  # file-based; or pass a callable `function`
     skill_name="my-skill",
 )
 ```
