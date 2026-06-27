@@ -215,7 +215,7 @@ When creating skills, these metadata fields are commonly used:
 
 ```python
 from pydantic_ai import RunContext
-from pydantic_ai.toolsets.skills import Skill, SkillResource
+from pydantic_ai_skills import Skill, SkillResource
 
 # Create a skill with static resources
 my_skill = Skill(
@@ -289,7 +289,7 @@ for name, skill in toolset.skills.items():
 
 ```python
 from pydantic_ai import RunContext
-from pydantic_ai.toolsets.skills import Skill, SkillsToolset
+from pydantic_ai_skills import Skill, SkillsToolset
 
 # Create programmatic skill
 custom_skill = Skill(

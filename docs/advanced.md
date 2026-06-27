@@ -92,7 +92,7 @@ The `@toolset.skill()` decorator enables defining skills directly on a `SkillsTo
 
 ```python
 from pydantic_ai import Agent, RunContext
-from pydantic_ai.toolsets.skills import SkillsToolset
+from pydantic_ai_skills import SkillsToolset
 
 skills = SkillsToolset()
 
@@ -212,7 +212,7 @@ By default, `SkillsToolset` injects a standard instruction template that explain
 
 ```python
 from pydantic_ai import Agent
-from pydantic_ai.toolsets.skills import SkillsToolset
+from pydantic_ai_skills import SkillsToolset
 
 custom_template = """\
 You have access to specialized skills for domain-specific knowledge.
@@ -299,7 +299,7 @@ Both `@skill.resource` and `@skill.script` decorated functions can optionally ac
 ```python
 from typing import TypedDict
 from pydantic_ai import RunContext
-from pydantic_ai.toolsets.skills import SkillsToolset
+from pydantic_ai_skills import SkillsToolset
 
 class MyDeps(TypedDict):
     """Dependencies available in RunContext."""
@@ -456,7 +456,7 @@ class SkillScriptExecutor(Protocol):
 ### Example: Remote Execution
 
 ```python
-from pydantic_ai.toolsets.skills import SkillScript, CallableSkillScriptExecutor
+from pydantic_ai_skills import SkillScript, CallableSkillScriptExecutor
 import httpx
 
 class RemoteExecutor:
@@ -478,7 +478,7 @@ class RemoteExecutor:
             return response.text
 
 # Use in custom script definitions
-from pydantic_ai.toolsets.skills import SkillScript
+from pydantic_ai_skills import SkillScript
 
 remote_executor = RemoteExecutor("https://api.example.com")
 
@@ -576,7 +576,7 @@ The real power comes when combining both approaches:
 
 ```python
 from pydantic_ai import Agent
-from pydantic_ai.toolsets.skills import SkillsToolset, Skill
+from pydantic_ai_skills import SkillsToolset, Skill
 
 # Create programmatic skills
 skills = SkillsToolset(
@@ -623,7 +623,7 @@ def conflicting_skill() -> str:
 You can programmatically register skills after toolset creation (though typically skills are defined at initialization):
 
 ```python
-from pydantic_ai.toolsets.skills import Skill
+from pydantic_ai_skills import Skill
 
 # Create toolset
 toolset = SkillsToolset()

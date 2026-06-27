@@ -14,7 +14,7 @@ Best for:
 
 ```python
 from pydantic_ai import Agent
-from pydantic_ai.toolsets.skills import SkillsToolset
+from pydantic_ai_skills import SkillsToolset
 
 # File-based approach: organize skills in directory structure
 # ./skills/
@@ -41,7 +41,7 @@ Best for:
 
 ```python
 from pydantic_ai import RunContext
-from pydantic_ai.toolsets.skills import SkillsToolset
+from pydantic_ai_skills import SkillsToolset
 
 class MyDeps:
     database: Database
@@ -72,7 +72,7 @@ agent = Agent(
 Combine both for flexibility:
 
 ```python
-from pydantic_ai.toolsets.skills import SkillsToolset
+from pydantic_ai_skills import SkillsToolset
 
 # Mix file-based and programmatic skills
 toolset = SkillsToolset(
@@ -103,7 +103,7 @@ agent = Agent(model='openai:gpt-4o', toolsets=[toolset])
 Use for reference documentation and fixed content:
 
 ```python
-from pydantic_ai.toolsets.skills import Skill, SkillResource
+from pydantic_ai_skills import Skill, SkillResource
 
 skill = Skill(
     name='reference-skill',
@@ -147,7 +147,7 @@ Use for resources that depend on runtime state:
 ```python
 from typing import TypedDict
 from pydantic_ai import RunContext
-from pydantic_ai.toolsets.skills import SkillsToolset
+from pydantic_ai_skills import SkillsToolset
 
 class MyDeps(TypedDict):
     database: Database
@@ -181,7 +181,7 @@ async def get_tables(ctx: RunContext[MyDeps]) -> str:
 Resources can accept parameters for dynamic content:
 
 ```python
-from pydantic_ai.toolsets.skills import SkillsToolset
+from pydantic_ai_skills import SkillsToolset
 
 skills = SkillsToolset()
 
@@ -520,7 +520,7 @@ Use TypedDict for clear dependency contracts:
 ```python
 from typing import TypedDict
 from pydantic_ai import Agent, RunContext
-from pydantic_ai.toolsets.skills import SkillsToolset
+from pydantic_ai_skills import SkillsToolset
 
 class MyDeps(TypedDict):
     """Dependencies available to skills."""
@@ -589,7 +589,7 @@ async def get_cached_status(ctx: RunContext[MyDeps]) -> str:
 Defer expensive setup:
 
 ```python
-from pydantic_ai.toolsets.skills import SkillsToolset
+from pydantic_ai_skills import SkillsToolset
 
 skills = SkillsToolset()
 
@@ -614,7 +614,7 @@ async def get_expensive_resource(ctx: RunContext[MyDeps]) -> str:
 ```python
 import pytest
 from pydantic_ai import RunContext
-from pydantic_ai.toolsets.skills import Skill, SkillsToolset
+from pydantic_ai_skills import Skill, SkillsToolset
 
 class MockDeps:
     def __init__(self):
@@ -659,7 +659,7 @@ def test_skill_in_toolset():
 ```python
 import pytest
 from pydantic_ai import Agent
-from pydantic_ai.toolsets.skills import SkillsToolset
+from pydantic_ai_skills import SkillsToolset
 
 @pytest.fixture
 def test_skills():

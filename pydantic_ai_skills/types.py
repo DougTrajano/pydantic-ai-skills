@@ -190,7 +190,7 @@ class Skill:
     Example - Programmatic skill with decorators:
         ```python
         from pydantic_ai import RunContext
-        from pydantic_ai.toolsets.skills import Skill, SkillResource
+        from pydantic_ai_skills import Skill, SkillResource
 
         # Create a skill (uri is optional and only for file-based skills)
         my_skill = Skill(
@@ -491,7 +491,7 @@ class SkillWrapper(Generic[DepsT]):
         ```python
         from dataclasses import dataclass
         from pydantic_ai import RunContext
-        from pydantic_ai.toolsets.skills import SkillsToolset
+        from pydantic_ai_skills import SkillsToolset
 
         @dataclass
         class MyDeps:

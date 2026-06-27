@@ -444,7 +444,7 @@ class CallableSkillScriptExecutor:
 
     Example:
         ```python
-        from pydantic_ai.toolsets.skills import CallableSkillScriptExecutor, SkillsDirectory
+        from pydantic_ai_skills import CallableSkillScriptExecutor, SkillsDirectory
 
         async def my_executor(script, args=None):
             # Custom execution logic - script.uri contains the file path

@@ -83,3 +83,58 @@ async def test_skills_capability_get_instructions_returns_none() -> None:
     """get_instructions returns None — agent extracts instructions natively from the toolset."""
     capability = SkillsCapability(skills=[])
     assert capability.get_instructions() is None
+
+
+def test_skills_capability_defaults_not_deferred() -> None:
+    """By default the capability is not deferred and has no id/description."""
+    capability = SkillsCapability(skills=[])
+    assert capability.defer_loading is False
+    assert capability.id is None
+    assert capability.description is None
+
+
+def test_skills_capability_defer_loading_sets_attributes() -> None:
+    """defer_loading should set the capability id/description/defer_loading attributes."""
+    capability = SkillsCapability(skills=[], id='skills', defer_loading=True)
+    assert capability.defer_loading is True
+    assert capability.id == 'skills'
+
+
+def test_skills_capability_defer_loading_requires_id() -> None:
+    """defer_loading without an id should raise a clear error."""
+    with pytest.raises(ValueError, match="requires a stable 'id'"):
+        SkillsCapability(skills=[], defer_loading=True)
+
+
+def _write_skill(directory: Path, name: str) -> None:
+    skill_dir = directory / name
+    skill_dir.mkdir(parents=True)
+    (skill_dir / 'SKILL.md').write_text(
+        f'---\nname: {name}\ndescription: The {name} skill.\n---\n# {name}\nBody.\n',
+        encoding='utf-8',
+    )
+
+
+def test_skills_capability_get_description_summarizes_skills(tmp_path: Path) -> None:
+    """get_description should summarize the available skill names when none is given."""
+    _write_skill(tmp_path, 'alpha')
+    _write_skill(tmp_path, 'beta')
+
+    capability = SkillsCapability(id='skills', directories=[tmp_path], defer_loading=True)
+    assert capability.get_description() == 'Provides specialized skills: alpha, beta.'
+
+
+def test_skills_capability_get_description_prefers_explicit(tmp_path: Path) -> None:
+    """An explicit description should override the generated summary."""
+    _write_skill(tmp_path, 'alpha')
+
+    capability = SkillsCapability(
+        id='skills', directories=[tmp_path], defer_loading=True, description='Custom catalog text.'
+    )
+    assert capability.get_description() == 'Custom catalog text.'
+
+
+def test_skills_capability_get_description_none_when_no_skills() -> None:
+    """get_description should return None when there are no skills and no description."""
+    capability = SkillsCapability(skills=[])
+    assert capability.get_description() is None

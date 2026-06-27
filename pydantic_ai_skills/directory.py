@@ -270,13 +270,13 @@ class SkillsDirectory:
             source = SkillsDirectory(path="./skills")
 
             # With custom executor
-            from pydantic_ai.toolsets.skills import LocalSkillScriptExecutor
+            from pydantic_ai_skills import LocalSkillScriptExecutor
 
             executor = LocalSkillScriptExecutor(timeout=60)
             source = SkillsDirectory(path="./skills", script_executor=executor)
 
             # With callable executor
-            from pydantic_ai.toolsets.skills import CallableSkillScriptExecutor
+            from pydantic_ai_skills import CallableSkillScriptExecutor
 
             async def my_executor(script, args=None, skill_uri=None):
                 return f"Executed {script.name}"
