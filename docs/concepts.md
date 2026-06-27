@@ -59,6 +59,28 @@ agent = Agent(
 )
 ```
 
+#### Deferred loading
+
+Pydantic AI v2 lets a capability stay hidden until the model explicitly loads it via the
+agent's built-in `load_capability` tool. Set `defer_loading=True` and give the capability a
+stable `id`:
+
+```python
+agent = Agent(
+    model='openai:gpt-5.2',
+    capabilities=[
+        SkillsCapability(id='skills', directories=['./skills'], defer_loading=True),
+    ],
+)
+```
+
+When deferred, the skills tools and instructions are collapsed to a one-line catalog entry
+(derived from the skill names, or set `description=...` to override) and only activate after
+the model loads the capability. This complements the toolset's own progressive disclosure
+(`list_skills` → `load_skill`): `defer_loading` gates the *entire skills system* behind one
+catalog entry, which is useful when an agent bundles many capabilities and most turns need
+none of the skills.
+
 ## SKILL.md Format
 
 Each `SKILL.md` file has **YAML frontmatter** (metadata) followed by **Markdown** (instructions).
@@ -145,24 +167,12 @@ skill_dir = SkillsDirectory(path="./skills", validate=True)
 all_skills = skill_dir.get_skills()
 
 for name, skill in all_skills.items():
-    print(f"{name}: {skill.metadata.description}")
+    print(f"{name}: {skill.description}")
 ```
 
 ## Type Safety
 
 The package provides type-safe dataclasses for working with skills:
-
-### SkillMetadata
-
-```python
-from pydantic_ai_skills import SkillMetadata
-
-metadata = SkillMetadata(
-    name="my-skill",
-    description="My skill description",
-    extra={"version": "1.0.0", "author": "Me"}
-)
-```
 
 ### Skill
 
@@ -171,11 +181,11 @@ from pydantic_ai_skills import Skill
 
 skill = Skill(
     name="my-skill",
-    path=Path("./skills/my-skill"),
-    metadata=metadata,
+    description="My skill description",
     content="# Instructions...",
     resources=[...],
-    scripts=[...]
+    scripts=[...],
+    metadata={"version": "1.0.0", "author": "Me"},
 )
 ```
 
@@ -186,8 +196,8 @@ from pydantic_ai_skills import SkillResource
 
 resource = SkillResource(
     name="reference.md",
-    path=Path("./skills/my-skill/resources/reference.md"),
-    content=None  # Lazy-loaded
+    description="Reference material",
+    content=None,  # Lazy-loaded for file-based resources
 )
 ```
 
@@ -198,8 +208,8 @@ from pydantic_ai_skills import SkillScript
 
 script = SkillScript(
     name="my_script",
-    path=Path("./skills/my-skill/scripts/my_script.py"),
-    skill_name="my-skill"
+    description="Runs an analysis",
+    skill_name="my-skill",
 )
 ```
 

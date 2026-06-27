@@ -293,7 +293,7 @@ from dataclasses import dataclass
 
 from fastapi import Request
 from pydantic_ai import Agent
-from pydantic_ai.toolsets.skills import LocalSkillScriptExecutor, SkillsDirectory, SkillsToolset
+from pydantic_ai_skills import LocalSkillScriptExecutor, SkillsDirectory, SkillsToolset
 
 
 @dataclass

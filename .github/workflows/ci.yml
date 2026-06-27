@@ -23,12 +23,13 @@ jobs:
       - uses: pre-commit/action@v3.0.1
 
   test:
-    name: Test (Python ${{ matrix.python-version }})
+    name: Test (Python ${{ matrix.python-version }}, pydantic-ai ${{ matrix.pydantic-ai-version }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        pydantic-ai-version: ["1.105.0", "2.0.0", "latest"]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -43,11 +44,20 @@ jobs:
       - name: Install dependencies
         run: uv pip install --system -e ".[test,git]"
 
+      - name: Select pydantic-ai-slim version
+        run: |
+          if [ "${{ matrix.pydantic-ai-version }}" = "latest" ]; then
+            uv pip install --system --upgrade pydantic-ai-slim
+          else
+            uv pip install --system "pydantic-ai-slim==${{ matrix.pydantic-ai-version }}"
+          fi
+          uv pip show pydantic-ai-slim | grep -i '^version'
+
       - name: Run pytest with coverage
         run: pytest --cov-report=xml
 
       - name: Upload coverage artifact
-        if: matrix.python-version == '3.12'
+        if: matrix.python-version == '3.12' && matrix.pydantic-ai-version == '2.0.0'
         uses: actions/upload-artifact@v4
         with:
           name: coverage-${{ github.run_id }}
@@ -55,7 +65,7 @@ jobs:
           retention-days: 7
 
       - name: Save PR metadata
-        if: matrix.python-version == '3.12'
+        if: matrix.python-version == '3.12' && matrix.pydantic-ai-version == '2.0.0'
         run: |
           echo "PR_NUMBER=${{ github.event.pull_request.number }}" > pr-metadata.env
           echo "PR_HEAD_SHA=${{ github.event.pull_request.head.sha }}" >> pr-metadata.env
@@ -63,7 +73,7 @@ jobs:
           echo "PR_HEAD_REF=${{ github.event.pull_request.head.ref }}" >> pr-metadata.env
 
       - name: Upload PR metadata artifact
-        if: matrix.python-version == '3.12'
+        if: matrix.python-version == '3.12' && matrix.pydantic-ai-version == '2.0.0'
         uses: actions/upload-artifact@v4
         with:
           name: pr-metadata-${{ github.run_id }}

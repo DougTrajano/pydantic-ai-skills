@@ -20,9 +20,8 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from pydantic import BeforeValidator
-from pydantic_ai import ModelRetry
+from pydantic_ai import ModelRetry, RunContext
 from pydantic_ai._griffe import doc_descriptions
-from pydantic_ai._run_context import RunContext
 from pydantic_ai.toolsets import FunctionToolset
 
 from .directory import SkillsDirectory
@@ -122,12 +121,11 @@ class SkillsToolset(FunctionToolset[Any]):
         )
 
         # Programmatic skills
-        from pydantic_ai.toolsets.skills import Skill, SkillMetadata
+        from pydantic_ai_skills import Skill
 
         custom_skill = Skill(
             name="my-skill",
-            uri="./custom",
-            metadata=SkillMetadata(name="my-skill", description="Custom skill"),
+            description="Custom skill",
             content="Instructions here",
         )
         agent = Agent(
@@ -145,7 +143,7 @@ class SkillsToolset(FunctionToolset[Any]):
         )
 
         # Using SkillsDirectory instances directly
-        from pydantic_ai.toolsets.skills import SkillsDirectory
+        from pydantic_ai_skills import SkillsDirectory
 
         dir1 = SkillsDirectory(path="./skills")
         agent = Agent(
@@ -760,7 +758,7 @@ class SkillsToolset(FunctionToolset[Any]):
         Example:
             ```python
             from pydantic_ai import RunContext
-            from pydantic_ai.toolsets.skills import SkillsToolset
+            from pydantic_ai_skills import SkillsToolset
 
             skills = SkillsToolset()
 

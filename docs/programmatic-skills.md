@@ -27,7 +27,7 @@ Programmatic skills let you:
 ## Creating a Basic Programmatic Skill
 
 ```python
-from pydantic_ai.toolsets.skills import Skill, SkillResource, SkillsToolset
+from pydantic_ai_skills import Skill, SkillResource, SkillsToolset
 
 # Create a skill with static resources
 my_skill = Skill(
@@ -83,7 +83,7 @@ Use the `@skill.resource` decorator to create resources that generate content dy
 
 ```python
 from pydantic_ai import RunContext
-from pydantic_ai.toolsets.skills import Skill
+from pydantic_ai_skills import Skill
 
 my_skill = Skill(
     name='database-skill',
@@ -116,7 +116,7 @@ Use the `@skill.script` decorator to create executable scripts:
 
 ```python
 from pydantic_ai import RunContext
-from pydantic_ai.toolsets.skills import Skill
+from pydantic_ai_skills import Skill
 
 my_skill = Skill(
     name='data-processor',
@@ -161,7 +161,7 @@ from dataclasses import dataclass, field
 
 import datasets
 from pydantic_ai import Agent, RunContext
-from pydantic_ai.toolsets.skills import Skill, SkillResource, SkillsToolset
+from pydantic_ai_skills import Skill, SkillResource, SkillsToolset
 
 @dataclass
 class AnalystDeps:
@@ -325,7 +325,7 @@ print(result.output)
 You can combine both approaches in the same toolset:
 
 ```python
-from pydantic_ai.toolsets.skills import Skill, SkillsToolset
+from pydantic_ai_skills import Skill, SkillsToolset
 
 # Programmatic skill
 my_skill = Skill(
@@ -363,7 +363,7 @@ Programmatic skills leverage Pydantic AI's type-safe function schema generation:
 
 ```python
 from pydantic_ai import RunContext
-from pydantic_ai.toolsets.skills import Skill
+from pydantic_ai_skills import Skill
 
 my_skill = Skill(name='typed-skill', description='Type-safe skill', content='...')
 
@@ -420,7 +420,7 @@ For concise skill definition directly on a `SkillsToolset`, use the `@toolset.sk
 
 ```python
 from pydantic_ai import Agent, RunContext
-from pydantic_ai.toolsets.skills import SkillsToolset
+from pydantic_ai_skills import SkillsToolset
 
 skills = SkillsToolset()
 
@@ -461,7 +461,7 @@ See [Advanced Features](advanced.md) for full decorator documentation.
 Combine file-based and programmatic skills in a single toolset:
 
 ```python
-from pydantic_ai.toolsets.skills import SkillsToolset
+from pydantic_ai_skills import SkillsToolset
 
 skills = SkillsToolset(directories=['./skills'])
 
@@ -555,7 +555,7 @@ Test resources and scripts independently:
 ```python
 import pytest
 from pydantic_ai import RunContext
-from pydantic_ai.toolsets.skills import Skill
+from pydantic_ai_skills import Skill
 
 @pytest.fixture
 def skill():

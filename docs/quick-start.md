@@ -208,7 +208,7 @@ Create skills directly in Python code for dynamic capabilities:
 
 ```python
 from pydantic_ai import Agent, RunContext
-from pydantic_ai.toolsets.skills import Skill, SkillsToolset
+from pydantic_ai_skills import Skill, SkillsToolset
 
 # Create a programmatic skill
 my_skill = Skill(

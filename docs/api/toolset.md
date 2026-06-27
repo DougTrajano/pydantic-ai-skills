@@ -60,7 +60,7 @@ toolset = SkillsToolset(
 )
 
 # Using SkillsDirectory instances directly
-from pydantic_ai.toolsets.skills import SkillsDirectory
+from pydantic_ai_skills import SkillsDirectory
 
 skills_dir = SkillsDirectory(
     path="./skills",
@@ -99,7 +99,7 @@ See [Skill Registries](../registries.md) for composition patterns (filtering, pr
 
 ```python
 from pydantic_ai import RunContext
-from pydantic_ai.toolsets.skills import Skill, SkillsToolset
+from pydantic_ai_skills import Skill, SkillsToolset
 
 # Create a simple programmatic skill
 my_skill = Skill(
@@ -133,7 +133,7 @@ async def analyze(ctx: RunContext[MyDeps], query: str) -> str:
 ### Mix File-Based and Programmatic Skills
 
 ```python
-from pydantic_ai.toolsets.skills import Skill, SkillsToolset
+from pydantic_ai_skills import Skill, SkillsToolset
 
 # Create programmatic skills
 programmatic_skill = Skill(
@@ -161,7 +161,7 @@ print(f"Total skills loaded: {len(toolset.skills)}")
 
 ```python
 from pydantic_ai import Agent
-from pydantic_ai.toolsets.skills import SkillsToolset
+from pydantic_ai_skills import SkillsToolset
 
 custom_instructions = """\
 You have specialized skills available for specific domains.
@@ -188,7 +188,7 @@ agent = Agent(
 ### Use @skill() Decorator
 
 ```python
-from pydantic_ai.toolsets.skills import SkillsToolset
+from pydantic_ai_skills import SkillsToolset
 
 skills = SkillsToolset(directories=["./skills"])
 
@@ -368,7 +368,7 @@ def skill(
 **Example**:
 
 ```python
-from pydantic_ai.toolsets.skills import SkillsToolset
+from pydantic_ai_skills import SkillsToolset
 
 skills = SkillsToolset()
 
