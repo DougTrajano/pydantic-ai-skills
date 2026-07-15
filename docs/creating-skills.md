@@ -629,7 +629,7 @@ read_skill_resource(
 )
 ```
 
-### What Counts as a Resource
+### Resource Discovery
 
 Discovery registers **every readable text file** in the skill folder (any subdirectory,
 any extension) as a resource — so `.sql`, `.toml`, `.jinja`, and friends work with no
