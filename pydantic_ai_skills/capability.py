@@ -87,6 +87,9 @@ class SkillsCapability(AbstractCapability[Any]):
     max_depth: int | None = 3
     """Maximum discovery depth."""
 
+    exclude_resources: list[str] | None = None
+    """Extra glob patterns to exclude from resource discovery, in addition to the built-in defaults."""
+
     instruction_template: str | None = None
     """Optional custom instructions template."""
 
@@ -113,6 +116,7 @@ class SkillsCapability(AbstractCapability[Any]):
             registries=self.registries,
             validate=self.validate,
             max_depth=self.max_depth,
+            exclude_resources=self.exclude_resources,
             id=self.id,
             instruction_template=self.instruction_template,
             exclude_tools=self.exclude_tools,
@@ -131,6 +135,7 @@ class SkillsCapability(AbstractCapability[Any]):
         directories: list[str] | None = None,
         validate: bool = True,
         max_depth: int | None = 3,
+        exclude_resources: list[str] | None = None,
         id: str | None = None,
         instruction_template: str | None = None,
         exclude_tools: list[str] | None = None,
@@ -148,6 +153,8 @@ class SkillsCapability(AbstractCapability[Any]):
             directories: Skill directories to discover, as path strings.
             validate: Validate skill structure during discovery.
             max_depth: Maximum discovery depth.
+            exclude_resources: Extra glob patterns to exclude from resource discovery, in addition
+                to the built-in defaults (``__pycache__``, ``*.pyc``, ``.DS_Store`` …).
             id: Stable identifier shared by the capability and its toolset. Required when
                 ``defer_loading`` is True.
             instruction_template: Optional custom instructions template.
@@ -161,6 +168,7 @@ class SkillsCapability(AbstractCapability[Any]):
             directories=list(directories) if directories is not None else None,
             validate=validate,
             max_depth=max_depth,
+            exclude_resources=list(exclude_resources) if exclude_resources is not None else None,
             id=id,
             instruction_template=instruction_template,
             exclude_tools=exclude_tools,

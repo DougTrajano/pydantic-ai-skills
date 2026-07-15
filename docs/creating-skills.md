@@ -629,6 +629,34 @@ read_skill_resource(
 )
 ```
 
+### Resource Discovery
+
+Discovery registers **every readable text file** in the skill folder (any subdirectory,
+any extension) as a resource — so `.sql`, `.toml`, `.jinja`, and friends work with no
+configuration. The following are automatically skipped:
+
+- **`SKILL.md`** itself.
+- **Binary files** — anything that does not decode as UTF-8 (images, PDFs, fonts, compiled artifacts). Discovery decodes a bounded prefix of each file (the same UTF-8 the loader uses), so binaries are filtered cheaply without reading whole files.
+- **Scripts** — files discovered as executable scripts are never also resources.
+- **Noise** — the default exclude globs: `__pycache__`, `*.pyc`, `*.pyo`, `.DS_Store`, `.git`.
+
+To exclude more files, pass `exclude_resources` — glob patterns that **extend** the
+defaults (they never replace them, so noise stays excluded):
+
+```python
+from pydantic_ai_skills import SkillsToolset
+
+toolset = SkillsToolset(
+    directories=["./skills"],
+    exclude_resources=["*.tmp", "drafts/*"],  # in addition to the defaults
+)
+```
+
+A pattern matches a file when it matches the full skill-relative path (e.g. `drafts/*`)
+or any single path component (e.g. `*.tmp`, `secrets`). The same parameter is available
+on `SkillsDirectory`, `discover_skills`, `Skill.from_file`, and `SkillsCapability`. The
+default patterns are exported as `pydantic_ai_skills.directory.DEFAULT_RESOURCE_EXCLUDES`.
+
 ## Organizing Multiple Skills
 
 ### Flat Structure

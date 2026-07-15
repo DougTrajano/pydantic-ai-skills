@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 import warnings
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from inspect import signature as get_signature
 from pathlib import Path
 from typing import Annotated, Any
@@ -162,6 +162,7 @@ class SkillsToolset(FunctionToolset[Any]):
         registries: list[SkillRegistry] | None = None,
         validate: bool = True,
         max_depth: int | None = 3,
+        exclude_resources: Iterable[str] | None = None,
         id: str | None = None,
         instruction_template: str | None = None,
         exclude_tools: set[str] | list[str] | None = None,
@@ -181,6 +182,10 @@ class SkillsToolset(FunctionToolset[Any]):
                 ``skills`` and ``directories``.
             validate: Validate skill structure during discovery (used when creating SkillsDirectory from str/Path).
             max_depth: Maximum depth for skill discovery (None for unlimited, used when creating SkillsDirectory from str/Path).
+            exclude_resources: Extra glob patterns to exclude from resource discovery, in addition to the
+                built-in defaults (``__pycache__``, ``*.pyc``, ``.DS_Store`` …). Used when creating
+                SkillsDirectory from str/Path. Any readable text file not excluded and not discovered as a
+                script becomes a resource. None for defaults only.
             id: Unique identifier for this toolset.
             instruction_template: Custom instruction template for skills system prompt.
                 Must include `{skills_list}` placeholder. If None, uses default template.
@@ -266,6 +271,7 @@ class SkillsToolset(FunctionToolset[Any]):
         self._registry_skills: dict[str, Skill] = {}  # Cache of registry-sourced skills
         self._validate = validate
         self._max_depth = max_depth
+        self._exclude_resources = exclude_resources
 
         # Load programmatic skills first (highest priority)
         if skills is not None:
@@ -338,6 +344,7 @@ class SkillsToolset(FunctionToolset[Any]):
                     path=directory,
                     validate=self._validate,
                     max_depth=self._max_depth,
+                    exclude_resources=self._exclude_resources,
                 )
             self._skill_directories.append(skill_dir)
 
