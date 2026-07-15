@@ -9,8 +9,11 @@ internal helper functions for skill validation, metadata parsing, and resource/s
 
 from __future__ import annotations
 
+import codecs
 import os
 import warnings
+from collections.abc import Iterable
+from fnmatch import fnmatch
 from pathlib import Path
 
 from ._parsing import parse_skill_md, validate_skill_metadata
@@ -25,6 +28,66 @@ from .types import Skill, SkillResource, SkillScript
 _SUPPORTED_SCRIPT_EXTENSIONS = {'.py', '.sh', '.bash', '.zsh', '.fish', '.ps1', '.bat', '.cmd'}
 _WINDOWS_EXECUTABLE_EXTENSIONS = {'.exe', '.bat', '.cmd', '.com', '.ps1'}
 _IGNORED_SCRIPT_NAMES = {'__init__.py', 'SKILL.md'}
+
+#: Glob patterns always excluded from resource discovery. User-provided
+#: ``exclude_resources`` patterns extend (do not replace) this set.
+DEFAULT_RESOURCE_EXCLUDES: tuple[str, ...] = ('__pycache__', '*.pyc', '*.pyo', '.DS_Store', '.git')
+
+_TEXT_SNIFF_BYTES = 65536
+
+
+def _resolve_resource_excludes(exclude_resources: Iterable[str] | None) -> list[str]:
+    """Build the resource exclude patterns, extending the built-in defaults.
+
+    User-provided glob patterns are appended to :data:`DEFAULT_RESOURCE_EXCLUDES`,
+    so noise such as ``__pycache__`` and ``.DS_Store`` stays excluded even when a
+    caller supplies extra patterns.
+
+    Args:
+        exclude_resources: Extra glob patterns to exclude, or None for defaults only.
+
+    Returns:
+        List of glob patterns with the defaults first.
+    """
+    patterns = list(DEFAULT_RESOURCE_EXCLUDES)
+    if exclude_resources is not None:
+        patterns.extend(exclude_resources)
+    return patterns
+
+
+def _is_excluded(rel_path: Path, patterns: list[str]) -> bool:
+    """Return True if a skill-relative path matches any exclude glob.
+
+    A pattern matches when it matches the full posix-style relative path
+    (for path-scoped patterns like ``docs/*.tmp``) or any single path
+    component (for name patterns like ``__pycache__`` or ``*.pyc``).
+    """
+    posix = rel_path.as_posix()
+    for pattern in patterns:
+        if fnmatch(posix, pattern) or any(fnmatch(part, pattern) for part in rel_path.parts):
+            return True
+    return False
+
+
+def _is_text_file(path: Path) -> bool:
+    """Return True if a file reads as UTF-8 text (matching the resource loader).
+
+    The loader reads resources with ``read_text('utf-8')``, so a file only
+    qualifies as a resource if it decodes as UTF-8. To keep discovery cheap this
+    inspects at most the first ``_TEXT_SNIFF_BYTES`` bytes rather than the whole
+    file: binaries fail on the first invalid byte, and real text is text
+    throughout. Files that fit within the window are validated exactly (a
+    trailing multibyte character split by the window is not treated as invalid
+    for larger files). Unreadable files are treated as non-text and skipped.
+    """
+    try:
+        with path.open('rb') as handle:
+            prefix = handle.read(_TEXT_SNIFF_BYTES)
+            at_eof = handle.read(1) == b''
+        codecs.getincrementaldecoder('utf-8')().decode(prefix, final=at_eof)
+    except (UnicodeDecodeError, OSError):
+        return False
+    return True
 
 
 def _is_script_candidate(script_file: Path) -> bool:
@@ -68,50 +131,72 @@ def _resolve_script_path(script_file: Path, skill_folder_resolved: Path) -> Path
     return resolved_path
 
 
-__all__ = ['SkillsDirectory', 'discover_skills', 'parse_skill_md', 'validate_skill_metadata']
+__all__ = [
+    'DEFAULT_RESOURCE_EXCLUDES',
+    'SkillsDirectory',
+    'discover_skills',
+    'parse_skill_md',
+    'validate_skill_metadata',
+]
 
 
-def _discover_resources(skill_folder: Path) -> list[SkillResource]:
+def _discover_resources(
+    skill_folder: Path,
+    exclude_resources: Iterable[str] | None = None,
+    script_uris: set[str] | None = None,
+) -> list[SkillResource]:
     """Discover resource files in a skill folder.
 
-    Resources are text files other than SKILL.md in any subdirectory.
-    Supported: .md, .json, .yaml, .yml, .csv, .xml, .txt
+    Any UTF-8-readable text file other than SKILL.md, in any subdirectory, is a
+    resource. Binary files (anything that does not decode as UTF-8), files
+    discovered as scripts, and files matching an exclude glob are skipped.
 
     Security validates that resolved paths remain within skill_folder
     after symlink resolution to prevent traversal attacks.
 
     Args:
         skill_folder: Path to the skill directory.
+        exclude_resources: Extra glob patterns to exclude, in addition to the
+            built-in :data:`DEFAULT_RESOURCE_EXCLUDES`. None for defaults only.
+        script_uris: Resolved URIs of files already discovered as scripts, which
+            are excluded from resources so a file is never both.
 
     Returns:
         List of discovered SkillResource objects.
     """
     resources: list[SkillResource] = []
-    supported_extensions = ['.md', '.json', '.yaml', '.yml', '.csv', '.xml', '.txt']
+    exclude_patterns = _resolve_resource_excludes(exclude_resources)
+    script_uris = script_uris or set()
     skill_folder_resolved = skill_folder.resolve()
 
-    for extension in supported_extensions:
-        for resource_file in skill_folder.rglob(f'*{extension}'):
-            if resource_file.name.upper() != 'SKILL.MD':
-                resolved_path = resource_file.resolve()
-                try:
-                    resolved_path.relative_to(skill_folder_resolved)
-                except ValueError:
-                    warnings.warn(
-                        f"Resource '{resource_file}' resolves outside skill directory (symlink escape detected). Skipping.",
-                        UserWarning,
-                        stacklevel=2,
-                    )
-                    continue
+    for resource_file in skill_folder.rglob('*'):
+        if not resource_file.is_file() or resource_file.name.upper() == 'SKILL.MD':
+            continue
 
-                rel_path = resource_file.relative_to(skill_folder)
-                name = rel_path.as_posix()
-                resources.append(
-                    create_file_based_resource(
-                        name=name,
-                        uri=str(resolved_path),
-                    )
-                )
+        rel_path = resource_file.relative_to(skill_folder)
+        if _is_excluded(rel_path, exclude_patterns):
+            continue
+
+        resolved_path = resource_file.resolve()
+        try:
+            resolved_path.relative_to(skill_folder_resolved)
+        except ValueError:
+            warnings.warn(
+                f"Resource '{resource_file}' resolves outside skill directory (symlink escape detected). Skipping.",
+                UserWarning,
+                stacklevel=2,
+            )
+            continue
+
+        if str(resolved_path) in script_uris or not _is_text_file(resource_file):
+            continue
+
+        resources.append(
+            create_file_based_resource(
+                name=rel_path.as_posix(),
+                uri=str(resolved_path),
+            )
+        )
 
     return resources
 
@@ -190,6 +275,7 @@ def discover_skills(
     validate: bool = True,
     max_depth: int | None = 3,
     script_executor: LocalSkillScriptExecutor | CallableSkillScriptExecutor | None = None,
+    exclude_resources: Iterable[str] | None = None,
 ) -> list[Skill]:
     """Discover skills from a filesystem directory.
 
@@ -202,6 +288,9 @@ def discover_skills(
         max_depth: Maximum depth to search for SKILL.md files. None for unlimited.
             Default is 3 levels deep to prevent performance issues with large trees.
         script_executor: Optional custom script executor for file-based scripts.
+        exclude_resources: Extra glob patterns to exclude from resource discovery, in
+            addition to the built-in :data:`DEFAULT_RESOURCE_EXCLUDES`. None for
+            defaults only.
 
     Returns:
         List of discovered Skill objects.
@@ -223,7 +312,12 @@ def discover_skills(
     skill_files = _find_skill_files(dir_path, max_depth)
     for skill_file in skill_files:
         try:
-            skill = Skill.from_file(skill_file, validate=validate, script_executor=executor)
+            skill = Skill.from_file(
+                skill_file,
+                validate=validate,
+                script_executor=executor,
+                exclude_resources=exclude_resources,
+            )
             skills.append(skill)
         except ValueError as ve:
             if validate:
@@ -253,6 +347,7 @@ class SkillsDirectory:
         validate: bool = True,
         max_depth: int | None = 3,
         script_executor: LocalSkillScriptExecutor | CallableSkillScriptExecutor | None = None,
+        exclude_resources: Iterable[str] | None = None,
     ) -> None:
         """Initialize the skills directory source.
 
@@ -263,6 +358,9 @@ class SkillsDirectory:
             script_executor: Optional custom script executor for file-based scripts.
                 Can be LocalSkillScriptExecutor or CallableSkillScriptExecutor.
                 If None, uses LocalSkillScriptExecutor with default settings.
+            exclude_resources: Extra glob patterns to exclude from resource discovery,
+                in addition to the built-in :data:`DEFAULT_RESOURCE_EXCLUDES`. None for
+                defaults only.
 
         Example:
             ```python
@@ -289,6 +387,7 @@ class SkillsDirectory:
         self._validate = validate
         self._max_depth = max_depth
         self._script_executor = script_executor or LocalSkillScriptExecutor()
+        self._exclude_resources = exclude_resources
 
         # Discover skills from directory
         self._skills: dict[str, Skill] = self.get_skills()
@@ -304,6 +403,7 @@ class SkillsDirectory:
             validate=self._validate,
             max_depth=self._max_depth,
             script_executor=self._script_executor,
+            exclude_resources=self._exclude_resources,
         )
 
         return {skill.uri: skill for skill in skills if skill.uri is not None}

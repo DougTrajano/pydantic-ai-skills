@@ -163,6 +163,42 @@ async def test_read_skill_resource_tool(sample_skills_dir: Path) -> None:
         assert resource_path.is_file()
 
 
+def test_toolset_discovers_text_resources_by_default(tmp_path: Path) -> None:
+    """Any readable text file is a resource without configuration."""
+    skill_dir = tmp_path / 'sql-skill'
+    skill_dir.mkdir()
+    (skill_dir / 'SKILL.md').write_text("""---
+name: sql-skill
+description: Skill shipping a SQL query
+---
+
+Read report.sql for the query.
+""")
+    (skill_dir / 'report.sql').write_text('SELECT 1;')
+
+    toolset = SkillsToolset(directories=[tmp_path])
+    names = [r.name for r in toolset.get_skill('sql-skill').resources or []]
+    assert 'report.sql' in names
+
+
+def test_toolset_exclude_resources(tmp_path: Path) -> None:
+    """SkillsToolset threads exclude_resources through directory discovery."""
+    skill_dir = tmp_path / 'sql-skill'
+    skill_dir.mkdir()
+    (skill_dir / 'SKILL.md').write_text("""---
+name: sql-skill
+description: Skill shipping a SQL query
+---
+
+Read report.sql for the query.
+""")
+    (skill_dir / 'report.sql').write_text('SELECT 1;')
+
+    toolset = SkillsToolset(directories=[tmp_path], exclude_resources=['*.sql'])
+    names = [r.name for r in toolset.get_skill('sql-skill').resources or []]
+    assert 'report.sql' not in names
+
+
 @pytest.mark.asyncio
 async def test_read_skill_resource_not_found(sample_skills_dir: Path) -> None:
     """Test reading a non-existent resource."""

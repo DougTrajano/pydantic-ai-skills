@@ -283,6 +283,156 @@ Content.
     assert 'resources/nested/data.csv' in resource_names
 
 
+def _write_skill_with_sql(tmp_path: Path) -> Path:
+    """Create a skill directory shipping a .sql resource and return the root."""
+    skill_dir = tmp_path / 'sql-skill'
+    skill_dir.mkdir()
+    (skill_dir / 'SKILL.md').write_text("""---
+name: sql-skill
+description: Skill shipping a SQL query
+---
+
+Read queries/report.sql for the query.
+""")
+    queries_dir = skill_dir / 'queries'
+    queries_dir.mkdir()
+    (queries_dir / 'report.sql').write_text('SELECT 1;')
+    (skill_dir / 'notes.txt').write_text('notes')
+    return tmp_path
+
+
+def test_discover_skills_arbitrary_text_extension_by_default(tmp_path: Path) -> None:
+    """Any readable text file is a resource by default, including .sql."""
+    root = _write_skill_with_sql(tmp_path)
+
+    skills = discover_skills(root, validate=True)
+
+    assert len(skills) == 1
+    resource_names = {r.name for r in skills[0].resources or []}
+    assert 'queries/report.sql' in resource_names
+    assert 'notes.txt' in resource_names
+
+
+def test_discover_skills_skips_binary_files(tmp_path: Path) -> None:
+    """Binary files (NUL byte) are not registered as resources."""
+    root = _write_skill_with_sql(tmp_path)
+    (root / 'sql-skill' / 'logo.png').write_bytes(b'\x89PNG\r\n\x00\x00binary')
+
+    skills = discover_skills(root, validate=True)
+
+    resource_names = {r.name for r in skills[0].resources or []}
+    assert 'logo.png' not in resource_names
+
+
+def test_discover_skills_rejects_invalid_utf8(tmp_path: Path) -> None:
+    """A file that is not valid UTF-8 is skipped, even without a NUL byte.
+
+    The loader reads resources as UTF-8, so discovery must reject anything it
+    could not decode (here, a stray 0xFF byte the old NUL-only sniff missed).
+    """
+    root = _write_skill_with_sql(tmp_path)
+    (root / 'sql-skill' / 'data.bin').write_bytes(b'\xff\xfe not utf-8')
+
+    skills = discover_skills(root, validate=True)
+
+    resource_names = {r.name for r in skills[0].resources or []}
+    assert 'data.bin' not in resource_names
+    assert 'notes.txt' in resource_names
+
+
+def test_discover_skills_accepts_multibyte_utf8(tmp_path: Path) -> None:
+    """Valid multibyte UTF-8 content is a resource and reads back intact."""
+    skill_dir = tmp_path / 'unicode-skill'
+    skill_dir.mkdir()
+    (skill_dir / 'SKILL.md').write_text("""---
+name: unicode-skill
+description: Skill with unicode content
+---
+
+See emoji.md.
+""")
+    (skill_dir / 'emoji.md').write_text('# café 🚀 日本語\n', encoding='utf-8')
+
+    skills = discover_skills(tmp_path, validate=True)
+
+    resource_names = {r.name for r in skills[0].resources or []}
+    assert 'emoji.md' in resource_names
+
+
+def test_discover_skills_excludes_scripts_from_resources(tmp_path: Path) -> None:
+    """Files discovered as scripts are not also registered as resources."""
+    skill_dir = tmp_path / 'script-skill'
+    skill_dir.mkdir()
+    (skill_dir / 'SKILL.md').write_text("""---
+name: script-skill
+description: Skill with a script and a resource
+---
+
+Run run.py; read notes.md.
+""")
+    (skill_dir / 'run.py').write_text('print("hi")\n')
+    (skill_dir / 'notes.md').write_text('# Notes\n')
+
+    skills = discover_skills(tmp_path, validate=True)
+
+    skill = skills[0]
+    resource_names = {r.name for r in skill.resources or []}
+    script_names = {s.name for s in skill.scripts or []}
+    assert 'run.py' in script_names
+    assert 'run.py' not in resource_names
+    assert 'notes.md' in resource_names
+
+
+def test_discover_skills_default_excludes_noise(tmp_path: Path) -> None:
+    """__pycache__ and .DS_Store are excluded by the default patterns."""
+    skill_dir = tmp_path / 'noisy-skill'
+    skill_dir.mkdir()
+    (skill_dir / 'SKILL.md').write_text("""---
+name: noisy-skill
+description: Skill with noise files
+---
+
+Content.
+""")
+    (skill_dir / 'keep.txt').write_text('keep')
+    (skill_dir / '.DS_Store').write_text('junk')
+    pycache = skill_dir / '__pycache__'
+    pycache.mkdir()
+    (pycache / 'mod.cpython-312.pyc').write_text('cached')
+
+    skills = discover_skills(tmp_path, validate=True)
+
+    resource_names = {r.name for r in skills[0].resources or []}
+    assert 'keep.txt' in resource_names
+    assert '.DS_Store' not in resource_names
+    assert not any(name.startswith('__pycache__/') for name in resource_names)
+
+
+def test_discover_skills_exclude_resources_extends_defaults(tmp_path: Path) -> None:
+    """User exclude patterns are additive; defaults still apply."""
+    root = _write_skill_with_sql(tmp_path)
+    (root / 'sql-skill' / '.DS_Store').write_text('junk')
+
+    skills = discover_skills(root, validate=True, exclude_resources=['*.sql'])
+
+    resource_names = {r.name for r in skills[0].resources or []}
+    assert 'queries/report.sql' not in resource_names  # user pattern
+    assert '.DS_Store' not in resource_names  # default still applied
+    assert 'notes.txt' in resource_names
+
+
+def test_skills_directory_exclude_resources(tmp_path: Path) -> None:
+    """SkillsDirectory threads exclude_resources through to discovery."""
+    root = _write_skill_with_sql(tmp_path)
+
+    source = SkillsDirectory(path=root, exclude_resources=['queries/*.sql'])
+
+    skills = list(source.skills.values())
+    resource_names = {r.name for r in skills[0].resources or []}
+    assert 'queries/report.sql' not in resource_names
+    assert 'notes.txt' in resource_names
+
+
 def test_skills_directory_missing_name_with_validation(tmp_path: Path) -> None:
     """SkillsDirectory with validate=True raises on a skill missing its name."""
     skill_dir = tmp_path / 'nameless'

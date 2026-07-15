@@ -12,7 +12,7 @@ Data classes:
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
@@ -266,6 +266,7 @@ class Skill:
         path: str | Path,
         validate: bool = True,
         script_executor: LocalSkillScriptExecutor | CallableSkillScriptExecutor | None = None,
+        exclude_resources: Iterable[str] | None = None,
     ) -> Skill:
         """Load a :class:`Skill` from a SKILL.md file or its parent directory.
 
@@ -277,6 +278,10 @@ class Skill:
                 field).  Metadata quality issues (bad name format, missing description,
                 overlong body) emit :class:`UserWarning` regardless of this flag.
             script_executor: Optional custom script executor for file-based scripts.
+            exclude_resources: Extra glob patterns to exclude from resource discovery,
+                in addition to the built-in defaults (``__pycache__``, ``*.pyc``,
+                ``.DS_Store`` …). None for defaults only. Any readable text file not
+                excluded and not discovered as a script becomes a resource.
 
         Returns:
             A :class:`Skill` instance.
@@ -331,8 +336,12 @@ class Skill:
             validate_skill_metadata(frontmatter, instructions, uri=str(skill_folder))
 
         executor = script_executor or _LocalExecutor()
-        resources = _discover_resources(skill_folder)
         scripts = _discover_scripts(skill_folder, name, executor)
+        resources = _discover_resources(
+            skill_folder,
+            exclude_resources,
+            script_uris={script.uri for script in scripts if script.uri},
+        )
 
         return cls(
             name=name,

@@ -184,6 +184,25 @@ def test_skills_capability_from_spec_builds_toolset(tmp_path: Path) -> None:
     assert capability.get_description() == 'Catalog text.'
 
 
+def test_skills_capability_from_spec_threads_exclude_resources(tmp_path: Path) -> None:
+    """from_spec should thread exclude_resources into discovery."""
+    skill_dir = tmp_path / 'sql-skill'
+    skill_dir.mkdir()
+    (skill_dir / 'SKILL.md').write_text(
+        '---\nname: sql-skill\ndescription: The sql-skill.\n---\n# sql-skill\nRead report.sql.\n',
+        encoding='utf-8',
+    )
+    (skill_dir / 'report.sql').write_text('SELECT 1;', encoding='utf-8')
+    (skill_dir / 'notes.txt').write_text('notes', encoding='utf-8')
+
+    capability = SkillsCapability.from_spec(directories=[str(tmp_path)], exclude_resources=['*.sql'])
+
+    skill = capability.toolset.get_skill('sql-skill')
+    resource_names = [r.name for r in skill.resources or []]
+    assert 'report.sql' not in resource_names
+    assert 'notes.txt' in resource_names
+
+
 def test_skills_capability_from_spec_defer_loading_requires_id() -> None:
     """from_spec should enforce the same defer_loading/id invariant as the constructor."""
     with pytest.raises(ValueError, match="requires a stable 'id'"):
