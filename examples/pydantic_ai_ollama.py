@@ -23,17 +23,17 @@ skills_capability = SkillsCapability(directories=[skills_dir])
 
 # Initialize LLM
 provider = gateway_provider('openai', route='ollama')
-model = OpenAIChatModel(model_name='gpt-oss:20b-cloud', provider=provider)
-gemma4 = OpenAIChatModel(model_name='gemma4:31b-cloud', provider=provider)
+gpt_oss_20b = OpenAIChatModel(model_name='gpt-oss:20b-cloud', provider=provider)
+gemma4_31b = OpenAIChatModel(model_name='gemma4:31b-cloud', provider=provider)
 
 # Create agent with skills
 agent = Agent(
-    model=model,
+    model=gpt_oss_20b,
     instructions='You are a helpful assistant.',
     capabilities=[skills_capability],
 )
 
-app = agent.to_web(models=[gemma4])
+app = agent.to_web(models=[gemma4_31b])
 
 if __name__ == '__main__':
     uvicorn.run(app, host='127.0.0.1', port=7932)
