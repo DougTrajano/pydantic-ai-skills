@@ -283,13 +283,7 @@ class SkillsToolset(FunctionToolset[Any]):
 
         self._instruction_template = instruction_template
 
-        # Skill-name selection (applies to every source: programmatic, directories, registries)
-        if include is not None and exclude is not None:
-            raise ValueError('include and exclude cannot be used together.')
-        self._include = _normalize_selection('include', include) if include is not None else None
-        self._exclude = _normalize_selection('exclude', exclude) if exclude is not None else frozenset()
-        # Every skill name seen before selection, used to report unknown include/exclude entries.
-        self._discovered_names: set[str] = set()
+        self._init_selection(include, exclude)
 
         # Validate and initialize exclude_tools
         valid_tools = {'list_skills', 'load_skill', 'read_skill_resource', 'run_skill_script'}
@@ -356,6 +350,23 @@ class SkillsToolset(FunctionToolset[Any]):
             Dictionary mapping skill names to Skill objects.
         """
         return self._skills
+
+    def _init_selection(self, include: Collection[str] | None, exclude: Collection[str] | None) -> None:
+        """Configure skill-name selection, applied to every source.
+
+        Args:
+            include: Exact skill names to expose, or None to expose all.
+            exclude: Exact skill names to omit, or None to omit none.
+
+        Raises:
+            ValueError: If both `include` and `exclude` are provided.
+        """
+        if include is not None and exclude is not None:
+            raise ValueError('include and exclude cannot be used together.')
+        self._include = _normalize_selection('include', include) if include is not None else None
+        self._exclude = _normalize_selection('exclude', exclude) if exclude is not None else frozenset()
+        # Every skill name seen before selection, used to report unknown include/exclude entries.
+        self._discovered_names: set[str] = set()
 
     def _is_selected(self, name: str) -> bool:
         """Return whether *name* passes the configured `include`/`exclude` selection.
