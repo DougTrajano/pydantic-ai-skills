@@ -13,9 +13,12 @@ Agent Skills are **modular collections of instructions, scripts, and resources**
 - **Skill Registries**: Discover and install skills from Git repositories and other remote sources
 - **Script Execution**: Include Python scripts that agents can execute
 - **Resource Management**: Support for documentation and data files
+- **Skill Selection**: Expose a per-agent subset of a shared library with `include` / `exclude`
 - **Type-Safe**: Built on Pydantic AI's type-safe foundation
 - **Simple Integration**: Drop-in toolset for Pydantic AI agents
 - **Capabilities Integration**: Preferred via `SkillsCapability` and `capabilities=[...]`
+
+Comparing options? See [Why pydantic-ai-skills](comparison.md).
 
 ## Quick Example
 
@@ -106,8 +109,12 @@ The Pydantic AI Skills documentation is available in the [llms.txt](https://llms
 
 Two formats are available:
 
-- [`llms.txt`](/llms.txt): a file containing a brief description of the project, along with links to the different sections of the documentation. The structure of this file is described in detail [here](https://llmstxt.org/#format).
-- [`llms-full.txt`](/llms-full.txt): Similar to `llms.txt`, but with the linked documentation content included inline. This file may be too large for some LLMs.
+<!-- These two files are generated at the site root by the mkdocs-llmstxt plugin, so they are
+     not part of the mkdocs file registry and a Markdown link to them fails `--strict`
+     validation. Raw anchors keep the relative (version-correct under mike) URL. -->
+
+- <a href="llms.txt"><code>llms.txt</code></a>: a file containing a brief description of the project, along with links to the different sections of the documentation. The structure of this file is described in detail [here](https://llmstxt.org/#format).
+- <a href="llms-full.txt"><code>llms-full.txt</code></a>: Similar to `llms.txt`, but with the linked documentation content included inline. This file may be too large for some LLMs.
 
 As of today, these files are not automatically leveraged by most IDEs or coding agents, but they can use them if you provide a link or the full text.
 

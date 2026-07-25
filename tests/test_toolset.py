@@ -811,3 +811,82 @@ def test_run_skill_script_rejects_non_object_json(sample_skills_dir: Path) -> No
                 'args': '[1, 2, 3]',
             }
         )
+
+
+def test_include_exposes_only_named_skills(sample_skills_dir: Path) -> None:
+    """`include` restricts the catalog to the named skills."""
+    toolset = SkillsToolset(directories=[sample_skills_dir], include=['skill-one', 'skill-two'])
+
+    assert set(toolset.skills) == {'skill-one', 'skill-two'}
+
+
+def test_exclude_omits_named_skills(sample_skills_dir: Path) -> None:
+    """`exclude` removes the named skills from the catalog."""
+    toolset = SkillsToolset(directories=[sample_skills_dir], exclude=['skill-three'])
+
+    assert set(toolset.skills) == {'skill-one', 'skill-two'}
+
+
+def test_empty_include_exposes_no_skills(sample_skills_dir: Path) -> None:
+    """An empty `include` collection yields an empty catalog."""
+    toolset = SkillsToolset(directories=[sample_skills_dir], include=[])
+
+    assert toolset.skills == {}
+
+
+def test_empty_exclude_exposes_all_skills(sample_skills_dir: Path) -> None:
+    """An empty `exclude` collection leaves the catalog unchanged."""
+    toolset = SkillsToolset(directories=[sample_skills_dir], exclude=[])
+
+    assert len(toolset.skills) == 3
+
+
+def test_include_and_exclude_are_mutually_exclusive(sample_skills_dir: Path) -> None:
+    """Passing both `include` and `exclude` is rejected."""
+    with pytest.raises(ValueError, match='cannot be used together'):
+        SkillsToolset(directories=[sample_skills_dir], include=['skill-one'], exclude=['skill-two'])
+
+
+def test_unknown_include_name_raises(sample_skills_dir: Path) -> None:
+    """An `include` entry matching no discovered skill is reported."""
+    with pytest.raises(ValueError, match='Unknown skill in include: nope'):
+        SkillsToolset(directories=[sample_skills_dir], include=['nope'])
+
+
+def test_unknown_exclude_name_raises(sample_skills_dir: Path) -> None:
+    """An `exclude` entry matching no discovered skill is reported."""
+    with pytest.raises(ValueError, match='Unknown skills in exclude: nope, nuh-uh'):
+        SkillsToolset(directories=[sample_skills_dir], exclude=['nope', 'nuh-uh'])
+
+
+def test_selection_rejects_bare_string(sample_skills_dir: Path) -> None:
+    """A bare string is rejected so `include='abc'` is not read character by character."""
+    with pytest.raises(TypeError, match='not a string'):
+        SkillsToolset(directories=[sample_skills_dir], include='skill-one')  # type: ignore[arg-type]
+
+
+def test_selection_rejects_non_string_entries(sample_skills_dir: Path) -> None:
+    """Non-string entries in a selection are rejected."""
+    with pytest.raises(TypeError, match='only skill names as strings'):
+        SkillsToolset(directories=[sample_skills_dir], exclude=[123])  # type: ignore[list-item]
+
+
+def test_selection_survives_reload(sample_skills_dir: Path) -> None:
+    """`reload()` re-applies the configured selection."""
+    toolset = SkillsToolset(directories=[sample_skills_dir], exclude=['skill-three'])
+    toolset.reload()
+
+    assert set(toolset.skills) == {'skill-one', 'skill-two'}
+
+
+def test_selection_applies_to_programmatic_skills(sample_skills_dir: Path) -> None:
+    """Programmatic skills are subject to the same selection."""
+    from pydantic_ai_skills import Skill
+
+    toolset = SkillsToolset(
+        skills=[Skill(name='extra-skill', description='A programmatic skill', content='Do it.')],
+        directories=[sample_skills_dir],
+        include=['skill-one'],
+    )
+
+    assert set(toolset.skills) == {'skill-one'}

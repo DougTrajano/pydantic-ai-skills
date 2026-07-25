@@ -237,3 +237,27 @@ def test_skills_capability_spec_schema_generation() -> None:
 
     schema = AgentSpec.model_json_schema_with_capabilities([SkillsCapability])
     assert 'SkillsCapability' in str(schema)
+
+
+def test_capability_forwards_selection(tmp_path: Path) -> None:
+    """`include` is forwarded through SkillsCapability to the underlying toolset."""
+    for name in ('alpha-skill', 'beta-skill'):
+        skill_dir = tmp_path / name
+        skill_dir.mkdir()
+        (skill_dir / 'SKILL.md').write_text(f'---\nname: {name}\ndescription: Test skill {name}\n---\n\nBody.\n')
+
+    capability = SkillsCapability(directories=[tmp_path], include=['alpha-skill'])
+
+    assert set(capability.toolset.skills) == {'alpha-skill'}
+
+
+def test_capability_from_spec_accepts_selection(tmp_path: Path) -> None:
+    """`exclude` round-trips through the agent-spec constructor."""
+    for name in ('alpha-skill', 'beta-skill'):
+        skill_dir = tmp_path / name
+        skill_dir.mkdir()
+        (skill_dir / 'SKILL.md').write_text(f'---\nname: {name}\ndescription: Test skill {name}\n---\n\nBody.\n')
+
+    capability = SkillsCapability.from_spec(directories=[str(tmp_path)], exclude=['beta-skill'])
+
+    assert set(capability.toolset.skills) == {'alpha-skill'}

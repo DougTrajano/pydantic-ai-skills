@@ -10,6 +10,7 @@ copyright: © Douglas Trajano 2025 to present. Licensed under the MIT License.
 
 nav:
   - Home: index.md
+  - Why pydantic-ai-skills: comparison.md
   - Getting Started:
       - Installation: installation.md
       - Quick Start: quick-start.md
@@ -149,7 +150,9 @@ plugins:
   - mkdocstrings:
       handlers:
         python:
-          paths: [pydantic_ai_skills]
+          # Search path for griffe: the directory *containing* the package, so the
+          # local source is documented instead of an installed copy in site-packages.
+          paths: [.]
           options:
             relative_crossrefs: true
             members_order: source

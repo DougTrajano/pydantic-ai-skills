@@ -13,8 +13,9 @@ The toolset provides four main tools for agents:
 from __future__ import annotations
 
 import json
+import unicodedata
 import warnings
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Collection, Iterable
 from inspect import signature as get_signature
 from pathlib import Path
 from typing import Annotated, Any
@@ -87,6 +88,29 @@ def _coerce_to_dict(v: Any) -> Any:
             raise ValueError(f'args must be a JSON object, got {type(parsed).__name__}')
         return parsed
     return v
+
+
+def _normalize_selection(option: str, values: Collection[str]) -> frozenset[str]:
+    """Normalize an `include`/`exclude` collection of skill names.
+
+    Args:
+        option: Name of the option being normalized, used in error messages.
+        values: Collection of skill names.
+
+    Returns:
+        Frozenset of NFKC-normalized skill names.
+
+    Raises:
+        TypeError: If `values` is a bare string or contains non-string entries.
+    """
+    if isinstance(values, str):
+        raise TypeError(f'{option} must be a collection of skill names, not a string.')
+    normalized: set[str] = set()
+    for value in values:
+        if not isinstance(value, str):
+            raise TypeError(f'{option} must contain only skill names as strings.')
+        normalized.add(unicodedata.normalize('NFKC', value))
+    return frozenset(normalized)
 
 
 class SkillsToolset(FunctionToolset[Any]):
@@ -165,6 +189,8 @@ class SkillsToolset(FunctionToolset[Any]):
         exclude_resources: Iterable[str] | None = None,
         id: str | None = None,
         instruction_template: str | None = None,
+        include: Collection[str] | None = None,
+        exclude: Collection[str] | None = None,
         exclude_tools: set[str] | list[str] | None = None,
         auto_reload: bool = False,
         max_retries: int = 1,
@@ -190,6 +216,11 @@ class SkillsToolset(FunctionToolset[Any]):
             instruction_template: Custom instruction template for skills system prompt.
                 Must include `{skills_list}` placeholder. If None, uses default template.
                 Tool usage guidance is provided in the tool docstrings themselves.
+            include: Exact skill names to expose. When provided, every other discovered skill is
+                omitted from the catalog. Cannot be combined with ``exclude``. Pass an empty
+                collection to expose no skills. Unknown names raise ``ValueError``.
+            exclude: Exact skill names to omit from the catalog. Cannot be combined with
+                ``include``. Unknown names raise ``ValueError``.
             exclude_tools: Set or list of tool names to exclude from registration (e.g., ['run_skill_script']).
                 Useful for security or capability restrictions such as disabling script execution.
                 Valid tool names: 'list_skills', 'load_skill', 'read_skill_resource', 'run_skill_script'.
@@ -227,6 +258,12 @@ class SkillsToolset(FunctionToolset[Any]):
             dir1 = SkillsDirectory(path="./skills")
             toolset = SkillsToolset(directories=[dir1])
 
+            # Expose only a subset of the discovered skills
+            toolset = SkillsToolset(directories=["./skills"], include=['arxiv-search'])
+
+            # Expose everything except one skill
+            toolset = SkillsToolset(directories=["./skills"], exclude=['web-research'])
+
             # Excluding specific tools (disable script execution with a set)
             toolset = SkillsToolset(exclude_tools=['run_skill_script'])
 
@@ -245,6 +282,8 @@ class SkillsToolset(FunctionToolset[Any]):
         super().__init__(id=id, max_retries=max_retries)
 
         self._instruction_template = instruction_template
+
+        self._init_selection(include, exclude)
 
         # Validate and initialize exclude_tools
         valid_tools = {'list_skills', 'load_skill', 'read_skill_resource', 'run_skill_script'}
@@ -297,6 +336,9 @@ class SkillsToolset(FunctionToolset[Any]):
         # Load registry skills (lowest priority — won't override existing)
         self._load_registry_skills()
 
+        # Surface typos in include/exclude once every source has been scanned
+        self._validate_selection()
+
         # Register tools
         self._register_tools()
 
@@ -308,6 +350,49 @@ class SkillsToolset(FunctionToolset[Any]):
             Dictionary mapping skill names to Skill objects.
         """
         return self._skills
+
+    def _init_selection(self, include: Collection[str] | None, exclude: Collection[str] | None) -> None:
+        """Configure skill-name selection, applied to every source.
+
+        Args:
+            include: Exact skill names to expose, or None to expose all.
+            exclude: Exact skill names to omit, or None to omit none.
+
+        Raises:
+            ValueError: If both `include` and `exclude` are provided.
+        """
+        if include is not None and exclude is not None:
+            raise ValueError('include and exclude cannot be used together.')
+        self._include = _normalize_selection('include', include) if include is not None else None
+        self._exclude = _normalize_selection('exclude', exclude) if exclude is not None else frozenset()
+        # Every skill name seen before selection, used to report unknown include/exclude entries.
+        self._discovered_names: set[str] = set()
+
+    def _is_selected(self, name: str) -> bool:
+        """Return whether *name* passes the configured `include`/`exclude` selection.
+
+        Records the name as discovered so :meth:`_validate_selection` can report
+        unknown `include`/`exclude` entries.
+        """
+        self._discovered_names.add(name)
+        if self._include is not None:
+            return name in self._include
+        return name not in self._exclude
+
+    def _validate_selection(self) -> None:
+        """Raise if `include` or `exclude` names no skill from any configured source.
+
+        Raises:
+            ValueError: If an `include`/`exclude` entry matches no discovered skill.
+        """
+        for option, selected in (('include', self._include), ('exclude', self._exclude)):
+            if not selected:
+                continue
+            unknown = sorted(set(selected) - self._discovered_names)
+            if unknown:
+                available = ', '.join(sorted(self._discovered_names)) or '(none)'
+                noun = 'skill' if len(unknown) == 1 else 'skills'
+                raise ValueError(f'Unknown {noun} in {option}: {", ".join(unknown)}. Available skills: {available}.')
 
     def get_skill(self, name: str) -> Skill:
         """Get a specific skill by name.
@@ -364,6 +449,8 @@ class SkillsToolset(FunctionToolset[Any]):
         programmatic_names = {s.name for s in self._programmatic_skills}
         for skill_dir in self._skill_directories:
             for skill in skill_dir.get_skills().values():
+                if not self._is_selected(skill.name):
+                    continue
                 if skill.name in programmatic_names:
                     continue  # programmatic always wins
                 if skill.name in target:
@@ -904,7 +991,8 @@ class SkillsToolset(FunctionToolset[Any]):
 
         # 1. Highest priority: programmatic skills (always preserved)
         for skill in self._programmatic_skills:
-            new_skills[skill.name] = skill
+            if self._is_selected(skill.name):
+                new_skills[skill.name] = skill
 
         # 2. Directory skills — programmatic names are protected inside the helper
         self._collect_dir_skills_into(new_skills)
@@ -915,7 +1003,7 @@ class SkillsToolset(FunctionToolset[Any]):
 
         # 4. Lowest priority: registry cache (never overrides higher-priority skills)
         for skill_name, skill in self._registry_skills.items():
-            if skill_name not in new_skills:
+            if skill_name not in new_skills and self._is_selected(skill_name):
                 new_skills[skill_name] = skill
 
         # Atomically replace the skills mapping once fully populated
@@ -933,6 +1021,9 @@ class SkillsToolset(FunctionToolset[Any]):
         # Convert SkillWrapper to Skill if needed
         if isinstance(skill, SkillWrapper):
             skill = skill.to_skill()
+
+        if not self._is_selected(skill.name):
+            return
 
         # Warn about duplicates
         if skill.name in self._skills:
