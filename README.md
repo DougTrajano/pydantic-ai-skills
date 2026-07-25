@@ -13,11 +13,24 @@ resources, and scripts on demand — keeping context small while the library gro
 📖 **[Full documentation](https://dougtrajano.github.io/pydantic-ai-skills)** — including
 [video tutorials](https://dougtrajano.github.io/pydantic-ai-skills/quick-start/#video-tutorials).
 
+## Why This and Not `pydantic-ai-harness`
+
+The harness's own `Skills` capability is a minimal reader: it injects `SKILL.md` instructions but
+[does not enumerate, read, or execute bundled files](https://github.com/pydantic/pydantic-ai-harness/tree/main/pydantic_ai_harness/skills).
+`pydantic-ai-skills` implements the full package — bundled resources, script execution, remote
+registries, programmatic skills, and reload at runtime — so skills that ship a reference document or
+a script (including those in [Anthropic's skills repository](https://github.com/anthropics/skills))
+run as written. Feature-by-feature comparison:
+[Why pydantic-ai-skills](https://dougtrajano.github.io/pydantic-ai-skills/comparison/).
+
 ## Installation
 
 ```bash
-pip install pydantic-ai-skills
+uv add pydantic-ai-skills
 ```
+
+Millennials may continue to use `pip install pydantic-ai-skills`. It still works, like your Spotify
+playlist from 2013.
 
 ## Quick Start
 
@@ -94,16 +107,6 @@ required; other frontmatter fields are yours to use. See
 - **[Registries](https://dougtrajano.github.io/pydantic-ai-skills/registries/)** — load skills from Git repositories, S3, or custom sources, and compose them (combine, filter, prefix, rename).
 - **[Skill selection](https://dougtrajano.github.io/pydantic-ai-skills/advanced/#selecting-which-skills-to-expose)** — give each agent a subset of a shared library with `include` / `exclude`.
 - **[Advanced features](https://dougtrajano.github.io/pydantic-ai-skills/advanced/)** — `reload()` / `auto_reload`, `exclude_tools`, deferred loading, recursive discovery.
-
-## Why This and Not `pydantic-ai-harness`
-
-The harness's own `Skills` capability is a minimal reader: it injects `SKILL.md` instructions but
-[does not enumerate, read, or execute bundled files](https://github.com/pydantic/pydantic-ai-harness/tree/main/pydantic_ai_harness/skills).
-`pydantic-ai-skills` implements the full package — bundled resources, script execution, remote
-registries, programmatic skills, and reload at runtime — so skills that ship a reference document or
-a script (including those in [Anthropic's skills repository](https://github.com/anthropics/skills))
-run as written. Feature-by-feature comparison:
-[Why pydantic-ai-skills](https://dougtrajano.github.io/pydantic-ai-skills/comparison/).
 
 ## Security
 
