@@ -66,7 +66,7 @@ class SkillsCapability(AbstractCapability[Any]):
         ```
 
     Only serializable arguments are spec-expressible (see
-    [`from_spec`][pydantic_ai_skills.SkillsCapability.from_spec]); programmatic
+    [`from_spec`][pydantic_ai_skills.capability.SkillsCapability.from_spec]); programmatic
     `skills`, `registries`, and `SkillsDirectory` instances require Python construction.
     """
 
@@ -92,6 +92,12 @@ class SkillsCapability(AbstractCapability[Any]):
 
     instruction_template: str | None = None
     """Optional custom instructions template."""
+
+    include: list[str] | None = None
+    """Exact skill names to expose. Cannot be combined with `exclude`."""
+
+    exclude: list[str] | None = None
+    """Exact skill names to omit from the catalog. Cannot be combined with `include`."""
 
     exclude_tools: set[str] | list[str] | None = None
     """Tool names to exclude."""
@@ -119,6 +125,8 @@ class SkillsCapability(AbstractCapability[Any]):
             exclude_resources=self.exclude_resources,
             id=self.id,
             instruction_template=self.instruction_template,
+            include=self.include,
+            exclude=self.exclude,
             exclude_tools=self.exclude_tools,
             auto_reload=self.auto_reload,
         )
@@ -138,6 +146,8 @@ class SkillsCapability(AbstractCapability[Any]):
         exclude_resources: list[str] | None = None,
         id: str | None = None,
         instruction_template: str | None = None,
+        include: list[str] | None = None,
+        exclude: list[str] | None = None,
         exclude_tools: list[str] | None = None,
         auto_reload: bool = False,
         description: str | None = None,
@@ -158,6 +168,8 @@ class SkillsCapability(AbstractCapability[Any]):
             id: Stable identifier shared by the capability and its toolset. Required when
                 ``defer_loading`` is True.
             instruction_template: Optional custom instructions template.
+            include: Exact skill names to expose. Cannot be combined with ``exclude``.
+            exclude: Exact skill names to omit from the catalog. Cannot be combined with ``include``.
             exclude_tools: Tool names to exclude.
             auto_reload: Re-scan directories before each run.
             description: Optional catalog description surfaced when ``defer_loading`` is True.
@@ -171,6 +183,8 @@ class SkillsCapability(AbstractCapability[Any]):
             exclude_resources=list(exclude_resources) if exclude_resources is not None else None,
             id=id,
             instruction_template=instruction_template,
+            include=list(include) if include is not None else None,
+            exclude=list(exclude) if exclude is not None else None,
             exclude_tools=exclude_tools,
             auto_reload=auto_reload,
             description=description,

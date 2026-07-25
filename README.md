@@ -16,6 +16,10 @@ This package implements the [Agent Skills specification](https://agentskills.io/
 - **Agent Skills Spec** - Fully compatible with the [Agent Skills](https://agentskills.io/home) open format
 - **Filesystem Skills** - Define skills as filesystem directories with Markdown files and scripts
 - **Programmatic Skills** - Create skills dynamically in Python code using decorators or dataclasses
+- **Bundled Resources** - Agents read `REFERENCE.md`, `FORMS.md`, and other bundled files on demand
+- **Script Execution** - Agents run a skill's bundled scripts with named arguments
+- **Skill Registries** - Load skills from Git repositories, S3, or custom remote sources
+- **Skill Selection** - Expose a per-agent subset of your library with `include` / `exclude`
 - **Type-Safe** - Built with Python dataclasses and type hints
 - **Validation** - Automatic validation of skill metadata and structure
 - **Multiple Directories** - Load skills from multiple sources
@@ -116,6 +120,78 @@ ModelRequestNode(request=ModelRequest(parts=[ToolReturnPart(tool_name='run_skill
 CallToolsNode(model_response=ModelResponse(parts=[TextPart(content='Here are the last three papers from arXiv about machine learning:\n\n1. **Title:** Changing Data Sources in the Age of Machine Learning for Official Statistics\n   - **Summary:** This paper discusses the increasing importance of data science in official statistics production, highlighting risks and uncertainties related to changing data sources in machine learning contexts. It covers issues like concept drift, bias, and data validity, and offers measures to maintain the reliability and integrity of machine learning-based statistics.\n   - **URL:** [Link to Paper](http://arxiv.org/abs/2306.04338v1)\n\n2. **Title:** DOME: Recommendations for supervised machine learning validation in biology\n   - **Summary:** The paper provides a set of community-wide recommendations for machine learning validation in biology, emphasizing the importance of a structured methods description using DOME (data, optimization, model, evaluation). These guidelines aim to improve the scrutiny of machine learning performance and facilitate better understanding and assessment of methods.\n   - **URL:** [Link to Paper](http://arxiv.org/abs/2006.16189v4)\n\n3. **Title:** Learning Curves for Decision Making in Supervised Machine Learning: A Survey\n   - **Summary:** This survey covers the concept of learning curves in machine learning, which assess algorithm performance concerning resources like training examples. The paper categorizes learning curve approaches based on decision-making situations, and it surveys literature to classify various models within this framework.\n   - **URL:** [Link to Paper](http://arxiv.org/abs/2201.12150v2)')], usage=RequestUsage(input_tokens=2177, cache_read_tokens=1408, output_tokens=322, details={'accepted_prediction_tokens': 0, 'audio_tokens': 0, 'reasoning_tokens': 0, 'rejected_prediction_tokens': 0}), model_name='gpt-4o-2024-08-06', timestamp=datetime.datetime(2025, 12, 18, 23, 27, 19, tzinfo=TzInfo(0)), provider_name='openai', provider_details={'finish_reason': 'stop'}, provider_response_id='chatcmpl-CoHgtHBD9LUsRKbILVar99GtAGKHM', finish_reason='stop'))
 End(data=FinalResult(output='Here are the last three papers from arXiv about machine learning:\n\n1. **Title:** Changing Data Sources in the Age of Machine Learning for Official Statistics\n   - **Summary:** This paper discusses the increasing importance of data science in official statistics production, highlighting risks and uncertainties related to changing data sources in machine learning contexts. It covers issues like concept drift, bias, and data validity, and offers measures to maintain the reliability and integrity of machine learning-based statistics.\n   - **URL:** [Link to Paper](http://arxiv.org/abs/2306.04338v1)\n\n2. **Title:** DOME: Recommendations for supervised machine learning validation in biology\n   - **Summary:** The paper provides a set of community-wide recommendations for machine learning validation in biology, emphasizing the importance of a structured methods description using DOME (data, optimization, model, evaluation). These guidelines aim to improve the scrutiny of machine learning performance and facilitate better understanding and assessment of methods.\n   - **URL:** [Link to Paper](http://arxiv.org/abs/2006.16189v4)\n\n3. **Title:** Learning Curves for Decision Making in Supervised Machine Learning: A Survey\n   - **Summary:** This survey covers the concept of learning curves in machine learning, which assess algorithm performance concerning resources like training examples. The paper categorizes learning curve approaches based on decision-making situations, and it surveys literature to classify various models within this framework.\n   - **URL:** [Link to Paper](http://arxiv.org/abs/2201.12150v2)'))
 ````
+
+## Choosing Which Skills to Expose
+
+One skill library can serve several agents. Use `include` or `exclude` to give each agent
+only the skills it should see:
+
+```python
+from pydantic_ai_skills import SkillsCapability
+
+research = SkillsCapability(directories=['./skills'], include=['arxiv-search', 'web-research'])
+everything_else = SkillsCapability(directories=['./skills'], exclude=['arxiv-search'])
+```
+
+| Configuration | Skills in the catalog |
+| --- | --- |
+| Neither option | All discovered skills |
+| `include=['a', 'b']` | Only `a` and `b` |
+| `include=[]` | No skills |
+| `exclude=['a', 'b']` | All except `a` and `b` |
+
+`include` and `exclude` cannot be combined, and a name that matches no discovered skill raises
+`ValueError` at construction so typos surface immediately. Selection applies to every source —
+programmatic skills, directories, and registries — and is re-applied by `reload()`.
+
+Both options work on `SkillsToolset` too, and in declarative agent specs:
+
+```yaml
+capabilities:
+  - SkillsCapability:
+      directories: ['./skills']
+      include:
+        - arxiv-search
+```
+
+> Selection controls what the model sees in the catalog. It is not a filesystem permission or an
+> access-control boundary — see [Security](https://dougtrajano.github.io/pydantic-ai-skills/security/).
+
+## Why pydantic-ai-skills
+
+Pydantic AI's own [`pydantic-ai-harness`](https://github.com/pydantic/pydantic-ai-harness) ships a
+`Skills` capability that maps each `SKILL.md` to a deferred core capability. It is a deliberately
+minimal reader: it loads frontmatter and the Markdown body, and explicitly
+[does not enumerate, read, or execute bundled files](https://github.com/pydantic/pydantic-ai-harness/tree/main/pydantic_ai_harness/skills).
+
+`pydantic-ai-skills` implements the full Agent Skills package, not just its instructions:
+
+| | `pydantic-ai-skills` | harness `Skills` |
+| --- | --- | --- |
+| Skill metadata catalog (level 1) | ✅ | ✅ |
+| Instructions on demand (level 2) | ✅ | ✅ |
+| Bundled resources, e.g. `REFERENCE.md` (level 3) | ✅ `read_skill_resource` | ❌ not loaded |
+| Bundled script execution | ✅ `run_skill_script` | ❌ not executed |
+| `include` / `exclude` selection | ✅ | ✅ |
+| Programmatic skills in Python | ✅ decorators and dataclasses | ❌ use core `Capability` |
+| Remote registries (Git, S3) | ✅ | ❌ |
+| Registry composition (combine, filter, prefix, rename) | ✅ | ❌ |
+| Reload skills without restarting | ✅ `reload()` / `auto_reload` | ❌ construction-time snapshot |
+| Recursive discovery | ✅ up to `max_depth` | ❌ immediate children only |
+| Path traversal and symlink containment | ✅ | ❌ explicitly not a boundary |
+| Per-tool restriction, e.g. disable scripts | ✅ `exclude_tools` | n/a |
+| Deferred loading via `load_capability` | ✅ `defer_loading=True` | ✅ always deferred |
+
+The practical difference is **level 3 of progressive disclosure**. A skill that ships a reference
+document or a script is a complete package; without resource reads and script execution, the model
+gets the instructions but cannot follow them. `pydantic-ai-skills` runs those skills as written —
+including the ones published in Anthropic's
+[skills repository](https://github.com/anthropics/skills).
+
+If you only need instruction text injected on demand and are already invested in the harness, its
+`Skills` capability is a fine, smaller dependency. Reach for `pydantic-ai-skills` when your skills
+have bundled files, come from a shared registry, are generated in Python, or change while the
+process is running.
 
 ## Creating Skills
 

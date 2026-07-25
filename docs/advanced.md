@@ -12,6 +12,56 @@ Watch the Advanced Usage Tutorial for in-depth demonstrations of advanced skill 
   <source src="../assets/advanced_usage.mp4" type="video/mp4">
 </video>
 
+## Selecting Which Skills to Expose
+
+One skill library often serves several agents. `include` and `exclude` scope the catalog per agent
+without duplicating the library on disk.
+
+```python
+from pydantic_ai_skills import SkillsCapability
+
+research = SkillsCapability(directories=['./skills'], include=['arxiv-search', 'web-research'])
+support = SkillsCapability(directories=['./skills'], exclude=['arxiv-search'])
+```
+
+| Configuration | Skills in the catalog |
+| --- | --- |
+| Neither option | All discovered skills |
+| `include=['a', 'b']` | Only `a` and `b` |
+| `include=[]` | No skills |
+| `exclude=['a', 'b']` | All except `a` and `b` |
+| `exclude=[]` | All discovered skills |
+
+Behavior:
+
+- `include` and `exclude` cannot be combined; doing so raises `ValueError`.
+- A name matching no discovered skill raises `ValueError` at construction, so typos surface early.
+- Selection applies to every source — programmatic skills, directories, and registries.
+- `reload()` and `auto_reload` re-apply the selection.
+- A bare string (`include='arxiv-search'`) raises `TypeError` rather than matching per character.
+
+Both options work on `SkillsToolset` as well:
+
+```python
+from pydantic_ai_skills import SkillsToolset
+
+toolset = SkillsToolset(directories=['./skills'], exclude=['web-research'])
+```
+
+And in declarative agent specs:
+
+```yaml
+capabilities:
+  - SkillsCapability:
+      directories: ['./skills']
+      include:
+        - arxiv-search
+```
+
+> Selection controls what the model sees in the catalog. It is not a filesystem permission or an
+> access-control boundary — see [Security](security.md). To restrict what loaded skills can *do*,
+> use `exclude_tools` (for example `exclude_tools=['run_skill_script']`).
+
 ## Hot-Reload (Runtime Skill Discovery)
 
 `SkillsCapability` is the preferred integration path. This section focuses on `SkillsToolset` because hot-reload controls (`reload()`, `auto_reload`) are configured on the underlying toolset.
