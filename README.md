@@ -6,9 +6,15 @@
 
 [Agent Skills](https://agentskills.io/home) for [Pydantic AI](https://ai.pydantic.dev/).
 
-A skill is a folder with a `SKILL.md` file, optional reference docs, and optional scripts. Your agent
-sees only the name and description of each skill until it needs more, then loads the instructions,
-resources, and scripts on demand — keeping context small while the library grows.
+**Agent Skills** are modular packages of instructions, resources, and scripts that teach an agent to
+handle a specialized task. On disk, a skill is just a folder: a `SKILL.md` file holding a name, a
+description, and Markdown instructions, plus any reference documents and executable scripts the task
+needs.
+
+Your agent starts out seeing only the name and description of each skill. When a task calls for one,
+it loads that skill's full instructions, and reads a reference document or runs a script only if it
+actually needs to. This is *progressive disclosure*: your skill library can grow without every skill
+paying for space in the prompt.
 
 📖 **[Full documentation](https://dougtrajano.github.io/pydantic-ai-skills)** — including
 [video tutorials](https://dougtrajano.github.io/pydantic-ai-skills/quick-start/#video-tutorials).
