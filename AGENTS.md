@@ -1,6 +1,6 @@
 # AGENTS.md
 
-**pydantic-ai-skills** is a Python library that implements the full [Agent Skills specification](https://agentskills.io/home) for [Pydantic AI](https://ai.pydantic.dev/) — enabling modular skill discovery, bundled resources, script execution, remote registries, and runtime reload for AI agents.
+**pydantic-ai-skills** is a Python package that implements the full [Agent Skills specification](https://agentskills.io/home) for [Pydantic AI](https://ai.pydantic.dev/), enabling modular skill discovery, bundled resources, script execution, remote registries, and runtime reload for AI agents.
 
 This file provides guidance to coding agents (Claude Code, etc.) when working with code in this repository. `CLAUDE.md` is a symlink to this file — edit this one.
 
