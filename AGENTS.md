@@ -18,12 +18,27 @@ pytest                                # all tests (coverage is on by default via
 pytest tests/test_toolset.py -v       # one file
 pytest tests/test_toolset.py::test_name -v  # one test
 pytest -m "not slow"                  # skip slow markers
-pre-commit run --all-files            # what CI's lint job runs: ruff + ruff-format + mypy
+pre-commit run --all-files            # what CI's lint job runs: ruff, ruff-format, mypy, actionlint, zizmor
 ruff check pydantic_ai_skills/ && ruff format pydantic_ai_skills/
-mkdocs serve                          # docs, needs pip install -e ".[docs]"
+mkdocs build --strict                 # what CI's docs job runs, needs pip install -e ".[docs]"
+mkdocs serve                          # docs preview
 ```
 
 `pytest.ini` sets `asyncio_mode = auto` — do **not** add `@pytest.mark.asyncio`.
+
+## Quality Gates
+
+Full description in [docs/contributing.md](docs/contributing.md#quality-gates). What matters here:
+
+- **Hooks run these for you.** [.claude/hooks/](.claude/hooks/) lints every `*.py` and
+  `.github/workflows/*.yml` you edit, blocks git commands that bypass a gate (`--no-verify`, bare
+  `--force`, pushing to `main`), and runs the test suite before a session ends. A blocked hook is
+  the gate talking — fix what it reports, don't work around it.
+- **`Checks passed` is the required check** in CI; it aggregates lint, the 5×3 test matrix (with a
+  coverage floor) and the strict docs build.
+- **An AI reviewer comments on the pull request** once CI passes, against
+  [.github/review-rubric.md](.github/review-rubric.md). Run the `pre-push-review` skill first and
+  the review has nothing left to say.
 
 ## Architecture
 

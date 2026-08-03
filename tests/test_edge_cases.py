@@ -1,6 +1,7 @@
 """Tests for uncovered code paths to improve coverage."""
 
 import json
+import os
 import sys
 import warnings
 from pathlib import Path
@@ -279,6 +280,10 @@ Content
 
 
 @pytest.mark.skipif(sys.platform == 'win32', reason='chmod does not restrict file access on Windows')
+@pytest.mark.skipif(
+    getattr(os, 'geteuid', lambda: -1)() == 0,
+    reason='root bypasses file permissions, so chmod 000 does not produce an OSError',
+)
 def test_discover_skills_os_error_handling(tmp_path: Path) -> None:
     """Test handling of OS errors during skill discovery."""
     skill_dir = tmp_path / 'skill'

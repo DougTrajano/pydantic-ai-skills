@@ -1,0 +1,14 @@
+# zizmor (https://docs.zizmor.sh) — static analysis for the GitHub Actions workflows.
+#
+# Runs in three places, all on the same config: the `pre-commit` hook, CI's
+# workflow-lint job, and the PostToolUse hook that lints a workflow the moment an
+# agent edits one.
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        # Tag pins (`actions/checkout@v4`) rather than commit hashes. Every action
+        # used here is either first-party (`actions/*`) or the vendor's own
+        # publishing action, and Dependabot keeps the tags current. Hash-pinning
+        # would trade that for a lockstep upgrade chore with no owner.
+        "*": ref-pin

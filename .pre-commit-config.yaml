@@ -35,6 +35,22 @@ repos:
       - id: ruff
         args: [--fix]
       - id: ruff-format
+  # Workflow linting. Agents write and edit CI workflows too, and a workflow is
+  # the one file in the repo the test suite cannot exercise: actionlint catches
+  # the syntax and expression errors, zizmor the security ones (script injection
+  # through a branch name, over-broad permissions, credential persistence).
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.12
+    hooks:
+      - id: actionlint
+  - repo: https://github.com/zizmorcore/zizmor-pre-commit
+    rev: v1.29.0
+    hooks:
+      - id: zizmor
+        # The online audits need a GitHub token, which a contributor's machine has
+        # no reason to hold; the offline set is what both local and CI runs share.
+        # Configuration lives in .github/zizmor.yml.
+        args: ["--no-progress", "--offline", "--persona=regular"]
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: v1.13.0
     hooks:

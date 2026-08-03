@@ -1,0 +1,281 @@
+name: AI Review
+
+# Reviews a pull request once CI has passed on its current head.
+#
+# Cadence: `workflow_run` rather than `pull_request`. A review started on every
+# push spends its tokens on a diff the next push replaces, and there is no point
+# reviewing code that does not lint, type-check or pass its tests — CI already
+# says that, deterministically and for free.
+#
+# Trust: `workflow_run` runs the workflow file from the default branch, so a pull
+# request cannot edit this file to grant itself permissions. The agent job checks
+# out contributor code, so the eligibility gate below refuses fork pull requests;
+# only same-repository branches are reviewed.
+on:
+  # zizmor: ignore[dangerous-triggers] -- the workflow file and its permissions come from the
+  # default branch; the eligibility job refuses fork heads before anything is checked out.
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request to review
+        required: true
+        type: number
+
+permissions: {}
+
+concurrency:
+  # One review per (branch, head commit). The branch alone would let CI finishing
+  # for an older head cancel a review of a newer one; the commit alone would let
+  # two branches sitting on the same commit cancel each other.
+  group: ${{ github.workflow }}-${{ github.event.workflow_run.head_branch || github.ref }}-${{ github.event.workflow_run.head_sha || inputs.pr_number }}
+  cancel-in-progress: true
+
+jobs:
+  eligibility:
+    name: Decide whether to review
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: read
+      # Only to leave a neutral check run behind when a commit is deliberately
+      # not reviewed — otherwise "skipped" and "still queued" look identical
+      # from the pull request.
+      checks: write
+    outputs:
+      eligible: ${{ steps.gate.outputs.eligible }}
+      pr_number: ${{ steps.gate.outputs.pr_number }}
+      head_sha: ${{ steps.gate.outputs.head_sha }}
+      base_ref: ${{ steps.gate.outputs.base_ref }}
+      head_ref: ${{ steps.gate.outputs.head_ref }}
+    steps:
+      - name: Decide
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          RUN_EVENT: ${{ github.event.workflow_run.event }}
+          RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          RUN_HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
+          DISPATCH_PR: ${{ inputs.pr_number }}
+          # The `secrets` context is not available in a job-level `if:`, so the
+          # "is a reviewer even configured?" question is answered here.
+          HAS_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' || secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
+        run: |
+          set -euo pipefail
+
+          # Commit a skip is recorded against. Empty for events this reviewer was
+          # never responsible for, so it does not claim commits it never owned.
+          MARKER_SHA=''
+
+          skip() {
+            {
+              echo "eligible=false"
+              echo "reason=$1"
+              echo "marker_sha=${MARKER_SHA}"
+            } >> "$GITHUB_OUTPUT"
+            echo "Not reviewing: $1" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          }
+
+          [ "$HAS_KEY" = 'true' ] || skip 'neither ANTHROPIC_API_KEY nor CLAUDE_CODE_OAUTH_TOKEN is configured'
+
+          # --- Resolve the pull request ---------------------------------------
+          # `workflow_run` carries no pull request, so it is resolved from the
+          # commit CI ran on and handed to every later step as an explicit value.
+          if [ "$EVENT_NAME" = 'workflow_dispatch' ]; then
+            PR_NUMBER="$DISPATCH_PR"
+            TRIGGER_SHA=''
+          else
+            [ "$RUN_EVENT" = 'pull_request' ] || skip "triggering CI run was a ${RUN_EVENT} run"
+            [ "$RUN_CONCLUSION" = 'success' ] || skip "triggering CI run concluded ${RUN_CONCLUSION}"
+            [ "$RUN_HEAD_REPO" = "$REPO" ] || skip "CI ran on ${RUN_HEAD_REPO}, not ${REPO}"
+            TRIGGER_SHA="$RUN_HEAD_SHA"
+            MARKER_SHA="$TRIGGER_SHA"
+            # `$ENV`, not interpolation: `"` is legal in a branch name and would
+            # otherwise splice into the jq program.
+            PRS=$(gh api "repos/${REPO}/commits/${TRIGGER_SHA}/pulls" \
+              --jq '[.[] | select(.state == "open" and .head.ref == $ENV.RUN_HEAD_BRANCH) | .number]')
+            MATCHES=$(printf '%s' "$PRS" | jq 'length')
+            [ "$MATCHES" -ne 0 ] || skip "no open pull request for ${RUN_HEAD_BRANCH}@${TRIGGER_SHA}"
+            # One branch can have several open pull requests onto different bases.
+            # Reviewing an arbitrary one of them is worse than not reviewing.
+            [ "$MATCHES" -eq 1 ] || skip "${MATCHES} open pull requests share ${RUN_HEAD_BRANCH}@${TRIGGER_SHA}"
+            PR_NUMBER=$(printf '%s' "$PRS" | jq -r '.[0]')
+          fi
+
+          PR_JSON=$(gh api "repos/${REPO}/pulls/${PR_NUMBER}")
+          HEAD_SHA=$(jq -r '.head.sha' <<<"$PR_JSON")
+          HEAD_REF=$(jq -r '.head.ref' <<<"$PR_JSON")
+          BASE_REF=$(jq -r '.base.ref' <<<"$PR_JSON")
+
+          [ "$(jq -r '.state' <<<"$PR_JSON")" = 'open' ] || skip "PR #${PR_NUMBER} is not open"
+          [ "$(jq -r '.draft' <<<"$PR_JSON")" = 'false' ] || skip "PR #${PR_NUMBER} is a draft"
+          # The checkout below fetches this repository, which a fork head is not —
+          # and reviewing fork code with a write-capable token is how a review
+          # workflow becomes an exploit.
+          [ "$(jq -r '.head.repo.full_name' <<<"$PR_JSON")" = "$REPO" ] || skip "PR #${PR_NUMBER} is from a fork"
+
+          [ -n "$MARKER_SHA" ] || MARKER_SHA="$HEAD_SHA"
+
+          # The pull request moved on while CI was running: commenting on the CI
+          # run's head would land on code that is no longer there. The CI run for
+          # the new head triggers this workflow again.
+          if [ -n "$TRIGGER_SHA" ] && [ "$TRIGGER_SHA" != "$HEAD_SHA" ]; then
+            skip "CI ran on ${TRIGGER_SHA}, but PR #${PR_NUMBER} has moved to ${HEAD_SHA}"
+          fi
+
+          # A rerun of the same CI run re-fires this workflow. Match our own
+          # marker rather than the bot account, which posts other reviews too.
+          ALREADY=$(gh api --paginate --slurp "repos/${REPO}/pulls/${PR_NUMBER}/reviews" \
+            | jq --arg sha "$HEAD_SHA" '[add[] | select(.commit_id == $sha and ((.body // "") | contains("<!-- ai-review -->")))] | length')
+          [ "$ALREADY" -eq 0 ] || skip "already reviewed ${HEAD_SHA}"
+
+          {
+            echo "eligible=true"
+            echo "pr_number=${PR_NUMBER}"
+            echo "head_sha=${HEAD_SHA}"
+            echo "head_ref=${HEAD_REF}"
+            echo "base_ref=${BASE_REF}"
+            echo "reason=eligible"
+          } >> "$GITHUB_OUTPUT"
+          echo "Reviewing PR #${PR_NUMBER} at ${HEAD_SHA}" >> "$GITHUB_STEP_SUMMARY"
+
+      # A skip only writes to the job summary, on a run GitHub attributes to the
+      # default branch — invisible from the pull request. A neutral check run on
+      # the commit the decision was about says "this commit will not be reviewed"
+      # without ever gating a merge.
+      - name: Record the skip on the commit
+        if: steps.gate.outputs.eligible == 'false' && steps.gate.outputs.marker_sha != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          MARKER_SHA: ${{ steps.gate.outputs.marker_sha }}
+          REASON: ${{ steps.gate.outputs.reason }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          jq -n --arg sha "$MARKER_SHA" --arg reason "$REASON" --arg url "$RUN_URL" '{
+            name: "AI Review skipped",
+            head_sha: $sha,
+            status: "completed",
+            conclusion: "neutral",
+            details_url: $url,
+            output: {title: $reason, summary: "This commit was not reviewed: \($reason)."}
+          }' | gh api "repos/${REPO}/check-runs" --input -
+
+  review:
+    name: Review
+    needs: eligibility
+    if: needs.eligibility.outputs.eligible == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      # Used only by the final step, which posts the review. The agent itself is
+      # given no GitHub tools.
+      pull-requests: write
+    steps:
+      - name: Check out the pull request head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.eligibility.outputs.head_sha }}
+          fetch-depth: 0
+          # The agent reads contributor code; it must not also inherit a token.
+          persist-credentials: false
+
+      - name: Gather review context
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ needs.eligibility.outputs.pr_number }}
+          BASE_REF: ${{ needs.eligibility.outputs.base_ref }}
+        run: |
+          set -euo pipefail
+          mkdir -p .review-context
+          # `...` is the merge-base diff: what this branch changed, not what the
+          # base branch changed underneath it.
+          git diff "origin/${BASE_REF}...HEAD" > .review-context/pr.diff
+          git diff --stat "origin/${BASE_REF}...HEAD" > .review-context/changed-files.txt
+          gh api "repos/${REPO}/pulls/${PR_NUMBER}" \
+            --jq '{title, body, author: .user.login, base: .base.ref, head: .head.ref, changed_files, additions, deletions}' \
+            > .review-context/pr.json
+          # Existing threads, so the reviewer does not re-raise a resolved point.
+          gh api --paginate "repos/${REPO}/pulls/${PR_NUMBER}/comments" \
+            --jq '[.[] | {path, line, user: .user.login, body}]' > .review-context/existing-comments.json
+          wc -l .review-context/pr.diff
+
+      - name: Review the diff
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            Review pull request #${{ needs.eligibility.outputs.pr_number }} of ${{ github.repository }},
+            at commit ${{ needs.eligibility.outputs.head_sha }}, which is checked out in the workspace.
+
+            `.github/review-rubric.md` is binding: read it first and apply its severity scale,
+            repository invariants, evidence bar and "what NOT to flag" list. Do not re-derive them.
+
+            Context already gathered for you (read these; do not call the GitHub API):
+
+            - `.review-context/pr.diff` — the full diff against the base branch. This is the source
+              of truth for what changed.
+            - `.review-context/changed-files.txt` — per-file change counts.
+            - `.review-context/pr.json` — title, body, author, sizes.
+            - `.review-context/existing-comments.json` — inline comments already on this pull
+              request. Never repeat a point that is already made there.
+
+            Read the full files around each hunk before judging it; a diff hunk alone routinely
+            hides the answer.
+
+            You have no GitHub access and must not attempt to post anything. Your only output is
+            the file `.review-context/findings.json`, which you must write exactly once, with:
+
+            {
+              "summary": "cross-cutting note that cannot be attached to a line, or an empty string",
+              "findings": [
+                {
+                  "path": "path/from/the/repository/root.py",
+                  "line": 42,
+                  "severity": "critical|high|medium|low",
+                  "comment": "the problem, then the concrete fix"
+                }
+              ]
+            }
+
+            `line` must be a line the diff adds or changes on the new side — a finding on any other
+            line is moved into the review body automatically, so prefer the changed line that best
+            anchors the problem. Order findings worst-first.
+
+            Finding nothing is the normal, healthy outcome: write {"summary": "", "findings": []}
+            rather than inventing something to say.
+          claude_args: |
+            --model claude-sonnet-5
+            --max-turns 40
+            --allowedTools "Read,Grep,Glob,Write,Bash(git diff:*),Bash(git log:*),Bash(git show:*)"
+
+      - name: Submit the review
+        # `!cancelled()`: an agent that timed out or crashed still reaches this
+        # step, and the submitter posts nothing when no findings file was written
+        # — an approving review nobody performed is worse than no review.
+        if: ${{ !cancelled() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ needs.eligibility.outputs.pr_number }}
+          HEAD_SHA: ${{ needs.eligibility.outputs.head_sha }}
+        run: |
+          python3 .github/scripts/submit_ai_review.py \
+            --findings .review-context/findings.json \
+            --patch .review-context/pr.diff \
+            --repo "$REPO" \
+            --pr "$PR_NUMBER" \
+            --commit "$HEAD_SHA"

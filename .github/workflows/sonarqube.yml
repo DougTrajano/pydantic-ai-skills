@@ -1,15 +1,23 @@
 name: SonarCloud Analysis
 
 on:
+  # zizmor: ignore[dangerous-triggers] -- the workflow file and its permissions come from
+  # the default branch, and the job only reads the tested commit; nothing from the head
+  # repository is executed.
   workflow_run:
     workflows: ["CI"]
     types:
       - completed
 
+permissions:
+  contents: read
+
 jobs:
   sonarcloud:
     name: SonarCloud Scan
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     # Run on success or failure so SonarCloud can report quality gate status either way.
     # Skipped/cancelled runs are excluded — no artifacts would exist to download.
     if: >
@@ -27,6 +35,7 @@ jobs:
           repository: ${{ github.event.workflow_run.head_repository.full_name }}
           ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Download coverage artifact
         uses: actions/download-artifact@v4

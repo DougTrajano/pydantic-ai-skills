@@ -38,6 +38,83 @@ pip install -e ".[dev]"
 pre-commit install
 ```
 
+## Quality Gates
+
+A lot of the code here is written by agents. The gates below exist so that whoever — or whatever —
+wrote a change, it arrives already linted, tested, type-checked and reviewed. They come in two
+layers: the ones that run on your machine while the code is being written, and the ones that run on
+GitHub once it is pushed.
+
+### Local: pre-commit
+
+`pre-commit run --all-files` runs everything CI's lint job runs:
+
+| Hook | Catches |
+| --- | --- |
+| `ruff`, `ruff-format` | Lint and formatting |
+| `mypy` | Type errors |
+| `actionlint` | Broken workflow syntax and expressions |
+| `zizmor` | Workflow security: script injection, over-broad permissions, credential persistence |
+| `pre-commit-hooks` | Merge markers, private keys, AWS credentials, large files, debug statements |
+
+`zizmor` is configured by [`.github/zizmor.yml`](https://github.com/dougtrajano/pydantic-ai-skills/blob/main/.github/zizmor.yml)
+and runs `--offline`, so no GitHub token is needed.
+
+### Local: agent hooks
+
+[`.claude/settings.json`](https://github.com/dougtrajano/pydantic-ai-skills/blob/main/.claude/settings.json)
+wires four [Claude Code hooks](https://docs.claude.com/en/docs/claude-code/hooks). They apply to
+agent sessions in this repository and need no setup:
+
+| Hook | When | What it does |
+| --- | --- | --- |
+| `session_start.py` | Session start | Installs the dev extras so `pytest` and `mypy` actually run in a fresh container |
+| `post_edit_lint.py` | After every `Write`/`Edit` | `ruff format` + `ruff check --fix` on the edited Python file; `actionlint` + `zizmor` on an edited workflow. Unresolved problems are reported back to the agent immediately |
+| `bash_guard.py` | Before every `git` command | Refuses `--no-verify`, bare `--force` pushes, and pushes to `main` |
+| `stop_test_gate.py` | Before the session ends | Runs the test suite if the session touched Python, and blocks on failure |
+
+Each rule is pinned by [`tests/test_agent_hooks.py`](https://github.com/dougtrajano/pydantic-ai-skills/blob/main/tests/test_agent_hooks.py) —
+a guard that silently stops matching is worse than no guard.
+
+There is also a `pre-push-review` skill: a local review of the branch against the same rubric CI
+uses. Run it before pushing.
+
+### GitHub: required checks
+
+The [CI workflow](https://github.com/dougtrajano/pydantic-ai-skills/blob/main/.github/workflows/ci.yml)
+runs on every pull request:
+
+| Job | Gate |
+| --- | --- |
+| `Lint (pre-commit)` | Everything in the table above |
+| `Test` | The suite on Python 3.10–3.14 × pydantic-ai-slim `1.105.0` / `2.0.0` / `latest`, with a coverage floor |
+| `Docs (strict build)` | `mkdocs build --strict` — a broken link, a page missing from the nav, or a stale API reference fails |
+| `Checks passed` | Aggregates the three above. **This is the one to mark as required** in branch protection; it stays accurate as jobs are added |
+
+SonarCloud runs afterwards and reports its own quality gate.
+
+### GitHub: AI review
+
+Once CI passes, the [AI Review workflow](https://github.com/dougtrajano/pydantic-ai-skills/blob/main/.github/workflows/ai-review.yml)
+reviews the pull request against
+[`.github/review-rubric.md`](https://github.com/dougtrajano/pydantic-ai-skills/blob/main/.github/review-rubric.md)
+and posts inline comments plus a verdict.
+
+Three properties are worth knowing:
+
+- **It runs after CI, not on every push.** There is no point reviewing a diff that does not compile,
+  and a review started on each push is cancelled by the next one.
+- **The agent has no write access.** It reads the diff and writes a findings file; a separate
+  deterministic script decides which lines are commentable, what the verdict is, and posts the
+  review. A malformed or missing findings file means "no findings", never a failed job.
+- **It is advisory.** `REQUEST_CHANGES` on a `critical` or `high` finding is a signal, not a merge
+  block — the required checks are the gate. Findings are wrong sometimes; say so on the thread and
+  move on.
+
+To enable it, set either `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` as a repository secret.
+Without one, the workflow records a neutral "AI Review skipped" check and does nothing else. It also
+skips draft pull requests, fork branches, and commits it has already reviewed.
+
 ## Making Changes
 
 ### 1. Create a Branch

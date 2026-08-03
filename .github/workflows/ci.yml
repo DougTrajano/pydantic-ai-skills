@@ -11,15 +11,28 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
+env:
+  # The suite currently sits at ~94%. The floor is a ratchet against untested
+  # code arriving with a passing build, not a target — raise it when the real
+  # number moves up, never lower it to make a red build green.
+  COVERAGE_FLOOR: "90"
+
 jobs:
   lint:
     name: Lint (pre-commit)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      # Runs ruff, ruff-format, mypy, actionlint and zizmor — the same hooks a
+      # contributor gets locally, so a green local run means a green lint job.
       - uses: pre-commit/action@v3.0.1
 
   test:
@@ -34,6 +47,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - uses: actions/setup-python@v5
         with:
@@ -54,7 +68,7 @@ jobs:
           uv pip show pydantic-ai-slim | grep -i '^version'
 
       - name: Run pytest with coverage
-        run: pytest --cov-report=xml
+        run: pytest --cov-report=xml --cov-fail-under="${COVERAGE_FLOOR}"
 
       - name: Upload coverage artifact
         if: matrix.python-version == '3.12' && matrix.pydantic-ai-version == '2.0.0'
@@ -66,11 +80,21 @@ jobs:
 
       - name: Save PR metadata
         if: matrix.python-version == '3.12' && matrix.pydantic-ai-version == '2.0.0'
+        env:
+          # Through the environment, not interpolated into the script: a branch
+          # name is attacker-controlled text and `$(...)` in one would otherwise
+          # execute here.
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
-          echo "PR_NUMBER=${{ github.event.pull_request.number }}" > pr-metadata.env
-          echo "PR_HEAD_SHA=${{ github.event.pull_request.head.sha }}" >> pr-metadata.env
-          echo "PR_BASE_REF=${{ github.event.pull_request.base.ref }}" >> pr-metadata.env
-          echo "PR_HEAD_REF=${{ github.event.pull_request.head.ref }}" >> pr-metadata.env
+          {
+            echo "PR_NUMBER=${PR_NUMBER}"
+            echo "PR_HEAD_SHA=${PR_HEAD_SHA}"
+            echo "PR_BASE_REF=${PR_BASE_REF}"
+            echo "PR_HEAD_REF=${PR_HEAD_REF}"
+          } > pr-metadata.env
 
       - name: Upload PR metadata artifact
         if: matrix.python-version == '3.12' && matrix.pydantic-ai-version == '2.0.0'
@@ -79,3 +103,41 @@ jobs:
           name: pr-metadata-${{ github.run_id }}
           path: pr-metadata.env
           retention-days: 7
+
+  docs:
+    name: Docs (strict build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # mkdocs-git-revision-date-localized reads the commit history.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Install dependencies
+        run: uv pip install --system -e ".[docs]"
+
+      # --strict turns a broken internal link, a page missing from the nav, or a
+      # mkdocstrings reference to a symbol that no longer exists into a failure.
+      # Those are the documentation errors a rename produces, and the ones a
+      # human reviewer reliably misses.
+      - name: Build documentation
+        run: mkdocs build --strict
+
+  check:
+    name: Checks passed
+    # The single job to mark as required in branch protection: it stays accurate
+    # as jobs are added to or removed from `needs` below.
+    if: always()
+    needs: [lint, test, docs]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: re-actors/alls-green@release/v1
+        with:
+          jobs: ${{ toJSON(needs) }}
