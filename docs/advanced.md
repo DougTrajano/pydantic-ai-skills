@@ -478,36 +478,44 @@ For advanced use cases, you can provide custom script executors that handle scri
 
 ### Executor Interface
 
-Custom executors must implement the `SkillScriptExecutor` protocol:
+Custom executors implement the `SkillScriptExecutor` protocol:
 
 ```python
-from typing import Protocol, Any
+from typing import Any, Protocol, runtime_checkable
 
+from pydantic_ai_skills import SkillScript
+
+
+@runtime_checkable
 class SkillScriptExecutor(Protocol):
-    """Protocol for custom script execution."""
-
-    async def execute(
+    async def run(
         self,
         script: SkillScript,
-        args: dict[str, Any] | None = None
-    ) -> str:
-        """Execute a skill script.
-
-        Args:
-            script: The script to execute
-            args: Optional arguments to pass to the script
-
-        Returns:
-            String output from the script
-        """
+        args: dict[str, Any] | None = None,
+        ctx: Any | None = None,
+    ) -> Any:
         ...
 ```
+
+The protocol is **structural**: any object exposing a matching `run` coroutine satisfies it, so you never need to subclass or import anything. `isinstance(obj, SkillScriptExecutor)` works at runtime if you want to assert conformance.
+
+Three things to know about `run`:
+
+- `script.uri` holds the path to the script file. `script.name` is relative to the skill folder (for example `scripts/run.py`).
+- `args` is a plain dict. The built-in marshalling rules — `True` emits a bare `--flag`, `False`/`None` omit it, lists repeat the flag — live in `LocalSkillScriptExecutor._build_args`; reuse it rather than reimplementing it.
+- `ctx` is the agent's `RunContext`, or `None`. It is optional; accept it and ignore it if you have no use for it.
+
+Executors used with the `run_skill_script` tool should return a string.
 
 ### Example: Remote Execution
 
 ```python
-from pydantic_ai_skills import SkillScript, CallableSkillScriptExecutor
+from typing import Any
+
 import httpx
+
+from pydantic_ai_skills import SkillScript, SkillsDirectory
+
 
 class RemoteExecutor:
     """Execute scripts on a remote server."""
@@ -515,60 +523,30 @@ class RemoteExecutor:
     def __init__(self, server_url: str):
         self.server_url = server_url
 
-    async def execute(self, script: SkillScript, args: dict | None = None) -> str:
-        """Send script execution request to remote server."""
+    async def run(
+        self,
+        script: SkillScript,
+        args: dict[str, Any] | None = None,
+        ctx: Any | None = None,
+    ) -> str:
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 f"{self.server_url}/execute",
-                json={
-                    "script_name": script.name,
-                    "args": args or {}
-                }
+                json={"script_name": script.name, "args": args or {}},
             )
             return response.text
 
-# Use in custom script definitions
-from pydantic_ai_skills import SkillScript
 
-remote_executor = RemoteExecutor("https://api.example.com")
-
-script = SkillScript(
-    name='remote-analysis',
-    description='Run analysis on remote server',
-    function=None,
-    executor=remote_executor  # Custom executor
+# Executors are attached to a skill source, not to individual scripts.
+directory = SkillsDirectory(
+    path="./skills",
+    script_executor=RemoteExecutor("https://api.example.com"),
 )
 ```
 
 ### Example: Sandboxed Execution
 
-```python
-import subprocess
-from pathlib import Path
-
-class SandboxedExecutor:
-    """Execute Python scripts in isolated sandboxes."""
-
-    def __init__(self, timeout: int = 30):
-        self.timeout = timeout
-
-    async def execute(self, script: SkillScript, args: dict | None = None) -> str:
-        """Execute script in sandbox."""
-        # Convert args to environment variables
-        env = {f"ARG_{k.upper()}": str(v) for k, v in (args or {}).items()}
-
-        try:
-            result = subprocess.run(
-                ["sandbox", "--timeout", str(self.timeout), script.name],
-                capture_output=True,
-                text=True,
-                env={**os.environ, **env},
-                timeout=self.timeout + 5
-            )
-            return result.stdout or result.stderr
-        except subprocess.TimeoutExpired:
-            return f"ERROR: Script execution timed out after {self.timeout}s"
-```
+For running untrusted skill scripts in an isolated environment, see [Sandboxing](sandbox.md), which walks through working executors built on OpenSandbox and LocalSandbox.
 
 ## Metadata Management
 

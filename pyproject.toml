@@ -54,6 +54,12 @@ git = [
 s3 = [
     "boto3>=1.26.0",
 ]
+opensandbox = [
+    "opensandbox>=0.1.15",
+]
+localsandbox = [
+    "localsandbox>=0.3.2",
+]
 test = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",

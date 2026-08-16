@@ -11,6 +11,8 @@ This folder contains runnable examples demonstrating how to use `pydantic-ai-ski
 | `git_registry_usage.py` | Loads skills from a remote Git repository using `GitSkillsRegistry` (clones Anthropic's public skills repo). |
 | `programatic_skills.py` | Defines a skill entirely in Python using `@skill.resource` / `@skill.script` decorators — HR Analytics Agent backed by a HuggingFace dataset. |
 | `debug_local_logging.py` | Development-focused example that runs file-based skill scripts in-process for breakpoint debugging and writes a local execution log file. |
+| `sandbox_opensandbox.py` | `SkillScriptExecutor` that runs skill scripts in an [OpenSandbox](https://github.com/opensandbox-group/OpenSandbox) container. Needs `pip install "pydantic-ai-skills[opensandbox]"` and a reachable OpenSandbox server. |
+| `sandbox_localsandbox.py` | `SkillScriptExecutor` that runs skill scripts in a [LocalSandbox](https://github.com/coplane/localsandbox) virtual filesystem (just-bash + Pyodide, no container runtime). Needs `pip install "pydantic-ai-skills[localsandbox]"`. |
 
 ### Bundled skills
 

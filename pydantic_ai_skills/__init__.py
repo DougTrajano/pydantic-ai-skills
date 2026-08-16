@@ -9,6 +9,7 @@ Key components:
 - [`SkillsToolset`][pydantic_ai_skills.SkillsToolset]: Main toolset for integrating skills with agents
 - [`Skill`][pydantic_ai_skills.Skill]: Data class representing a skill with resources and scripts
 - [`SkillsDirectory`][pydantic_ai_skills.SkillsDirectory]: Filesystem-based skill discovery and management
+- [`SkillScriptExecutor`][pydantic_ai_skills.SkillScriptExecutor]: Protocol for custom script executors
 - [`LocalSkillScriptExecutor`][pydantic_ai_skills.LocalSkillScriptExecutor]: Execute scripts via subprocess
 - [`CallableSkillScriptExecutor`][pydantic_ai_skills.CallableSkillScriptExecutor]: Wrap callables as script executors
 
@@ -38,6 +39,7 @@ Example:
 
 from pydantic_ai_skills.capability import SkillsCapability
 from pydantic_ai_skills.directory import SkillsDirectory, discover_skills, parse_skill_md
+from pydantic_ai_skills.executors import SkillScriptExecutor
 from pydantic_ai_skills.local import CallableSkillScriptExecutor, LocalSkillScriptExecutor
 from pydantic_ai_skills.registries import GitCloneOptions, GitSkillsRegistry, S3SkillsRegistry, SkillRegistry
 from pydantic_ai_skills.toolset import SkillsToolset
@@ -50,6 +52,7 @@ __all__ = [
     # Directory discovery
     'SkillsDirectory',
     # Executors
+    'SkillScriptExecutor',
     'LocalSkillScriptExecutor',
     'CallableSkillScriptExecutor',
     # Types

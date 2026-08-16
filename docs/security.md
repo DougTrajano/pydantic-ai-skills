@@ -172,7 +172,7 @@ from pydantic_ai_skills import SkillScript, LocalSkillScriptExecutor
 
 executor = LocalSkillScriptExecutor(
     python_executable=None,  # Uses default Python
-    script_timeout=30        # 30 second timeout
+    timeout=30               # 30 second timeout
 )
 
 script = SkillScript(
@@ -181,6 +181,8 @@ script = SkillScript(
     uri='./scripts/analyze.py'
 )
 ```
+
+A subprocess is still the same user, filesystem and network as your agent. For scripts you have not reviewed — anything from a Git or S3 registry — run them in a real sandbox instead. See [Sandboxing](sandbox.md).
 
 ### Input Sanitization
 
@@ -350,17 +352,20 @@ Files outside the skill directory or with unsupported extensions are not accessi
 ### Configuration
 
 ```python
-from pydantic_ai_skills import SkillsToolset, LocalSkillScriptExecutor
+from pydantic_ai_skills import LocalSkillScriptExecutor, SkillsDirectory, SkillsToolset
 
 # Default timeout: 30 seconds
 toolset = SkillsToolset(directories=['./skills'])
 
-# Custom timeout: 60 seconds
-executor = LocalSkillScriptExecutor(script_timeout=60)
-
-# No timeout (use carefully!)
-# executor = LocalSkillScriptExecutor(script_timeout=None)
+# Custom timeout: 60 seconds. The timeout lives on the executor, so build the
+# SkillsDirectory yourself and pass it to the toolset.
+executor = LocalSkillScriptExecutor(timeout=60)
+toolset = SkillsToolset(
+    directories=[SkillsDirectory(path='./skills', script_executor=executor)]
+)
 ```
+
+Timeouts are always enforced; there is no way to disable them.
 
 ### Timeout Patterns
 

@@ -17,8 +17,8 @@ from fnmatch import fnmatch
 from pathlib import Path
 
 from ._parsing import parse_skill_md, validate_skill_metadata
+from .executors import SkillScriptExecutor
 from .local import (
-    CallableSkillScriptExecutor,
     LocalSkillScriptExecutor,
     create_file_based_resource,
     create_file_based_script,
@@ -230,7 +230,7 @@ def _find_skill_files(root_dir: Path, max_depth: int | None) -> list[Path]:
 def _discover_scripts(
     skill_folder: Path,
     skill_name: str,
-    executor: LocalSkillScriptExecutor | CallableSkillScriptExecutor,
+    executor: SkillScriptExecutor,
 ) -> list[SkillScript]:
     """Discover executable scripts in a skill folder.
 
@@ -274,7 +274,7 @@ def discover_skills(
     path: str | Path,
     validate: bool = True,
     max_depth: int | None = 3,
-    script_executor: LocalSkillScriptExecutor | CallableSkillScriptExecutor | None = None,
+    script_executor: SkillScriptExecutor | None = None,
     exclude_resources: Iterable[str] | None = None,
 ) -> list[Skill]:
     """Discover skills from a filesystem directory.
@@ -336,8 +336,9 @@ class SkillsDirectory:
     Discovers and loads skills from a local directory by finding SKILL.md files
     and automatically discovering associated resources and scripts.
 
-    File-based scripts are executed using the configured script executor
-    (LocalSkillScriptExecutor or CallableSkillScriptExecutor).
+    File-based scripts are executed using the configured script executor, any
+    object implementing the
+    [`SkillScriptExecutor`][pydantic_ai_skills.SkillScriptExecutor] protocol.
     """
 
     def __init__(
@@ -346,7 +347,7 @@ class SkillsDirectory:
         path: str | Path,
         validate: bool = True,
         max_depth: int | None = 3,
-        script_executor: LocalSkillScriptExecutor | CallableSkillScriptExecutor | None = None,
+        script_executor: SkillScriptExecutor | None = None,
         exclude_resources: Iterable[str] | None = None,
     ) -> None:
         """Initialize the skills directory source.
@@ -356,7 +357,8 @@ class SkillsDirectory:
             validate: Validate skill structure on discovery.
             max_depth: Maximum depth for skill discovery (None for unlimited).
             script_executor: Optional custom script executor for file-based scripts.
-                Can be LocalSkillScriptExecutor or CallableSkillScriptExecutor.
+                Any object implementing the
+                [`SkillScriptExecutor`][pydantic_ai_skills.SkillScriptExecutor] protocol.
                 If None, uses LocalSkillScriptExecutor with default settings.
             exclude_resources: Extra glob patterns to exclude from resource discovery,
                 in addition to the built-in :data:`DEFAULT_RESOURCE_EXCLUDES`. None for
@@ -376,7 +378,7 @@ class SkillsDirectory:
             # With callable executor
             from pydantic_ai_skills import CallableSkillScriptExecutor
 
-            async def my_executor(script, args=None, skill_uri=None):
+            async def my_executor(script, args=None):
                 return f"Executed {script.name}"
 
             executor = CallableSkillScriptExecutor(func=my_executor)
