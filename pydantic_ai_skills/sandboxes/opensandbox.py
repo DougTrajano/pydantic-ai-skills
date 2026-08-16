@@ -259,7 +259,10 @@ class OpenSandboxScriptExecutor:
             )
         finally:
             if not self._reuse_sandbox:
-                await sandbox.kill()
+                # Shielded: a cancelled scope would cancel this await too, leaking
+                # the container until its server-side lifetime expires.
+                with anyio.CancelScope(shield=True):
+                    await sandbox.kill()
 
         stdout = ''.join(message.text for message in execution.logs.stdout)
         stderr = ''.join(message.text for message in execution.logs.stderr)

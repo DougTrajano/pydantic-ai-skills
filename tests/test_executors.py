@@ -934,3 +934,38 @@ async def test_reused_opensandbox_creates_one_container_under_concurrency(
 
     assert _SlowOpenSandbox.created == 1, 'a duplicate container was created and leaked'
     assert executor._sandbox is not None
+
+
+class _HangingOpenSandbox(_SlowOpenSandbox):
+    """Blocks inside command execution so the run can be cancelled mid-flight."""
+
+    async def _run(self, command: str, opts: Any = None) -> Any:
+        await anyio.sleep_forever()
+
+    async def kill(self) -> None:
+        # A real kill() is a network round trip, so it contains a checkpoint.
+        # Without one, cancellation would never get a chance to interrupt it and
+        # this test would pass even with the shield removed.
+        await anyio.lowlevel.checkpoint()
+        self.killed = True
+
+
+async def test_opensandbox_kills_container_even_when_cancelled(
+    runnable_skill: Path, monkeypatch: pytest.MonkeyPatch, fake_opensandbox_models: None
+) -> None:
+    """Cleanup must survive cancellation, or the container leaks until it expires."""
+    monkeypatch.setattr(_HangingOpenSandbox, 'created', 0)
+    sandboxes: list[_HangingOpenSandbox] = []
+
+    async def create(image: str, env: Any = None, timeout: Any = None) -> _HangingOpenSandbox:
+        sandbox = _HangingOpenSandbox()
+        sandboxes.append(sandbox)
+        return sandbox
+
+    monkeypatch.setattr(opensandbox_module, '_require_opensandbox', lambda: SimpleNamespace(create=create))
+    executor = OpenSandboxScriptExecutor()
+
+    with anyio.move_on_after(0.05):
+        await executor.run(_script_in(runnable_skill, 'scripts/run.py'))
+
+    assert sandboxes and sandboxes[0].killed, 'a cancelled run must still tear its container down'
