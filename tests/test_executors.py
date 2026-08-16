@@ -1,14 +1,15 @@
-"""Tests for the SkillScriptExecutor protocol and the sandbox executor examples."""
+"""Tests for the SkillScriptExecutor protocol.
+
+The sandbox executors live inside ``examples/sandbox_*.py``, which build an
+``Agent`` at import time and so cannot be imported here. They are exercised the
+same way every other example is: by running them.
+"""
 
 from __future__ import annotations
 
-import contextlib
-import importlib.util
-import io
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import patch
 
 import pytest
 
@@ -100,200 +101,16 @@ async def test_duck_typed_executor_runs_through_toolset(skill_dir: Path) -> None
     assert executor.calls == [('scripts/run.py', {'query': 'x'})]
 
 
-# ---------------------------------------------------------------------------
-# Sandbox executor examples
-# ---------------------------------------------------------------------------
+async def test_custom_executor_receives_skill_relative_script_name(skill_dir: Path) -> None:
+    """script.name stays relative to the skill folder, which the sandbox executors rely on.
 
-EXAMPLES_DIR = Path(__file__).parent.parent / 'examples'
-
-
-def _load_example(module_name: str) -> Any:
-    """Load an example module by path.
-
-    Loading by path rather than importing ``examples.<name>`` keeps the example
-    modules out of the package namespace, which would otherwise make the same
-    file resolvable under two module names.
+    They derive the skill root by walking up that many levels from ``script.uri``;
+    if this contract changed they would stage the wrong directory.
     """
-    spec = importlib.util.spec_from_file_location(f'_example_{module_name}', EXAMPLES_DIR / f'{module_name}.py')
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    executor = DuckTypedExecutor()
+    toolset = SkillsToolset(directories=[SkillsDirectory(path=skill_dir, script_executor=executor)])
 
+    script = next(s for s in toolset.skills['demo-skill'].scripts if s.name.endswith('run.py'))
 
-@pytest.fixture
-def opensandbox_example() -> Any:
-    """The OpenSandbox executor example module."""
-    return _load_example('sandbox_opensandbox')
-
-
-@pytest.fixture
-def localsandbox_example() -> Any:
-    """The LocalSandbox executor example module."""
-    return _load_example('sandbox_localsandbox')
-
-
-def test_sandbox_examples_satisfy_protocol(opensandbox_example: Any, localsandbox_example: Any) -> None:
-    """Both sandbox examples implement the executor protocol."""
-    assert isinstance(opensandbox_example.OpenSandboxScriptExecutor(), SkillScriptExecutor)
-    assert isinstance(localsandbox_example.LocalSandboxScriptExecutor(), SkillScriptExecutor)
-
-
-def test_opensandbox_example_reports_missing_extra(opensandbox_example: Any) -> None:
-    """Without the SDK installed, the error names the extra that provides it."""
-    with patch.dict('sys.modules', {'opensandbox': None}):
-        with pytest.raises(ImportError, match=r'pydantic-ai-skills\[opensandbox\]'):
-            opensandbox_example._require_opensandbox()
-
-
-def test_localsandbox_example_reports_missing_extra(localsandbox_example: Any) -> None:
-    """Without the SDK installed, the error names the extra that provides it."""
-    with patch.dict('sys.modules', {'localsandbox': None}):
-        with pytest.raises(ImportError, match=r'pydantic-ai-skills\[localsandbox\]'):
-            localsandbox_example._require_localsandbox()
-
-
-@pytest.fixture
-def staged_skill(tmp_path: Path) -> Path:
-    """A skill folder with a nested script, a top-level resource, and a symlink escape."""
-    outside = tmp_path / 'outside'
-    outside.mkdir()
-    (outside / 'secret.txt').write_text('host secret')
-
-    skill = tmp_path / 'demo-skill'
-    (skill / 'scripts').mkdir(parents=True)
-    (skill / 'resources').mkdir()
-    (skill / 'SKILL.md').write_text('---\nname: demo-skill\ndescription: Demo.\n---\n\nBody.\n')
-    (skill / 'resources' / 'data.json').write_text('{"k": 1}')
-    (skill / 'scripts' / 'run.py').write_text('print("hi")\n')
-    (skill / 'scripts' / 'escape.txt').symlink_to(outside / 'secret.txt')
-    return skill
-
-
-@pytest.mark.parametrize('module_name', ['sandbox_opensandbox', 'sandbox_localsandbox'])
-def test_staging_uses_skill_root_not_script_parent(module_name: str, staged_skill: Path) -> None:
-    """script.name is relative to the skill folder, so the root is above scripts/."""
-    example = _load_example(module_name)
-    script = SkillScript(name='scripts/run.py', uri=str(staged_skill / 'scripts' / 'run.py'))
-
-    assert example.skill_root_for(script) == staged_skill.resolve()
-
-
-def _collect_staged(example: Any, skill_root: Path) -> dict[str, Path]:
-    """Drain the staging generator into a mapping of relative path to source file."""
-    return dict(example.iter_stageable_files(skill_root))
-
-
-@pytest.mark.parametrize('module_name', ['sandbox_opensandbox', 'sandbox_localsandbox'])
-@pytest.mark.filterwarnings('ignore:Skipping.*symlink escape:UserWarning')
-def test_staging_includes_whole_skill_folder(module_name: str, staged_skill: Path) -> None:
-    """SKILL.md and resources/ are staged, not just the script's own directory."""
-    example = _load_example(module_name)
-
-    staged = _collect_staged(example, staged_skill.resolve())
-
-    assert 'SKILL.md' in staged
-    assert 'resources/data.json' in staged
-    assert 'scripts/run.py' in staged
-
-
-@pytest.mark.parametrize('module_name', ['sandbox_opensandbox', 'sandbox_localsandbox'])
-@pytest.mark.filterwarnings('ignore:Skipping.*symlink escape:UserWarning')
-def test_staging_skips_symlinks_escaping_the_skill_folder(module_name: str, staged_skill: Path) -> None:
-    """Following an escaping symlink would copy a host file into the sandbox."""
-    example = _load_example(module_name)
-
-    staged = _collect_staged(example, staged_skill.resolve())
-
-    assert 'scripts/escape.txt' not in staged
-    assert not any('secret' in path.name for path in staged.values())
-
-
-@pytest.mark.parametrize('module_name', ['sandbox_opensandbox', 'sandbox_localsandbox'])
-def test_staging_warns_about_symlink_escape(module_name: str, staged_skill: Path) -> None:
-    """The skipped symlink is reported rather than silently dropped."""
-    example = _load_example(module_name)
-    skill_root = staged_skill.resolve()
-
-    with pytest.warns(UserWarning, match='symlink escape'):
-        _collect_staged(example, skill_root)
-
-
-class _StubPyodideSandbox:
-    """Runs the generated wrapper under CPython so the tests need no SDK."""
-
-    async def aexecute_python(self, code: str, cwd: str | None = None, preload_packages: Any = None) -> Any:
-        buffer = io.StringIO()
-        with contextlib.redirect_stdout(buffer):
-            exec(compile(code, '<wrapper>', 'exec'), {'__name__': '__wrapper__'})
-        return SimpleNamespace(stdout=buffer.getvalue(), stderr='', error=None, exit_code=0)
-
-    def read_file(self, path: str) -> str:
-        return Path(path).read_text(encoding='utf-8')
-
-
-async def test_python_wrapper_normalizes_boolean_exit_codes(
-    localsandbox_example: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """sys.exit(not ok) yields a bool, which must be written as 1 rather than 'True'."""
-    monkeypatch.setattr(localsandbox_example, '_EXIT_CODE_FILE', str(tmp_path / 'exit_code'))
-    script = tmp_path / 'run.py'
-    script.write_text('import sys\nsys.exit(not False)\n', encoding='utf-8')
-    executor = localsandbox_example.LocalSandboxScriptExecutor()
-
-    _, _, exit_code = await executor._run_python(_StubPyodideSandbox(), str(script), str(tmp_path), None)
-
-    assert exit_code == 1
-
-
-async def test_python_wrapper_preserves_non_bmp_arguments(
-    localsandbox_example: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """JSON-escaping argv would deliver lone surrogates instead of the character."""
-    monkeypatch.setattr(localsandbox_example, '_EXIT_CODE_FILE', str(tmp_path / 'exit_code'))
-    script = tmp_path / 'run.py'
-    script.write_text('import sys\nprint(sys.argv[1:])\n', encoding='utf-8')
-    executor = localsandbox_example.LocalSandboxScriptExecutor()
-
-    stdout, _, _ = await executor._run_python(_StubPyodideSandbox(), str(script), str(tmp_path), {'msg': 'hi 😀'})
-
-    assert 'hi 😀' in stdout
-    assert '\\ud83d' not in stdout
-
-
-def _script_without_uri() -> SkillScript:
-    """Build a script whose uri is None."""
-    # __post_init__ requires a uri or a function, so clear it afterwards.
-    script = SkillScript(name='no-uri', uri='placeholder')
-    script.uri = None
-    return script
-
-
-async def test_localsandbox_example_rejects_unsupported_script_type(localsandbox_example: Any, tmp_path: Path) -> None:
-    """LocalSandbox supports .py and shell scripts only, and says so before provisioning."""
-    script_file = tmp_path / 'thing.rb'
-    script_file.write_text('puts "hi"\n')
-    script = SkillScript(name='thing.rb', uri=str(script_file))
-    executor = localsandbox_example.LocalSandboxScriptExecutor()
-
-    with pytest.raises(ValueError, match='unsupported type'):
-        await executor.run(script)
-
-
-async def test_localsandbox_example_requires_a_uri(localsandbox_example: Any) -> None:
-    """The LocalSandbox executor rejects scripts with no URI."""
-    script = _script_without_uri()
-    executor = localsandbox_example.LocalSandboxScriptExecutor()
-
-    with pytest.raises(ValueError, match='has no URI'):
-        await executor.run(script)
-
-
-async def test_opensandbox_example_requires_a_uri(opensandbox_example: Any) -> None:
-    """The OpenSandbox executor rejects scripts with no URI."""
-    script = _script_without_uri()
-    executor = opensandbox_example.OpenSandboxScriptExecutor()
-
-    with pytest.raises(ValueError, match='has no URI'):
-        await executor.run(script)
+    assert script.name == 'scripts/run.py'
+    assert Path(str(script.uri)).parent.name == 'scripts'

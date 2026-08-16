@@ -1,55 +1,24 @@
-"""Run skill scripts inside a LocalSandbox virtual filesystem.
+"""Example running skill scripts inside a LocalSandbox virtual filesystem.
 
-Implements the [`SkillScriptExecutor`][pydantic_ai_skills.SkillScriptExecutor]
-protocol on top of [LocalSandbox](https://github.com/coplane/localsandbox), which
-combines just-bash and Pyodide over a SQLite-backed virtual filesystem. Nothing
-runs against the host filesystem, and no container runtime is required.
+This example shows how to create an agent whose skill scripts execute in a
+[LocalSandbox](https://github.com/coplane/localsandbox) virtual filesystem
+(just-bash + Pyodide, no container runtime) rather than a local subprocess.
+Only the `script_executor=` argument differs from `basic_usage_capability.py`.
 
-Requirements:
-    pip install "pydantic-ai-skills[localsandbox]"
+Requires `pip install -e ".[examples,localsandbox]"`.
 
-Two execution paths, because LocalSandbox has no CPython binary on ``PATH``:
+The executor stages the whole skill folder — `SKILL.md`, `resources/`,
+`scripts/` — and runs the script with its own directory as the working
+directory, so relative paths resolve exactly as they do locally. Symlinks
+resolving outside the skill folder are skipped, so staging cannot pull host
+files into the sandbox. Output is formatted like local execution, so switching
+backends does not change what the model sees.
 
-- **Shell scripts** (``.sh``, ``.bash``) run through ``abash`` with the usual
-  ``--flag value`` argv.
-- **Python scripts** (``.py``) run through ``aexecute_python`` (Pyodide). Since
-  Pyodide has no ``sys.argv``, this executor injects one and executes the staged
-  file with ``runpy.run_path(..., run_name='__main__')``, so ``argparse`` and
-  ``if __name__ == '__main__'`` behave normally. ``sys.exit(N)`` is captured and
-  reported as the exit code.
-
-Limitations worth knowing before pointing this at real skills:
-
-- Pyodide ships a subset of the ecosystem. Scripts importing third-party packages
-  not available as Pyodide wheels will fail; use ``preload_packages`` where it helps.
-- Subprocesses, sockets, and host filesystem access are unavailable by design.
-- ``abash`` accepts no per-command timeout or environment; use ``preset`` to pick
-  an execution limit profile (``STRICT``, ``NORMAL``, ``PERMISSIVE``).
-
-Lifecycle: a fresh sandbox is created per run and closed afterwards. Pass
-``reuse_sandbox=True`` to keep one warm across runs — faster, but runs share
-state. A reused sandbox is rebuilt automatically when the skill changes, since
-one executor instance serves every skill in a ``SkillsDirectory``.
-
-Staging: the whole skill folder is copied in — ``SKILL.md``, ``resources/``,
-``scripts/`` and anything else — and the script runs with its own directory as
-the working directory, so sibling modules and ``../resources/data.json`` resolve
-exactly as they do locally. Symlinks resolving outside the skill folder are
-skipped with a warning, so staging cannot pull host files into the sandbox.
-
-Running this example:
-    ```bash
-    pip install -e ".[examples,localsandbox]"
-    python -m examples.sandbox_localsandbox
-    ```
-
-It writes a small stdlib-only demo skill under ``examples/tmp/``, wires it to an
-agent through ``SkillsCapability``, and serves the agent on
-http://127.0.0.1:7932. Ask it to inspect the sandbox and compare the answer with
-your own machine — the paths and the visible filesystem belong to the sandbox.
-
-The bundled ``examples/skills`` are not used here on purpose: they import
-third-party packages such as ``arxiv``, which Pyodide has no wheels for.
+Note:
+    Pyodide has no sockets and only a subset of the ecosystem, so the bundled
+    `arxiv-search` script cannot run here — it needs the `arxiv` package and
+    network access. The resource-only skills (`pydanticai-docs`, `web-research`)
+    work normally, since resources are read on the host.
 """
 
 from __future__ import annotations
@@ -60,6 +29,9 @@ from collections.abc import Iterator
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
+import logfire
+import uvicorn
+from dotenv import load_dotenv
 from pydantic_ai import Agent
 
 from pydantic_ai_skills import (
@@ -69,10 +41,6 @@ from pydantic_ai_skills import (
     SkillScriptExecutor,
     SkillsDirectory,
 )
-
-EXAMPLES_DIR = Path(__file__).parent
-TMP_DIR = EXAMPLES_DIR / 'tmp'
-SKILL_DIR = TMP_DIR / 'sandbox-demo-skill'
 
 if TYPE_CHECKING:
     from localsandbox import LocalSandbox
@@ -125,6 +93,29 @@ def iter_stageable_files(skill_root: Path) -> Iterator[tuple[str, Path]]:
             yield path.relative_to(skill_root).as_posix(), resolved
 
 
+def _stage_snapshot(skill_root: Path) -> tuple[list[tuple[str, Path]], tuple[tuple[str, int, int], ...]]:
+    """Walk the skill folder once, returning its files and a change fingerprint.
+
+    The fingerprint covers every staged path with its size and modification
+    time, so a reused sandbox can tell whether the source skill was edited since
+    it was staged — ``auto_reload`` and ``reload()`` both surface edits under an
+    unchanged skill root.
+
+    Args:
+        skill_root: Resolved path to the skill folder.
+
+    Returns:
+        The staged ``(relative, resolved)`` pairs and their fingerprint.
+    """
+    entries: list[tuple[str, Path]] = []
+    fingerprint: list[tuple[str, int, int]] = []
+    for relative, resolved in iter_stageable_files(skill_root):
+        entries.append((relative, resolved))
+        stat = resolved.stat()
+        fingerprint.append((relative, stat.st_size, stat.st_mtime_ns))
+    return entries, tuple(fingerprint)
+
+
 _SHELL_INTERPRETERS: dict[str, list[str]] = {
     '.sh': ['sh'],
     '.bash': ['bash'],
@@ -167,6 +158,15 @@ def _require_localsandbox() -> Any:
 class LocalSandboxScriptExecutor(SkillScriptExecutor):
     """Execute file-based skill scripts inside a LocalSandbox virtual filesystem.
 
+    LocalSandbox has no CPython binary on ``PATH``, so there are two paths:
+    shell scripts run through ``abash``, and ``.py`` scripts run through
+    ``aexecute_python`` (Pyodide) with an injected ``sys.argv`` and
+    ``runpy.run_path(..., run_name='__main__')``, so ``argparse`` and
+    ``if __name__ == '__main__'`` behave normally.
+
+    Pyodide ships a subset of the ecosystem and has no sockets or subprocesses,
+    so scripts needing third-party wheels or network access will fail here.
+
     Attributes:
         workdir: Directory inside the sandbox that the skill folder is staged into.
     """
@@ -195,31 +195,30 @@ class LocalSandboxScriptExecutor(SkillScriptExecutor):
         self._reuse_sandbox = reuse_sandbox
         self._sandbox: LocalSandbox | None = None
         self._staged_root: Path | None = None
+        self._staged_fingerprint: tuple[tuple[str, int, int], ...] | None = None
         # Reused for its host-independent argument marshalling and output formatting.
         self._formatter = LocalSkillScriptExecutor()
-
-    def _stage_files(self, skill_root: Path) -> dict[str, str | bytes]:
-        """Map every stageable file in the skill folder to its path inside the sandbox."""
-        return {
-            f'{self.workdir}/{relative}': resolved.read_bytes()
-            for relative, resolved in iter_stageable_files(skill_root)
-        }
 
     def _get_sandbox(self, skill_root: Path) -> LocalSandbox:
         """Return the sandbox to run in, creating and staging one when needed.
 
         Staging happens at construction, so a reused sandbox is rebuilt whenever
-        the skill changes. One executor instance serves every skill in a
-        ``SkillsDirectory``, and without this the second skill would find the
-        first skill's files still in place.
+        the skill changes — either a different skill (one executor instance
+        serves every skill in a ``SkillsDirectory``) or edited files under the
+        same root, which ``auto_reload`` and ``reload()`` both surface.
         """
+        entries, fingerprint = _stage_snapshot(skill_root)
+
         if self._reuse_sandbox and self._sandbox is not None:
-            if self._staged_root == skill_root:
+            if self._staged_root == skill_root and self._staged_fingerprint == fingerprint:
                 return self._sandbox
             self.close()
 
         sandbox_cls = _require_localsandbox()
-        kwargs: dict[str, Any] = {'files': self._stage_files(skill_root), 'cwd': self.workdir}
+        files: dict[str, str | bytes] = {
+            f'{self.workdir}/{relative}': resolved.read_bytes() for relative, resolved in entries
+        }
+        kwargs: dict[str, Any] = {'files': files, 'cwd': self.workdir}
         if self._preset is not None:
             kwargs['preset'] = self._preset
 
@@ -227,6 +226,7 @@ class LocalSandboxScriptExecutor(SkillScriptExecutor):
         if self._reuse_sandbox:
             self._sandbox = sandbox
             self._staged_root = skill_root
+            self._staged_fingerprint = fingerprint
         return sandbox
 
     async def _run_python(
@@ -338,118 +338,30 @@ class LocalSandboxScriptExecutor(SkillScriptExecutor):
             self._sandbox.__exit__(None, None, None)
             self._sandbox = None
             self._staged_root = None
+            self._staged_fingerprint = None
 
 
-# ---------------------------------------------------------------------------
-# Demo agent
-# ---------------------------------------------------------------------------
+load_dotenv()
 
-_SKILL_MD = """---
-name: sandbox-demo
-description: Inspect the environment that skill scripts execute in. Use this skill whenever the user asks where scripts run, what the sandbox looks like, or to prove that execution is isolated from the host machine.
----
+logfire.configure()
+logfire.instrument_pydantic_ai()
 
-# Sandbox demo
+# Get the skills directory (examples/skills)
+skills_dir = Path(__file__).parent / 'skills'
 
-Run `scripts/inspect_sandbox.py` to report the interpreter, platform, working
-directory and visible files of whatever environment the script executes in.
+# Initialize Skills Capability with skill scripts sandboxed via LocalSandbox
+skills_capability = SkillsCapability(
+    directories=[SkillsDirectory(path=skills_dir, script_executor=LocalSandboxScriptExecutor())],
+)
 
-Pass `--show-config` to also read `resources/config.json`, which lives at the
-skill root rather than next to the script. It only resolves when the whole
-skill folder was made available to the script.
-"""
+# Create agent with skills capability
+agent = Agent(
+    model='gateway/openai:gpt-5.2',
+    instructions='You are a helpful research assistant.',
+    capabilities=[skills_capability],
+)
 
-_INSPECT_SCRIPT = '''#!/usr/bin/env python3
-"""Report where this script is really running."""
-
-import argparse
-import json
-import platform
-import sys
-from pathlib import Path
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description='Inspect the execution environment.')
-    parser.add_argument('--label', default='sandbox-demo')
-    parser.add_argument('--show-config', action='store_true')
-    args = parser.parse_args()
-
-    script_dir = Path(__file__).resolve().parent
-    report = {
-        'label': args.label,
-        'python_version': platform.python_version(),
-        'platform': sys.platform,
-        'cwd': str(Path.cwd()),
-        'script_dir': str(script_dir),
-        'files_next_to_script': sorted(p.name for p in script_dir.iterdir()),
-    }
-
-    if args.show_config:
-        # Lives at the skill root, one level up from scripts/.
-        config = script_dir.parent / 'resources' / 'config.json'
-        report['config'] = json.loads(config.read_text(encoding='utf-8'))
-
-    print(json.dumps(report, indent=2))
-
+app = agent.to_web()
 
 if __name__ == '__main__':
-    main()
-'''
-
-_CONFIG_JSON = '{\n  "environment": "sandbox-demo",\n  "answer": 42\n}\n'
-
-
-def write_demo_skill() -> Path:
-    """Create a self-contained, stdlib-only demo skill under ``examples/tmp/``.
-
-    The script lives in ``scripts/`` while its config lives in ``resources/``,
-    so a run only succeeds when the whole skill folder reaches the sandbox.
-
-    Returns:
-        Path to the demo skill directory.
-    """
-    (SKILL_DIR / 'scripts').mkdir(parents=True, exist_ok=True)
-    (SKILL_DIR / 'resources').mkdir(parents=True, exist_ok=True)
-
-    (SKILL_DIR / 'SKILL.md').write_text(_SKILL_MD, encoding='utf-8')
-    (SKILL_DIR / 'scripts' / 'inspect_sandbox.py').write_text(_INSPECT_SCRIPT, encoding='utf-8')
-    (SKILL_DIR / 'resources' / 'config.json').write_text(_CONFIG_JSON, encoding='utf-8')
-    return SKILL_DIR
-
-
-def build_agent(model: str = 'gateway/openai:gpt-5.2') -> Agent:
-    """Build an agent whose skill scripts execute inside LocalSandbox.
-
-    Args:
-        model: Model identifier passed to :class:`~pydantic_ai.Agent`.
-
-    Returns:
-        Configured agent with skills wired to the sandbox executor.
-    """
-    executor = LocalSandboxScriptExecutor()
-    skills = SkillsCapability(directories=[SkillsDirectory(path=TMP_DIR, script_executor=executor)])
-
-    return Agent(
-        model=model,
-        instructions=(
-            'You are a demo assistant for sandboxed skill execution. '
-            'When asked about the execution environment, run the sandbox-demo skill '
-            'and report exactly what it prints.'
-        ),
-        capabilities=[skills],
-    )
-
-
-if __name__ == '__main__':
-    # Imported here so the executor above stays importable without the examples extra.
-    import logfire
-    import uvicorn
-    from dotenv import load_dotenv
-
-    load_dotenv()
-    logfire.configure()
-    logfire.instrument_pydantic_ai()
-
-    write_demo_skill()
-    uvicorn.run(build_agent().to_web(), host='127.0.0.1', port=7932)
+    uvicorn.run(app, host='127.0.0.1', port=7932)
