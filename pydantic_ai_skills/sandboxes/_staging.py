@@ -7,6 +7,7 @@ much and a script can read files it should not see.
 
 from __future__ import annotations
 
+import os
 import warnings
 from collections.abc import Iterator
 from pathlib import Path, PurePosixPath
@@ -15,7 +16,17 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pydantic_ai_skills.types import SkillScript
 
-__all__ = ['iter_stageable_files', 'skill_root_for']
+__all__ = ['EXCLUDED_STAGING_DIRS', 'iter_stageable_files', 'skill_root_for']
+
+# Directories never copied into a sandbox.
+#
+# Version-control metadata is the important entry: a registry skill whose
+# SKILL.md sits at the repository root makes the clone root the skill root, and
+# GitSkillsRegistry clones with a token-bearing URL, so .git/config holds the
+# caller's PAT. Staging it would hand that token to any script the sandbox runs.
+# Discovery already excludes .git from resources for the same reason (see
+# DEFAULT_RESOURCE_EXCLUDES in pydantic_ai_skills.directory).
+EXCLUDED_STAGING_DIRS = frozenset({'.git', '.hg', '.svn', '.bzr', '__pycache__'})
 
 
 def skill_root_for(script: SkillScript) -> Path:
@@ -49,10 +60,13 @@ def skill_root_for(script: SkillScript) -> Path:
 def iter_stageable_files(skill_root: Path) -> Iterator[tuple[str, Path]]:
     """Yield ``(relative_posix_path, resolved_file)`` for files safe to stage.
 
-    Symlinks that resolve outside ``skill_root`` are skipped with a warning.
-    Discovery already rejects those, but staging re-walks the folder, and
-    following such a link would copy an arbitrary host file into the sandbox
-    where the script could read it back out.
+    Two things are filtered out:
+
+    - :data:`EXCLUDED_STAGING_DIRS`, most importantly version-control metadata,
+      which can hold the credentials a registry cloned with.
+    - Symlinks resolving outside ``skill_root``. Discovery already rejects those,
+      but staging re-walks the folder, and following such a link would copy an
+      arbitrary host file into the sandbox where the script could read it back out.
 
     Args:
         skill_root: Resolved path to the skill folder.
@@ -60,17 +74,22 @@ def iter_stageable_files(skill_root: Path) -> Iterator[tuple[str, Path]]:
     Yields:
         Tuples of the path relative to ``skill_root`` and the resolved file.
     """
-    for path in sorted(skill_root.rglob('*')):
-        resolved = path.resolve()
-        if not resolved.is_relative_to(skill_root):
-            warnings.warn(
-                f"Skipping '{path}': resolves outside the skill folder (symlink escape detected).",
-                UserWarning,
-                stacklevel=2,
-            )
-            continue
-        if resolved.is_file():
-            yield path.relative_to(skill_root).as_posix(), resolved
+    for dirpath, dirnames, filenames in os.walk(skill_root):
+        # Pruned in place so os.walk never descends into them.
+        dirnames[:] = sorted(name for name in dirnames if name not in EXCLUDED_STAGING_DIRS)
+
+        for filename in sorted(filenames):
+            path = Path(dirpath) / filename
+            resolved = path.resolve()
+            if not resolved.is_relative_to(skill_root):
+                warnings.warn(
+                    f"Skipping '{path}': resolves outside the skill folder (symlink escape detected).",
+                    UserWarning,
+                    stacklevel=2,
+                )
+                continue
+            if resolved.is_file():
+                yield path.relative_to(skill_root).as_posix(), resolved
 
 
 def _stage_snapshot(skill_root: Path) -> tuple[list[tuple[str, Path]], tuple[tuple[str, int, int], ...]]:

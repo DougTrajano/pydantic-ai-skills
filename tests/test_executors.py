@@ -613,7 +613,7 @@ async def test_localsandbox_run_executes_shell_script(runnable_skill: Path, monk
 
     output = await executor.run(_script_in(runnable_skill, 'scripts/go.sh'), {'query': 'x'})
 
-    assert created[0].command == 'sh /data/skill/scripts/go.sh --query x'
+    assert created[0].command == 'cd /data/skill/scripts && sh /data/skill/scripts/go.sh --query x'
     assert output == 'hello\n\n\nStderr:\nwarned'
     assert created[0].closed, 'a non-reused sandbox is closed after the run'
 
@@ -669,3 +669,79 @@ async def test_localsandbox_close_releases_reused_sandbox(
     assert sandbox.closed
     assert executor._sandbox is None
     assert executor._staged_fingerprint is None
+
+
+# ---------------------------------------------------------------------------
+# Version-control metadata must never reach the sandbox
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def cloned_skill(tmp_path: Path) -> Path:
+    """A skill whose SKILL.md sits at a clone root, so .git is inside the skill root."""
+    clone = tmp_path / 'clone'
+    (clone / '.git').mkdir(parents=True)
+    (clone / 'scripts').mkdir()
+    (clone / 'SKILL.md').write_text('---\nname: root-skill\ndescription: At the clone root.\n---\n\nBody.\n')
+    (clone / 'scripts' / 'run.py').write_text('print("hi")\n')
+    (clone / '.git' / 'config').write_text(
+        '[remote "origin"]\n\turl = https://oauth2:ghp_SECRETTOKEN@github.com/acme/skills.git\n'
+    )
+    return clone
+
+
+def test_staging_excludes_version_control_metadata(cloned_skill: Path) -> None:
+    """GitSkillsRegistry clones with a token-bearing URL, which git stores in .git/config.
+
+    Staging that would hand the caller's PAT to any script the sandbox runs.
+    """
+    staged = _collect_staged(cloned_skill.resolve())
+
+    assert sorted(staged) == ['SKILL.md', 'scripts/run.py']
+    assert not any(path.startswith('.git/') for path in staged)
+    assert not any('ghp_SECRETTOKEN' in source.read_text(errors='ignore') for source in staged.values())
+
+
+def test_staging_excludes_are_pruned_not_just_filtered(cloned_skill: Path) -> None:
+    """Nested files under an excluded directory are skipped too, without descending."""
+    deep = cloned_skill / '.git' / 'objects' / 'ab'
+    deep.mkdir(parents=True)
+    (deep / 'cdef').write_bytes(b'object data')
+
+    staged = _collect_staged(cloned_skill.resolve())
+
+    assert not any('.git' in path for path in staged)
+
+
+def test_pycache_is_not_staged(cloned_skill: Path) -> None:
+    """__pycache__ is noise in a sandbox and is already excluded from resources."""
+    cache = cloned_skill / 'scripts' / '__pycache__'
+    cache.mkdir()
+    (cache / 'run.cpython-313.pyc').write_bytes(b'\x00')
+
+    staged = _collect_staged(cloned_skill.resolve())
+
+    assert not any('__pycache__' in path for path in staged)
+
+
+async def test_localsandbox_shell_script_runs_from_its_own_directory(
+    runnable_skill: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Abash takes no cwd, so the command must change directory itself.
+
+    Without this a shell script reading ../resources/data.json resolves it
+    differently than under LocalSkillScriptExecutor.
+    """
+    created: list[_FakeLocalSandboxRun] = []
+
+    def factory(**kwargs: Any) -> _FakeLocalSandboxRun:
+        sandbox = _FakeLocalSandboxRun(**kwargs)
+        created.append(sandbox)
+        return sandbox
+
+    monkeypatch.setattr(localsandbox_module, '_require_localsandbox', lambda: factory)
+    executor = LocalSandboxScriptExecutor(workdir='/data/skill')
+
+    await executor.run(_script_in(runnable_skill, 'scripts/go.sh'))
+
+    assert (created[0].command or '').startswith('cd /data/skill/scripts && ')

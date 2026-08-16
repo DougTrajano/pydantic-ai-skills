@@ -176,17 +176,22 @@ class LocalSandboxScriptExecutor:
         return result.stdout or '', stderr, exit_code
 
     async def _run_shell(
-        self, sandbox: LocalSandbox, remote_path: str, suffix: str, args: dict[str, Any] | None
+        self, sandbox: LocalSandbox, remote_path: str, cwd: str, suffix: str, args: dict[str, Any] | None
     ) -> tuple[str, str, int]:
-        """Run a shell script through just-bash."""
+        """Run a shell script through just-bash from the script's own directory."""
         from localsandbox import CommandError
 
         cmd = [*_SHELL_INTERPRETERS[suffix], remote_path]
         if args:
             self._formatter._build_args(cmd, args)
 
+        # abash takes no cwd, so change directory as part of the command; without
+        # this a script reading ../resources/data.json would resolve it differently
+        # than under LocalSkillScriptExecutor.
+        command = f'cd {shlex.quote(cwd)} && {shlex.join(cmd)}'
+
         try:
-            result = await sandbox.abash(shlex.join(cmd))
+            result = await sandbox.abash(command)
         except CommandError as exc:
             # abash raises on non-zero exit; surface it like local execution does.
             return exc.stdout, exc.stderr, exc.exit_code
@@ -237,7 +242,7 @@ class LocalSandboxScriptExecutor:
             if suffix == '.py':
                 stdout, stderr, exit_code = await self._run_python(sandbox, remote_path, cwd, args)
             else:
-                stdout, stderr, exit_code = await self._run_shell(sandbox, remote_path, suffix, args)
+                stdout, stderr, exit_code = await self._run_shell(sandbox, remote_path, cwd, suffix, args)
         finally:
             if not self._reuse_sandbox:
                 sandbox.__exit__(None, None, None)
