@@ -54,7 +54,6 @@ third-party packages such as ``arxiv``, which Pyodide has no wheels for.
 
 from __future__ import annotations
 
-import json
 import shlex
 import warnings
 from collections.abc import Iterator
@@ -142,7 +141,8 @@ try:
     runpy.run_path({script_path!r}, run_name='__main__')
 except SystemExit as exc:
     if isinstance(exc.code, int):
-        __skill_exit_code = exc.code
+        # int() also normalizes bool, so sys.exit(not ok) reports 1 rather than 'True'.
+        __skill_exit_code = int(exc.code)
     elif exc.code is not None:
         __skill_exit_code = 1
         print(exc.code, file=sys.stderr)
@@ -238,7 +238,9 @@ class LocalSandboxScriptExecutor(SkillScriptExecutor):
             self._formatter._build_args(argv, args)
 
         code = _PYTHON_WRAPPER.format(
-            argv=json.dumps(argv),
+            # repr, not json.dumps: JSON escapes non-BMP characters as UTF-16
+            # surrogate pairs, which become two lone surrogates in Python source.
+            argv=repr(argv),
             script_path=remote_path,
             exit_file=_EXIT_CODE_FILE,
         )
@@ -250,8 +252,11 @@ class LocalSandboxScriptExecutor(SkillScriptExecutor):
 
         stderr = result.stderr or ''
         if result.error:
-            # The wrapper never reached the exit-code file: report the Pyodide traceback.
-            return result.stdout or '', stderr or result.error, result.exit_code or 1
+            # The wrapper never reached the exit-code file. Pyodide usually mirrors the
+            # traceback into stderr already, so append rather than replace or duplicate.
+            if result.error not in stderr:
+                stderr = f'{stderr}\n{result.error}' if stderr else result.error
+            return result.stdout or '', stderr, result.exit_code or 1
 
         try:
             exit_code = int(sandbox.read_file(_EXIT_CODE_FILE))

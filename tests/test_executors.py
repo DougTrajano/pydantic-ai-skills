@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -216,6 +218,48 @@ def test_staging_warns_about_symlink_escape(module_name: str, staged_skill: Path
 
     with pytest.warns(UserWarning, match='symlink escape'):
         _collect_staged(example, skill_root)
+
+
+class _StubPyodideSandbox:
+    """Runs the generated wrapper under CPython so the tests need no SDK."""
+
+    async def aexecute_python(self, code: str, cwd: str | None = None, preload_packages: Any = None) -> Any:
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            exec(compile(code, '<wrapper>', 'exec'), {'__name__': '__wrapper__'})
+        return SimpleNamespace(stdout=buffer.getvalue(), stderr='', error=None, exit_code=0)
+
+    def read_file(self, path: str) -> str:
+        return Path(path).read_text(encoding='utf-8')
+
+
+async def test_python_wrapper_normalizes_boolean_exit_codes(
+    localsandbox_example: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """sys.exit(not ok) yields a bool, which must be written as 1 rather than 'True'."""
+    monkeypatch.setattr(localsandbox_example, '_EXIT_CODE_FILE', str(tmp_path / 'exit_code'))
+    script = tmp_path / 'run.py'
+    script.write_text('import sys\nsys.exit(not False)\n', encoding='utf-8')
+    executor = localsandbox_example.LocalSandboxScriptExecutor()
+
+    _, _, exit_code = await executor._run_python(_StubPyodideSandbox(), str(script), str(tmp_path), None)
+
+    assert exit_code == 1
+
+
+async def test_python_wrapper_preserves_non_bmp_arguments(
+    localsandbox_example: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """JSON-escaping argv would deliver lone surrogates instead of the character."""
+    monkeypatch.setattr(localsandbox_example, '_EXIT_CODE_FILE', str(tmp_path / 'exit_code'))
+    script = tmp_path / 'run.py'
+    script.write_text('import sys\nprint(sys.argv[1:])\n', encoding='utf-8')
+    executor = localsandbox_example.LocalSandboxScriptExecutor()
+
+    stdout, _, _ = await executor._run_python(_StubPyodideSandbox(), str(script), str(tmp_path), {'msg': 'hi 😀'})
+
+    assert 'hi 😀' in stdout
+    assert '\\ud83d' not in stdout
 
 
 def _script_without_uri() -> SkillScript:

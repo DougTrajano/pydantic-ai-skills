@@ -122,10 +122,11 @@ This is a real trade-off, not a tuning knob: with reuse, files written by one sc
 
 The protocol is deliberately small, so adding a backend is mostly plumbing:
 
-1. Stage `Path(script.uri).parent` into the sandbox.
-2. Build the command. Reuse `LocalSkillScriptExecutor._build_args` for the `--flag value` marshalling rather than reimplementing the bool/list/`None` rules.
-3. Execute, and collect stdout, stderr and the exit code.
-4. Format with `LocalSkillScriptExecutor._format_output(stdout_chunks, stderr_chunks, exit_code)` so the returned string matches local execution.
+1. Derive the skill root and stage it. **Not** `Path(script.uri).parent` — that is the `scripts/` directory for the usual layout, which would leave out `SKILL.md` and `resources/`. `script.name` is relative to the skill folder (`scripts/run.py`), so walk that many levels up from the script file; both examples do this in `skill_root_for`.
+2. Skip symlinks that resolve outside the skill root, or staging will copy host files into the sandbox. Both examples do this in `iter_stageable_files`.
+3. Build the command. Reuse `LocalSkillScriptExecutor._build_args` for the `--flag value` marshalling rather than reimplementing the bool/list/`None` rules.
+4. Execute with the script's own directory as the working directory, so relative paths behave as they do locally, and collect stdout, stderr and the exit code.
+5. Format with `LocalSkillScriptExecutor._format_output(stdout_chunks, stderr_chunks, exit_code)` so the returned string matches local execution.
 
 Follow the optional-dependency pattern used by both examples: import the SDK lazily inside a helper and raise an `ImportError` naming the extra that provides it.
 
