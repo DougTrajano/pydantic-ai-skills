@@ -17,6 +17,7 @@ from typing import Any
 from urllib.parse import urlparse, urlunparse
 
 from pydantic_ai_skills.directory import discover_skills
+from pydantic_ai_skills.executors import SkillScriptExecutor
 from pydantic_ai_skills.registries._base import SkillRegistry
 from pydantic_ai_skills.registries._copy import copy_skill_directory
 from pydantic_ai_skills.types import Skill
@@ -189,6 +190,11 @@ class GitSkillsRegistry(SkillRegistry):
             clone/pull automatically so the local copy is always up to date.
             Set to ``False`` to require explicit ``install`` / ``update`` calls,
             which is preferable in offline or air-gapped environments.
+        script_executor: Executor used for file-based scripts in the discovered
+            skills. Registry skills are the least-trusted source there is, so
+            pass a sandboxing executor here to keep them off the host. When
+            None, scripts run as local subprocesses via
+            :class:`~pydantic_ai_skills.LocalSkillScriptExecutor`.
 
     Examples:
         Basic usage — clone and register all skills:
@@ -270,6 +276,7 @@ class GitSkillsRegistry(SkillRegistry):
         clone_options: GitCloneOptions | None = None,
         validate: bool = True,
         auto_install: bool = True,
+        script_executor: SkillScriptExecutor | None = None,
     ) -> None:
         try:
             import git as _git  # noqa: F401
@@ -282,6 +289,7 @@ class GitSkillsRegistry(SkillRegistry):
         self._path = path.strip('/')
         self._validate = validate
         self._auto_install = auto_install
+        self._script_executor = script_executor
         self._clone_options = clone_options or GitCloneOptions()
         self._tmp_dir: tempfile.TemporaryDirectory[str] | None = None
 
@@ -448,7 +456,12 @@ class GitSkillsRegistry(SkillRegistry):
         skills_root = self._skills_root()
         if not skills_root.exists():
             return []
-        return discover_skills(path=skills_root, validate=self._validate, max_depth=2)
+        return discover_skills(
+            path=skills_root,
+            validate=self._validate,
+            max_depth=2,
+            script_executor=self._script_executor,
+        )
 
     def _enrich_metadata(self, skill: Skill, *, version: str | None = None) -> Skill:
         """Inject registry-specific keys into ``skill.metadata``."""

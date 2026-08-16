@@ -249,7 +249,6 @@ skills_toolset = SkillsToolset(
         "./shared-skills",      # Shared across projects
     ],
     validate=True,
-    script_timeout=60
 )
 
 print(f"Loaded {len(skills_toolset.skills)} skills")

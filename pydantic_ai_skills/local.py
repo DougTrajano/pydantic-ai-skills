@@ -34,6 +34,7 @@ import anyio.abc
 import yaml
 from pydantic_ai._utils import is_async_callable, run_in_executor
 
+from .executors import SkillScriptExecutor
 from .types import SkillResource, SkillScript
 
 ContextEnvVarsExtractor = Callable[[Any], Mapping[str, Any] | None]
@@ -90,7 +91,7 @@ class FileBasedSkillResource(SkillResource):
         return content
 
 
-class LocalSkillScriptExecutor:
+class LocalSkillScriptExecutor(SkillScriptExecutor):
     """Execute skill scripts using local subprocesses.
 
     Executes file-based scripts as subprocesses with args passed as command-line named arguments.
@@ -435,7 +436,7 @@ class LocalSkillScriptExecutor:
         return self._format_output(stdout_chunks, stderr_chunks, return_code)
 
 
-class CallableSkillScriptExecutor:
+class CallableSkillScriptExecutor(SkillScriptExecutor):
     """Wraps a callable in a script executor interface.
 
     Allows users to provide custom execution logic for file-based scripts
@@ -548,9 +549,14 @@ class FileBasedSkillScript(SkillScript):
 
     Attributes:
         executor: Executor for running the script.
+        skill_root: Path to the skill folder this script belongs to, recorded at
+            discovery time. Sandbox executors stage that folder; inferring it from
+            ``uri`` and ``name`` is ambiguous when a skill nests another skill or
+            when an in-tree symlink changes the script's depth.
     """
 
-    executor: LocalSkillScriptExecutor | CallableSkillScriptExecutor = LocalSkillScriptExecutor()
+    executor: SkillScriptExecutor = LocalSkillScriptExecutor()
+    skill_root: str | None = None
 
     async def run(self, ctx: Any, args: dict[str, Any] | None = None) -> Any:
         """Execute script file via subprocess.
@@ -580,8 +586,9 @@ def create_file_based_script(
     name: str,
     uri: str,
     skill_name: str,
-    executor: LocalSkillScriptExecutor | CallableSkillScriptExecutor,
+    executor: SkillScriptExecutor,
     description: str | None = None,
+    skill_root: str | None = None,
 ) -> FileBasedSkillScript:
     """Create a file-based script with executor.
 
@@ -591,6 +598,7 @@ def create_file_based_script(
         skill_name: Name of the parent skill.
         executor: Executor for running the script.
         description: Optional script description.
+        skill_root: Path to the skill folder the script belongs to.
 
     Returns:
         FileBasedSkillScript instance.
@@ -601,4 +609,5 @@ def create_file_based_script(
         skill_name=skill_name,
         description=description,
         executor=executor,
+        skill_root=skill_root,
     )

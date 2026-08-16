@@ -17,8 +17,8 @@ from fnmatch import fnmatch
 from pathlib import Path
 
 from ._parsing import parse_skill_md, validate_skill_metadata
+from .executors import SkillScriptExecutor
 from .local import (
-    CallableSkillScriptExecutor,
     LocalSkillScriptExecutor,
     create_file_based_resource,
     create_file_based_script,
@@ -230,7 +230,7 @@ def _find_skill_files(root_dir: Path, max_depth: int | None) -> list[Path]:
 def _discover_scripts(
     skill_folder: Path,
     skill_name: str,
-    executor: LocalSkillScriptExecutor | CallableSkillScriptExecutor,
+    executor: SkillScriptExecutor,
 ) -> list[SkillScript]:
     """Discover executable scripts in a skill folder.
 
@@ -264,6 +264,7 @@ def _discover_scripts(
                     uri=str(resolved_path),
                     skill_name=skill_name,
                     executor=executor,
+                    skill_root=str(skill_folder_resolved),
                 )
             )
 
@@ -274,7 +275,7 @@ def discover_skills(
     path: str | Path,
     validate: bool = True,
     max_depth: int | None = 3,
-    script_executor: LocalSkillScriptExecutor | CallableSkillScriptExecutor | None = None,
+    script_executor: SkillScriptExecutor | None = None,
     exclude_resources: Iterable[str] | None = None,
 ) -> list[Skill]:
     """Discover skills from a filesystem directory.
@@ -308,7 +309,10 @@ def discover_skills(
     if not dir_path.is_dir():
         return skills
 
-    executor = script_executor or LocalSkillScriptExecutor()
+    # `is None`, not `or`: a custom executor defining __bool__/__len__ can be
+    # falsey, and silently swapping it for the local one would run scripts
+    # directly on the host.
+    executor = LocalSkillScriptExecutor() if script_executor is None else script_executor
     skill_files = _find_skill_files(dir_path, max_depth)
     for skill_file in skill_files:
         try:
@@ -336,8 +340,9 @@ class SkillsDirectory:
     Discovers and loads skills from a local directory by finding SKILL.md files
     and automatically discovering associated resources and scripts.
 
-    File-based scripts are executed using the configured script executor
-    (LocalSkillScriptExecutor or CallableSkillScriptExecutor).
+    File-based scripts are executed using the configured script executor, any
+    object implementing the
+    [`SkillScriptExecutor`][pydantic_ai_skills.SkillScriptExecutor] protocol.
     """
 
     def __init__(
@@ -346,7 +351,7 @@ class SkillsDirectory:
         path: str | Path,
         validate: bool = True,
         max_depth: int | None = 3,
-        script_executor: LocalSkillScriptExecutor | CallableSkillScriptExecutor | None = None,
+        script_executor: SkillScriptExecutor | None = None,
         exclude_resources: Iterable[str] | None = None,
     ) -> None:
         """Initialize the skills directory source.
@@ -356,7 +361,8 @@ class SkillsDirectory:
             validate: Validate skill structure on discovery.
             max_depth: Maximum depth for skill discovery (None for unlimited).
             script_executor: Optional custom script executor for file-based scripts.
-                Can be LocalSkillScriptExecutor or CallableSkillScriptExecutor.
+                Any object implementing the
+                [`SkillScriptExecutor`][pydantic_ai_skills.SkillScriptExecutor] protocol.
                 If None, uses LocalSkillScriptExecutor with default settings.
             exclude_resources: Extra glob patterns to exclude from resource discovery,
                 in addition to the built-in :data:`DEFAULT_RESOURCE_EXCLUDES`. None for
@@ -376,7 +382,7 @@ class SkillsDirectory:
             # With callable executor
             from pydantic_ai_skills import CallableSkillScriptExecutor
 
-            async def my_executor(script, args=None, skill_uri=None):
+            async def my_executor(script, args=None):
                 return f"Executed {script.name}"
 
             executor = CallableSkillScriptExecutor(func=my_executor)
@@ -386,7 +392,8 @@ class SkillsDirectory:
         self._path = Path(path).expanduser().resolve()
         self._validate = validate
         self._max_depth = max_depth
-        self._script_executor = script_executor or LocalSkillScriptExecutor()
+        # `is None`, not `or`: see discover_skills.
+        self._script_executor = LocalSkillScriptExecutor() if script_executor is None else script_executor
         self._exclude_resources = exclude_resources
 
         # Discover skills from directory

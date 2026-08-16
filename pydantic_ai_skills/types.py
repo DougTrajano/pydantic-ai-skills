@@ -15,16 +15,14 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Generic, TypeVar
+from typing import Any, Generic, TypeVar
 
 from pydantic.json_schema import GenerateJsonSchema
 from pydantic_ai import _function_schema
 from pydantic_ai.tools import GenerateToolJsonSchema
 
 from ._parsing import SKILL_NAME_PATTERN, parse_skill_md, validate_skill_metadata
-
-if TYPE_CHECKING:
-    from .local import CallableSkillScriptExecutor, LocalSkillScriptExecutor
+from .executors import SkillScriptExecutor
 
 # Generic type variable for dependencies
 DepsT = TypeVar('DepsT')
@@ -265,7 +263,7 @@ class Skill:
         cls,
         path: str | Path,
         validate: bool = True,
-        script_executor: LocalSkillScriptExecutor | CallableSkillScriptExecutor | None = None,
+        script_executor: SkillScriptExecutor | None = None,
         exclude_resources: Iterable[str] | None = None,
     ) -> Skill:
         """Load a :class:`Skill` from a SKILL.md file or its parent directory.
@@ -335,7 +333,9 @@ class Skill:
         if validate:
             validate_skill_metadata(frontmatter, instructions, uri=str(skill_folder))
 
-        executor = script_executor or _LocalExecutor()
+        # `is None`, not `or`: a falsey custom executor must not be replaced by
+        # the host one.
+        executor = _LocalExecutor() if script_executor is None else script_executor
         scripts = _discover_scripts(skill_folder, name, executor)
         resources = _discover_resources(
             skill_folder,
