@@ -213,6 +213,8 @@ class LocalSandboxScriptExecutor:
         Raises:
             ValueError: If the script has no URI, or its type is unsupported here.
         """
+        del ctx  # Required by the SkillScriptExecutor protocol; unused by this backend.
+
         if script.uri is None:
             raise ValueError(f"Script '{script.name}' has no URI for sandbox execution")
 

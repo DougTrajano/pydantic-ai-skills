@@ -32,6 +32,8 @@ if TYPE_CHECKING:
 
 __all__ = ['OpenSandboxScriptExecutor']
 
+_DEFAULT_WORKDIR = '/workspace/skills'
+
 # Suffix -> interpreter, resolved inside the sandbox rather than on the host.
 _SANDBOX_INTERPRETERS: dict[str, list[str]] = {
     '.py': ['python3'],
@@ -67,7 +69,7 @@ class OpenSandboxScriptExecutor:
         image: str = 'opensandbox/code-interpreter:v1.1.0',
         *,
         timeout: int = 30,
-        workdir: str = '/tmp/skills',
+        workdir: str = '/workspace/skills',
         env_vars: dict[str, str] | None = None,
         reuse_sandbox: bool = False,
         sandbox_timeout: timedelta = timedelta(minutes=10),
@@ -78,6 +80,9 @@ class OpenSandboxScriptExecutor:
             image: Container image used for each sandbox.
             timeout: Per-script execution timeout in seconds.
             workdir: Directory inside the sandbox that the skill folder is staged into.
+                Deliberately not under ``/tmp``: that is world-writable, so another
+                process in the sandbox could tamper with a staged script between
+                upload and execution. The directory is created if missing.
             env_vars: Environment variables exported to the script process.
             reuse_sandbox: Keep a single sandbox alive across runs instead of
                 creating and killing one per run. Faster, but runs share state.
@@ -85,7 +90,7 @@ class OpenSandboxScriptExecutor:
         """
         self.timeout = timeout
         self._image = image
-        self._workdir = workdir.rstrip('/') or '/tmp/skills'
+        self._workdir = workdir.rstrip('/') or _DEFAULT_WORKDIR
         self._env_vars = dict(env_vars or {})
         self._reuse_sandbox = reuse_sandbox
         self._sandbox_timeout = sandbox_timeout
@@ -123,17 +128,27 @@ class OpenSandboxScriptExecutor:
         from opensandbox.models import WriteEntry
 
         entries, _ = _stage_snapshot(skill_root)
-        write_entries = [
-            WriteEntry(
-                path=f'{self._workdir}/{relative}',
-                data=resolved.read_bytes(),
-                mode=0o755 if resolved.stat().st_mode & 0o111 else 0o644,
-            )
-            for relative, resolved in entries
-        ]
+        if not entries:
+            return
 
-        if write_entries:
-            await sandbox.files.write_files(write_entries)
+        # write_files does not create parents, so every directory is made first.
+        directories = {self._workdir}
+        for relative, _resolved in entries:
+            parent = PurePosixPath(relative).parent
+            if parent != PurePosixPath('.'):
+                directories.add(f'{self._workdir}/{parent}')
+        await sandbox.files.create_directories([WriteEntry(path=path) for path in sorted(directories)])
+
+        await sandbox.files.write_files(
+            [
+                WriteEntry(
+                    path=f'{self._workdir}/{relative}',
+                    data=resolved.read_bytes(),
+                    mode=0o755 if resolved.stat().st_mode & 0o111 else 0o644,
+                )
+                for relative, resolved in entries
+            ]
+        )
 
     def _build_command(self, remote_path: str, suffix: str, args: dict[str, Any] | None) -> str:
         """Build the shell command line executed inside the sandbox."""
@@ -166,6 +181,8 @@ class OpenSandboxScriptExecutor:
         Raises:
             ValueError: If the script has no URI configured.
         """
+        del ctx  # Required by the SkillScriptExecutor protocol; unused by this backend.
+
         if script.uri is None:
             raise ValueError(f"Script '{script.name}' has no URI for sandbox execution")
 

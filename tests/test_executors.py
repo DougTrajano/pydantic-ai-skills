@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import contextlib
 import io
+import sys
+import types
 from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -407,9 +409,10 @@ async def test_localsandbox_rejects_unsupported_script_type(tmp_path: Path) -> N
     script_file = tmp_path / 'thing.rb'
     script_file.write_text('puts "hi"\n')
     script = SkillScript(name='thing.rb', uri=str(script_file))
+    executor = LocalSandboxScriptExecutor()
 
     with pytest.raises(ValueError, match='unsupported type'):
-        await LocalSandboxScriptExecutor().run(script)
+        await executor.run(script)
 
 
 def _script_without_uri() -> SkillScript:
@@ -423,14 +426,246 @@ def _script_without_uri() -> SkillScript:
 async def test_localsandbox_requires_a_uri() -> None:
     """The LocalSandbox executor rejects scripts with no URI."""
     executor = LocalSandboxScriptExecutor()
+    script = _script_without_uri()
 
     with pytest.raises(ValueError, match='has no URI'):
-        await executor.run(_script_without_uri())
+        await executor.run(script)
 
 
 async def test_opensandbox_requires_a_uri() -> None:
     """The OpenSandbox executor rejects scripts with no URI."""
     executor = OpenSandboxScriptExecutor()
+    script = _script_without_uri()
 
     with pytest.raises(ValueError, match='has no URI'):
-        await executor.run(_script_without_uri())
+        await executor.run(script)
+
+
+# ---------------------------------------------------------------------------
+# Full run() paths, driven by fake SDK objects
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def runnable_skill(tmp_path: Path) -> Path:
+    """A skill whose script sits in scripts/ alongside a top-level resource."""
+    skill = tmp_path / 'demo-skill'
+    (skill / 'scripts').mkdir(parents=True)
+    (skill / 'resources').mkdir()
+    (skill / 'SKILL.md').write_text('---\nname: demo-skill\ndescription: Demo.\n---\n\nBody.\n')
+    (skill / 'resources' / 'data.json').write_text('{"k": 1}')
+    (skill / 'scripts' / 'run.py').write_text('print("hi")\n')
+    (skill / 'scripts' / 'go.sh').write_text('#!/bin/sh\necho hi\n')
+    return skill
+
+
+def _script_in(skill: Path, name: str) -> SkillScript:
+    """Build a discovery-shaped script for a file inside a skill folder."""
+    return SkillScript(name=name, uri=str(skill / name), skill_name=skill.name)
+
+
+class _FakeOpenSandboxRun:
+    """A sandbox that records the staged files and the command it was asked to run."""
+
+    def __init__(self) -> None:
+        self.written: list[Any] = []
+        self.directories: list[str] = []
+        self.command: str | None = None
+        self.opts: Any = None
+        self.killed = False
+        self.files = SimpleNamespace(write_files=self._write_files, create_directories=self._create_directories)
+        self.commands = SimpleNamespace(run=self._run)
+
+    async def _create_directories(self, entries: list[Any]) -> None:
+        self.directories.extend(e.path for e in entries)
+
+    async def _write_files(self, entries: list[Any]) -> None:
+        self.written.extend(entries)
+
+    async def _run(self, command: str, opts: Any = None) -> Any:
+        self.command = command
+        self.opts = opts
+        return SimpleNamespace(
+            exit_code=0,
+            logs=SimpleNamespace(
+                stdout=[SimpleNamespace(text='hello\n')],
+                stderr=[SimpleNamespace(text='warned\n')],
+            ),
+        )
+
+    async def kill(self) -> None:
+        self.killed = True
+
+
+@pytest.fixture
+def fake_opensandbox_models(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stand in for the SDK model modules that run() imports at call time."""
+
+    class WriteEntry:
+        def __init__(self, path: str, data: Any = None, mode: int = 0o644) -> None:
+            self.path, self.data, self.mode = path, data, mode
+
+    class RunCommandOpts:
+        def __init__(self, **kwargs: Any) -> None:
+            self.__dict__.update(kwargs)
+
+    package = types.ModuleType('opensandbox')
+    models = types.ModuleType('opensandbox.models')
+    models.WriteEntry = WriteEntry  # type: ignore[attr-defined]
+    execd = types.ModuleType('opensandbox.models.execd')
+    execd.RunCommandOpts = RunCommandOpts  # type: ignore[attr-defined]
+    package.models = models  # type: ignore[attr-defined]
+    models.execd = execd  # type: ignore[attr-defined]
+
+    monkeypatch.setitem(sys.modules, 'opensandbox', package)
+    monkeypatch.setitem(sys.modules, 'opensandbox.models', models)
+    monkeypatch.setitem(sys.modules, 'opensandbox.models.execd', execd)
+
+
+async def test_opensandbox_run_stages_and_executes(
+    runnable_skill: Path, monkeypatch: pytest.MonkeyPatch, fake_opensandbox_models: None
+) -> None:
+    """The whole skill folder is staged and the script runs from its own directory."""
+    sandbox = _FakeOpenSandboxRun()
+    monkeypatch.setattr(opensandbox_module, '_require_opensandbox', lambda: SimpleNamespace(create=_returning(sandbox)))
+    executor = OpenSandboxScriptExecutor(workdir='/workspace/skills')
+
+    output = await executor.run(_script_in(runnable_skill, 'scripts/run.py'), {'query': 'x', 'verbose': True})
+
+    staged = {entry.path for entry in sandbox.written}
+    assert staged == {
+        '/workspace/skills/SKILL.md',
+        '/workspace/skills/resources/data.json',
+        '/workspace/skills/scripts/run.py',
+        '/workspace/skills/scripts/go.sh',
+    }
+    # write_files does not create parents, so directories must be made first.
+    assert '/workspace/skills/scripts' in sandbox.directories
+    assert '/workspace/skills/resources' in sandbox.directories
+    assert sandbox.command == 'python3 /workspace/skills/scripts/run.py --query x --verbose'
+    assert sandbox.opts.working_directory == '/workspace/skills/scripts'
+    assert output == 'hello\n\n\nStderr:\nwarned'
+    assert sandbox.killed, 'a non-reused sandbox is killed after the run'
+
+
+def _returning(value: Any) -> Any:
+    """Build an async factory that always yields ``value``."""
+
+    async def factory(*args: Any, **kwargs: Any) -> Any:
+        return value
+
+    return factory
+
+
+async def test_opensandbox_default_workdir_avoids_tmp() -> None:
+    """/tmp is world-writable, so a staged script could be swapped before it runs."""
+    assert not OpenSandboxScriptExecutor()._workdir.startswith('/tmp')
+
+
+async def test_opensandbox_aclose_kills_reused_sandbox(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Closing releases the container rather than leaving it to expire."""
+    sandbox = _FakeOpenSandboxRun()
+    monkeypatch.setattr(opensandbox_module, '_require_opensandbox', lambda: SimpleNamespace(create=_returning(sandbox)))
+    executor = OpenSandboxScriptExecutor(reuse_sandbox=True)
+    await executor._get_sandbox()
+
+    await executor.aclose()
+
+    assert sandbox.killed
+    assert executor._sandbox is None
+
+
+class _FakeLocalSandboxRun:
+    """A LocalSandbox stand-in covering both the Pyodide and just-bash paths."""
+
+    def __init__(self, files: dict[str, Any], cwd: str, **kwargs: Any) -> None:
+        self.files = files
+        self.cwd = cwd
+        self.closed = False
+        self.command: str | None = None
+
+    async def aexecute_python(self, code: str, cwd: str | None = None, preload_packages: Any = None) -> Any:
+        self.command = code
+        return SimpleNamespace(stdout='hello\n', stderr='warned\n', error=None, exit_code=0)
+
+    async def abash(self, command: str) -> Any:
+        self.command = command
+        return SimpleNamespace(stdout='hello\n', stderr='warned\n', exit_code=0, duration_ms=1)
+
+    def read_file(self, path: str) -> str:
+        return '0'
+
+    def __exit__(self, *exc: Any) -> None:
+        self.closed = True
+
+
+async def test_localsandbox_run_executes_shell_script(runnable_skill: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Shell scripts go through abash with normal --flag value argv."""
+    created: list[_FakeLocalSandboxRun] = []
+
+    def factory(**kwargs: Any) -> _FakeLocalSandboxRun:
+        sandbox = _FakeLocalSandboxRun(**kwargs)
+        created.append(sandbox)
+        return sandbox
+
+    monkeypatch.setattr(localsandbox_module, '_require_localsandbox', lambda: factory)
+    executor = LocalSandboxScriptExecutor(workdir='/data/skill')
+
+    output = await executor.run(_script_in(runnable_skill, 'scripts/go.sh'), {'query': 'x'})
+
+    assert created[0].command == 'sh /data/skill/scripts/go.sh --query x'
+    assert output == 'hello\n\n\nStderr:\nwarned'
+    assert created[0].closed, 'a non-reused sandbox is closed after the run'
+
+
+async def test_localsandbox_run_executes_python_script(runnable_skill: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Python scripts are wrapped for Pyodide and staged with the whole skill folder."""
+    created: list[_FakeLocalSandboxRun] = []
+
+    def factory(**kwargs: Any) -> _FakeLocalSandboxRun:
+        sandbox = _FakeLocalSandboxRun(**kwargs)
+        created.append(sandbox)
+        return sandbox
+
+    monkeypatch.setattr(localsandbox_module, '_require_localsandbox', lambda: factory)
+    executor = LocalSandboxScriptExecutor(workdir='/data/skill')
+
+    output = await executor.run(_script_in(runnable_skill, 'scripts/run.py'))
+
+    assert '/data/skill/SKILL.md' in created[0].files
+    assert '/data/skill/resources/data.json' in created[0].files
+    assert 'runpy.run_path' in (created[0].command or '')
+    assert output == 'hello\n\n\nStderr:\nwarned'
+
+
+async def test_localsandbox_surfaces_pyodide_error_with_stderr(
+    runnable_skill: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An uncaught exception must not be dropped in favour of earlier stderr."""
+
+    class _Failing(_FakeLocalSandboxRun):
+        async def aexecute_python(self, code: str, cwd: str | None = None, preload_packages: Any = None) -> Any:
+            return SimpleNamespace(stdout='partial\n', stderr='warned\n', error='Traceback: boom', exit_code=1)
+
+    monkeypatch.setattr(localsandbox_module, '_require_localsandbox', lambda: _Failing)
+    executor = LocalSandboxScriptExecutor()
+
+    output = await executor.run(_script_in(runnable_skill, 'scripts/run.py'))
+
+    assert 'warned' in output
+    assert 'Traceback: boom' in output
+
+
+async def test_localsandbox_close_releases_reused_sandbox(
+    runnable_skill: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Closing drops the sandbox and its staging fingerprint."""
+    monkeypatch.setattr(localsandbox_module, '_require_localsandbox', lambda: _FakeLocalSandboxRun)
+    executor = LocalSandboxScriptExecutor(reuse_sandbox=True)
+    sandbox = executor._get_sandbox(runnable_skill.resolve())
+
+    executor.close()
+
+    assert sandbox.closed
+    assert executor._sandbox is None
+    assert executor._staged_fingerprint is None
