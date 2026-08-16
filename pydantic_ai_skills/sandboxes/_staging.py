@@ -131,6 +131,39 @@ def _walk_files(root: Path, skill_root: Path) -> Iterator[tuple[Path, Path]]:
                 yield path, resolved
 
 
+def _partition_directories(
+    dirpath: str, dirnames: list[str], skill_root: Path
+) -> tuple[list[str], list[tuple[str, Path]]]:
+    """Split walked subdirectories into ones to descend into and aliases to expand.
+
+    os.walk does not follow directory symlinks, so an in-tree alias such as
+    ``resources/current -> data/v2`` would simply be missing from the sandbox even
+    though it resolves locally. Aliases are returned for the caller to expand once
+    — one level only, so they cannot cycle.
+
+    Args:
+        dirpath: Directory currently being walked.
+        dirnames: Its subdirectory names.
+        skill_root: Resolved path to the skill folder.
+
+    Returns:
+        The subdirectories to descend into, and ``(alias, target)`` pairs.
+    """
+    kept: list[str] = []
+    aliases: list[tuple[str, Path]] = []
+    for name in sorted(dirnames):
+        if name in EXCLUDED_STAGING_DIRS:
+            continue
+        directory = Path(dirpath) / name
+        if not directory.is_symlink():
+            kept.append(name)
+            continue
+        target = _safe_directory_alias(directory, skill_root)
+        if target is not None:
+            aliases.append((directory.relative_to(skill_root).as_posix(), target))
+    return kept, aliases
+
+
 def iter_stageable_files(skill_root: Path) -> Iterator[tuple[str, Path]]:
     """Yield ``(relative_posix_path, resolved_file)`` for files safe to stage.
 
@@ -155,22 +188,9 @@ def iter_stageable_files(skill_root: Path) -> Iterator[tuple[str, Path]]:
     """
     aliases: list[tuple[str, Path]] = []
     for dirpath, dirnames, filenames in os.walk(skill_root):
-        kept: list[str] = []
-        for name in sorted(dirnames):
-            if name in EXCLUDED_STAGING_DIRS:
-                continue
-            directory = Path(dirpath) / name
-            if not directory.is_symlink():
-                kept.append(name)
-                continue
-            # os.walk does not follow directory symlinks, so an in-tree alias such
-            # as resources/current -> data/v2 would simply be missing from the
-            # sandbox even though it resolves locally. Expand it once below; one
-            # level only, so aliases cannot cycle.
-            target = _safe_directory_alias(directory, skill_root)
-            if target is not None:
-                aliases.append((directory.relative_to(skill_root).as_posix(), target))
+        kept, found = _partition_directories(dirpath, dirnames, skill_root)
         dirnames[:] = kept
+        aliases.extend(found)
 
         for filename in sorted(filenames):
             path = Path(dirpath) / filename
