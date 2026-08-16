@@ -599,7 +599,23 @@ class _FakeLocalSandboxRun:
         self.closed = True
 
 
-async def test_localsandbox_run_executes_shell_script(runnable_skill: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.fixture
+def fake_localsandbox_module(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stand in for the SDK module that _run_shell imports at call time."""
+
+    class CommandError(Exception):
+        def __init__(self, message: str, exit_code: int, stdout: str, stderr: str) -> None:
+            super().__init__(message)
+            self.exit_code, self.stdout, self.stderr = exit_code, stdout, stderr
+
+    module = types.ModuleType('localsandbox')
+    module.CommandError = CommandError  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, 'localsandbox', module)
+
+
+async def test_localsandbox_run_executes_shell_script(
+    runnable_skill: Path, monkeypatch: pytest.MonkeyPatch, fake_localsandbox_module: None
+) -> None:
     """Shell scripts go through abash with normal --flag value argv."""
     created: list[_FakeLocalSandboxRun] = []
 
@@ -725,7 +741,7 @@ def test_pycache_is_not_staged(cloned_skill: Path) -> None:
 
 
 async def test_localsandbox_shell_script_runs_from_its_own_directory(
-    runnable_skill: Path, monkeypatch: pytest.MonkeyPatch
+    runnable_skill: Path, monkeypatch: pytest.MonkeyPatch, fake_localsandbox_module: None
 ) -> None:
     """Abash takes no cwd, so the command must change directory itself.
 
