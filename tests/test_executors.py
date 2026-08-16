@@ -467,6 +467,26 @@ def _script_in(skill: Path, name: str) -> SkillScript:
     return SkillScript(name=name, uri=str(skill / name), skill_name=skill.name)
 
 
+def _fake_filesystem(
+    *,
+    write_files: Any,
+    create_directories: Any,
+    delete_files: Any,
+    delete_directories: Any,
+) -> SimpleNamespace:
+    """Build the `sandbox.files` surface the OpenSandbox executor calls.
+
+    Kept in one place so a new call in the executor fails every fake at once
+    rather than only the ones that happened to be updated.
+    """
+    return SimpleNamespace(
+        write_files=write_files,
+        create_directories=create_directories,
+        delete_files=delete_files,
+        delete_directories=delete_directories,
+    )
+
+
 class _FakeOpenSandboxRun:
     """A sandbox that records the staged files and the command it was asked to run."""
 
@@ -474,13 +494,15 @@ class _FakeOpenSandboxRun:
         self.written: list[Any] = []
         self.directories: list[str] = []
         self.deleted: list[str] = []
+        self.deleted_dirs: list[str] = []
         self.command: str | None = None
         self.opts: Any = None
         self.killed = False
-        self.files = SimpleNamespace(
+        self.files = _fake_filesystem(
             write_files=self._write_files,
             create_directories=self._create_directories,
             delete_files=self._delete_files,
+            delete_directories=self._delete_directories,
         )
         self.commands = SimpleNamespace(run=self._run)
 
@@ -492,6 +514,9 @@ class _FakeOpenSandboxRun:
 
     async def _delete_files(self, paths: list[str]) -> None:
         self.deleted.extend(paths)
+
+    async def _delete_directories(self, paths: list[str]) -> None:
+        self.deleted_dirs.extend(paths)
 
     async def _run(self, command: str, opts: Any = None) -> Any:
         self.command = command
@@ -904,7 +929,12 @@ class _SlowOpenSandbox:
 
     def __init__(self) -> None:
         self.killed = False
-        self.files = SimpleNamespace(write_files=self._noop, create_directories=self._noop, delete_files=self._noop)
+        self.files = _fake_filesystem(
+            write_files=self._noop,
+            create_directories=self._noop,
+            delete_files=self._noop,
+            delete_directories=self._noop,
+        )
         self.commands = SimpleNamespace(run=self._run)
 
     @classmethod
@@ -1096,3 +1126,58 @@ def test_staging_rejects_symlink_aliases_into_excluded_directories(cloned_skill:
 
     assert 'resources/config' not in staged
     assert not any('ghp_SECRETTOKEN' in source.read_text(errors='ignore') for source in staged.values())
+
+
+async def test_reused_sandboxes_detect_edits_that_preserve_size_and_mtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_opensandbox_models: None
+) -> None:
+    """Reproducible-build tooling pins mtimes, so size+mtime cannot detect an edit.
+
+    A same-size change with the mtime restored must still be restaged.
+    """
+    skill = tmp_path / 'demo-skill'
+    (skill / 'scripts').mkdir(parents=True)
+    (skill / 'SKILL.md').write_text('---\nname: demo-skill\ndescription: Demo.\n---\n\nBody.\n')
+    script = skill / 'scripts' / 'run.py'
+    script.write_text('print("A")\n')
+    stat = script.stat()
+    stamp_ns = (stat.st_atime_ns, stat.st_mtime_ns)
+
+    sandbox = _FakeOpenSandboxRun()
+    monkeypatch.setattr(opensandbox_module, '_require_opensandbox', lambda: SimpleNamespace(create=_returning(sandbox)))
+    executor = OpenSandboxScriptExecutor(reuse_sandbox=True)
+    skill_script = _script_in(skill, 'scripts/run.py')
+
+    await executor.run(skill_script)
+    script.write_text('print("B")\n')  # Same length as the original.
+    os.utime(script, ns=stamp_ns)  # Same mtime, to the nanosecond.
+    await executor.run(skill_script)
+
+    staged = [entry.data for entry in sandbox.written if entry.path.endswith('scripts/run.py')]
+    assert staged[-1] == b'print("B")\n', 'a same-size, same-mtime edit must still be restaged'
+
+
+async def test_reused_opensandbox_removes_directories_replaced_by_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_opensandbox_models: None
+) -> None:
+    """A path that was a directory must be removed before a file can take its place."""
+    first = tmp_path / 'skill-a'
+    (first / 'resources' / 'config').mkdir(parents=True)
+    (first / 'SKILL.md').write_text('---\nname: skill-a\ndescription: A.\n---\n\nBody.\n')
+    (first / 'resources' / 'config' / 'item').write_text('nested\n')
+    (first / 'run.py').write_text('print("A")\n')
+
+    second = tmp_path / 'skill-b'
+    (second / 'resources').mkdir(parents=True)
+    (second / 'SKILL.md').write_text('---\nname: skill-b\ndescription: B.\n---\n\nBody.\n')
+    (second / 'resources' / 'config').write_text('now a file\n')
+    (second / 'run.py').write_text('print("B")\n')
+
+    sandbox = _FakeOpenSandboxRun()
+    monkeypatch.setattr(opensandbox_module, '_require_opensandbox', lambda: SimpleNamespace(create=_returning(sandbox)))
+    executor = OpenSandboxScriptExecutor(workdir='/workspace/skills', reuse_sandbox=True)
+
+    await executor.run(_script_in(first, 'run.py'))
+    await executor.run(_script_in(second, 'run.py'))
+
+    assert '/workspace/skills/resources/config' in sandbox.deleted_dirs

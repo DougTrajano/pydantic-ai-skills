@@ -127,8 +127,9 @@ class OpenSandboxScriptExecutor:
         self._sandbox: Sandbox | None = None
         self._sandbox_deadline: float = 0.0
         self._staged_paths: set[str] = set()
+        self._staged_dirs: set[str] = set()
         self._staged_root: Path | None = None
-        self._staged_fingerprint: tuple[tuple[str, int, int], ...] | None = None
+        self._staged_fingerprint: str | None = None
         # Serializes runs that share one sandbox; see run().
         self._reuse_lock = anyio.Lock()
         # Reused for its host-independent argument marshalling and output formatting.
@@ -170,40 +171,47 @@ class OpenSandboxScriptExecutor:
         from opensandbox.models import WriteEntry
 
         entries, fingerprint = _stage_snapshot(skill_root)
-        # Keyed on the root as well: two skills can share relative paths, sizes and
-        # mtimes (templates, timestamp-preserving copies), and fingerprint alone
-        # would then run skill B against skill A's staged files.
+        # Keyed on the root as well: two skills can share relative paths and
+        # contents, and fingerprint alone would then run skill B against skill A's
+        # staged files.
         if self._reuse_sandbox and (skill_root, fingerprint) == (self._staged_root, self._staged_fingerprint):
             return
 
-        paths = {f'{self._workdir}/{relative}' for relative, _resolved in entries}
+        paths = {f'{self._workdir}/{entry.relative}' for entry in entries}
+        directories = {self._workdir}
+        for entry in entries:
+            parent = PurePosixPath(entry.relative).parent
+            if parent != PurePosixPath('.'):
+                directories.add(f'{self._workdir}/{parent}')
 
-        stale = sorted(self._staged_paths - paths)
-        if stale:
-            await sandbox.files.delete_files(stale)
+        stale_files = sorted(self._staged_paths - paths)
+        if stale_files:
+            await sandbox.files.delete_files(stale_files)
+
+        # Directories too: a path that was a directory in the previous skill and is
+        # a file in this one would otherwise block the write. Deepest first so
+        # children go before their parents.
+        stale_dirs = sorted(self._staged_dirs - directories, key=lambda path: path.count('/'), reverse=True)
+        if stale_dirs:
+            await sandbox.files.delete_directories(stale_dirs)
 
         if entries:
             # write_files does not create parents, so every directory is made first.
-            directories = {self._workdir}
-            for relative, _resolved in entries:
-                parent = PurePosixPath(relative).parent
-                if parent != PurePosixPath('.'):
-                    directories.add(f'{self._workdir}/{parent}')
             await sandbox.files.create_directories([WriteEntry(path=path) for path in sorted(directories)])
-
             await sandbox.files.write_files(
                 [
                     WriteEntry(
-                        path=f'{self._workdir}/{relative}',
-                        data=resolved.read_bytes(),
-                        mode=0o755 if resolved.stat().st_mode & 0o111 else 0o644,
+                        path=f'{self._workdir}/{entry.relative}',
+                        data=entry.data,
+                        mode=0o755 if entry.executable else 0o644,
                     )
-                    for relative, resolved in entries
+                    for entry in entries
                 ]
             )
 
         if self._reuse_sandbox:
             self._staged_paths = paths
+            self._staged_dirs = directories
             self._staged_root = skill_root
             self._staged_fingerprint = fingerprint
 
@@ -300,5 +308,6 @@ class OpenSandboxScriptExecutor:
             self._sandbox = None
             self._sandbox_deadline = 0.0
             self._staged_paths = set()
+            self._staged_dirs = set()
             self._staged_root = None
             self._staged_fingerprint = None

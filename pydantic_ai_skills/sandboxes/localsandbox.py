@@ -107,7 +107,7 @@ class LocalSandboxScriptExecutor:
         self._reuse_sandbox = reuse_sandbox
         self._sandbox: LocalSandbox | None = None
         self._staged_root: Path | None = None
-        self._staged_fingerprint: tuple[tuple[str, int, int], ...] | None = None
+        self._staged_fingerprint: str | None = None
         # Serializes runs that share one sandbox; see run().
         self._reuse_lock = anyio.Lock()
         # Reused for its host-independent argument marshalling and output formatting.
@@ -129,9 +129,7 @@ class LocalSandboxScriptExecutor:
             self.close()
 
         sandbox_cls = _require_localsandbox()
-        files: dict[str, str | bytes] = {
-            f'{self.workdir}/{relative}': resolved.read_bytes() for relative, resolved in entries
-        }
+        files: dict[str, str | bytes] = {f'{self.workdir}/{entry.relative}': entry.data for entry in entries}
         kwargs: dict[str, Any] = {'files': files, 'cwd': self.workdir}
         if self._preset is not None:
             kwargs['preset'] = self._preset

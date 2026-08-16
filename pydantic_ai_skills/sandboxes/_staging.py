@@ -7,9 +7,11 @@ much and a script can read files it should not see.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import warnings
 from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
@@ -109,24 +111,55 @@ def iter_stageable_files(skill_root: Path) -> Iterator[tuple[str, Path]]:
                 yield path.relative_to(skill_root).as_posix(), resolved
 
 
-def _stage_snapshot(skill_root: Path) -> tuple[list[tuple[str, Path]], tuple[tuple[str, int, int], ...]]:
-    """Walk the skill folder once, returning its files and a change fingerprint.
+@dataclass(frozen=True)
+class StagedFile:
+    """One file to copy into a sandbox, with the bytes already read.
 
-    The fingerprint covers every staged path with its size and modification
-    time, so a reused sandbox can tell whether the source skill was edited since
-    it was staged — ``auto_reload`` and ``reload()`` both surface edits under an
-    unchanged skill root.
+    Attributes:
+        relative: Path relative to the skill root, posix-style.
+        source: Resolved path on the host.
+        data: File contents, read once and reused for both the fingerprint and
+            the upload.
+        executable: Whether the source file carries an execute bit.
+    """
+
+    relative: str
+    source: Path
+    data: bytes
+    executable: bool
+
+
+def _stage_snapshot(skill_root: Path) -> tuple[list[StagedFile], str]:
+    """Walk the skill folder once, returning its files and a content fingerprint.
+
+    The fingerprint is a digest of every staged path and its contents, so a
+    reused sandbox can tell whether the source skill changed since it was
+    staged. Size and mtime are not enough: reproducible-build tooling pins
+    mtimes, so an edit that preserves file size would go unnoticed and the
+    sandbox would keep running the previously staged script.
+
+    Contents are read once here and carried on the returned entries, so hashing
+    costs no extra I/O over staging itself.
 
     Args:
         skill_root: Resolved path to the skill folder.
 
     Returns:
-        The staged ``(relative, resolved)`` pairs and their fingerprint.
+        The staged files and a hex digest covering their paths and contents.
     """
-    entries: list[tuple[str, Path]] = []
-    fingerprint: list[tuple[str, int, int]] = []
+    entries: list[StagedFile] = []
+    digest = hashlib.sha256()
     for relative, resolved in iter_stageable_files(skill_root):
-        entries.append((relative, resolved))
-        stat = resolved.stat()
-        fingerprint.append((relative, stat.st_size, stat.st_mtime_ns))
-    return entries, tuple(fingerprint)
+        data = resolved.read_bytes()
+        entries.append(
+            StagedFile(
+                relative=relative,
+                source=resolved,
+                data=data,
+                executable=bool(resolved.stat().st_mode & 0o111),
+            )
+        )
+        digest.update(relative.encode('utf-8'))
+        digest.update(b'\0')
+        digest.update(hashlib.sha256(data).digest())
+    return entries, digest.hexdigest()
