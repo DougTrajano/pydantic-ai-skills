@@ -23,6 +23,8 @@ from datetime import timedelta
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
+import anyio
+
 from pydantic_ai_skills.local import LocalSkillScriptExecutor
 from pydantic_ai_skills.sandboxes._staging import _stage_snapshot, skill_root_for
 from pydantic_ai_skills.types import SkillScript
@@ -124,6 +126,8 @@ class OpenSandboxScriptExecutor:
         self._sandbox_timeout = sandbox_timeout
         self._sandbox: Sandbox | None = None
         self._sandbox_deadline: float = 0.0
+        # Serializes runs that share one sandbox; see run().
+        self._reuse_lock = anyio.Lock()
         # Reused for its host-independent argument marshalling and output formatting.
         self._formatter = LocalSkillScriptExecutor()
 
@@ -227,6 +231,17 @@ class OpenSandboxScriptExecutor:
         working_directory = str(PurePosixPath(remote_path).parent)
         command = self._build_command(script_path, remote_path, script_path.suffix.lower(), args)
 
+        if not self._reuse_sandbox:
+            return await self._execute(skill_root, command, working_directory)
+
+        # One sandbox serving concurrent runs has to serialize them: two first
+        # runs would otherwise each create a container and leak one, and both
+        # would stage over each other's files in the shared workdir.
+        async with self._reuse_lock:
+            return await self._execute(skill_root, command, working_directory)
+
+    async def _execute(self, skill_root: Path, command: str, working_directory: str) -> Any:
+        """Provision a sandbox, stage the skill, run the command, and format the output."""
         # _get_sandbox raises the ImportError naming the extra, so import the SDK
         # models only once a sandbox exists.
         sandbox = await self._get_sandbox()

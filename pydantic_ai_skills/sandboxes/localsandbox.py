@@ -18,6 +18,8 @@ import shlex
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
+import anyio
+
 from pydantic_ai_skills.local import LocalSkillScriptExecutor
 from pydantic_ai_skills.sandboxes._staging import _stage_snapshot, skill_root_for
 from pydantic_ai_skills.types import SkillScript
@@ -106,6 +108,8 @@ class LocalSandboxScriptExecutor:
         self._sandbox: LocalSandbox | None = None
         self._staged_root: Path | None = None
         self._staged_fingerprint: tuple[tuple[str, int, int], ...] | None = None
+        # Serializes runs that share one sandbox; see run().
+        self._reuse_lock = anyio.Lock()
         # Reused for its host-independent argument marshalling and output formatting.
         self._formatter = LocalSkillScriptExecutor()
 
@@ -237,6 +241,19 @@ class LocalSandboxScriptExecutor:
                 f'Supported: .py (Pyodide), {", ".join(sorted(_SHELL_INTERPRETERS))} (just-bash).'
             )
 
+        if not self._reuse_sandbox:
+            return await self._execute(skill_root, remote_path, cwd, suffix, args)
+
+        # One sandbox serving concurrent runs has to serialize them: a second run
+        # switching skills would otherwise close the sandbox the first is still
+        # using, and both would share a filesystem mid-execution anyway.
+        async with self._reuse_lock:
+            return await self._execute(skill_root, remote_path, cwd, suffix, args)
+
+    async def _execute(
+        self, skill_root: Path, remote_path: str, cwd: str, suffix: str, args: dict[str, Any] | None
+    ) -> Any:
+        """Provision a sandbox, run the script in it, and format the output."""
         sandbox = self._get_sandbox(skill_root)
         try:
             if suffix == '.py':

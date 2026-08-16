@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
+import anyio
 import pytest
 
 from pydantic_ai_skills import (
@@ -819,3 +820,117 @@ def test_opensandbox_shebang_does_not_resolve_against_the_host(tmp_path: Path) -
     command = _opensandbox_command(OpenSandboxScriptExecutor(), script)
 
     assert command.startswith('/opt/custom/bin/bash ')
+
+
+# ---------------------------------------------------------------------------
+# Concurrency: one shared sandbox must not be torn down mid-run
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def second_skill(tmp_path: Path) -> Path:
+    """A second skill folder, so a reused executor has to switch roots."""
+    skill = tmp_path / 'other-skill'
+    (skill / 'scripts').mkdir(parents=True)
+    (skill / 'SKILL.md').write_text('---\nname: other-skill\ndescription: Other.\n---\n\nBody.\n')
+    (skill / 'scripts' / 'run.py').write_text('print("other")\n')
+    return skill
+
+
+class _SlowLocalSandbox:
+    """Yields control during execution so a competing run can interleave."""
+
+    live: int = 0
+    max_live: int = 0
+    closed_while_running = False
+
+    def __init__(self, files: dict[str, Any], cwd: str, **kwargs: Any) -> None:
+        self.files = files
+        self.closed = False
+        self.running = False
+
+    async def aexecute_python(self, code: str, cwd: str | None = None, preload_packages: Any = None) -> Any:
+        self.running = True
+        type(self).live += 1
+        type(self).max_live = max(type(self).max_live, type(self).live)
+        await anyio.sleep(0.02)  # Long enough for a competing run to reach _get_sandbox.
+        if self.closed:
+            type(self).closed_while_running = True
+        type(self).live -= 1
+        self.running = False
+        return SimpleNamespace(stdout='ok\n', stderr='', error=None, exit_code=0)
+
+    def read_file(self, path: str) -> str:
+        return '0'
+
+    def __exit__(self, *exc: Any) -> None:
+        if self.running:
+            type(self).closed_while_running = True
+        self.closed = True
+
+
+async def test_reused_localsandbox_serializes_concurrent_runs(
+    runnable_skill: Path, second_skill: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A second skill must not close the sandbox the first run is still using."""
+    monkeypatch.setattr(_SlowLocalSandbox, 'live', 0)
+    monkeypatch.setattr(_SlowLocalSandbox, 'max_live', 0)
+    monkeypatch.setattr(_SlowLocalSandbox, 'closed_while_running', False)
+    monkeypatch.setattr(localsandbox_module, '_require_localsandbox', lambda: _SlowLocalSandbox)
+    executor = LocalSandboxScriptExecutor(reuse_sandbox=True)
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(executor.run, _script_in(runnable_skill, 'scripts/run.py'))
+        tg.start_soon(executor.run, _script_in(second_skill, 'scripts/run.py'))
+
+    assert not _SlowLocalSandbox.closed_while_running, 'a live sandbox was closed mid-run'
+    assert _SlowLocalSandbox.max_live == 1, 'reused-sandbox runs must not overlap'
+
+
+class _SlowOpenSandbox:
+    """Counts containers so a duplicate creation is observable."""
+
+    created = 0
+
+    def __init__(self) -> None:
+        self.killed = False
+        self.files = SimpleNamespace(write_files=self._noop, create_directories=self._noop)
+        self.commands = SimpleNamespace(run=self._run)
+
+    @classmethod
+    async def create(cls, image: str, env: Any = None, timeout: Any = None) -> _SlowOpenSandbox:
+        cls.created += 1
+        await anyio.sleep(0.02)  # Suspends inside create, where the race lived.
+        return cls()
+
+    async def _noop(self, entries: list[Any]) -> None:
+        return None
+
+    async def _run(self, command: str, opts: Any = None) -> Any:
+        await anyio.sleep(0.01)
+        return SimpleNamespace(
+            exit_code=0,
+            logs=SimpleNamespace(stdout=[SimpleNamespace(text='ok\n')], stderr=[]),
+        )
+
+    async def kill(self) -> None:
+        self.killed = True
+
+
+async def test_reused_opensandbox_creates_one_container_under_concurrency(
+    runnable_skill: Path,
+    second_skill: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fake_opensandbox_models: None,
+) -> None:
+    """Two concurrent first runs must not each create a container, leaking one."""
+    monkeypatch.setattr(_SlowOpenSandbox, 'created', 0)
+    monkeypatch.setattr(opensandbox_module, '_require_opensandbox', lambda: _SlowOpenSandbox)
+    executor = OpenSandboxScriptExecutor(reuse_sandbox=True)
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(executor.run, _script_in(runnable_skill, 'scripts/run.py'))
+        tg.start_soon(executor.run, _script_in(second_skill, 'scripts/run.py'))
+
+    assert _SlowOpenSandbox.created == 1, 'a duplicate container was created and leaked'
+    assert executor._sandbox is not None
