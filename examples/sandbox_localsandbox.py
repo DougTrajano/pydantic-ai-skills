@@ -27,16 +27,21 @@ Limitations worth knowing before pointing this at real skills:
   an execution limit profile (``STRICT``, ``NORMAL``, ``PERMISSIVE``).
 
 Lifecycle: a fresh sandbox is created per run and closed afterwards. Pass
-``reuse_sandbox=True`` to keep one warm across runs — faster, but runs share state.
+``reuse_sandbox=True`` to keep one warm across runs — faster, but runs share
+state. A reused sandbox is rebuilt automatically when the skill changes, since
+one executor instance serves every skill in a ``SkillsDirectory``.
 
-Staging: the whole skill directory (the script's parent folder) is copied into the
-sandbox, so sibling modules and bundled data files resolve as they do locally.
+Staging: the whole skill folder is copied in — ``SKILL.md``, ``resources/``,
+``scripts/`` and anything else — and the script runs with its own directory as
+the working directory, so sibling modules and ``../resources/data.json`` resolve
+exactly as they do locally. Symlinks resolving outside the skill folder are
+skipped with a warning, so staging cannot pull host files into the sandbox.
 
 Example:
     ```python
     from pydantic_ai_skills import SkillsDirectory
 
-    from examples.sandbox_localsandbox import LocalSandboxScriptExecutor
+    from myapp.sandbox_localsandbox import LocalSandboxScriptExecutor
 
     executor = LocalSandboxScriptExecutor()
     directory = SkillsDirectory(path='./skills', script_executor=executor)
@@ -47,13 +52,63 @@ from __future__ import annotations
 
 import json
 import shlex
-from pathlib import Path
+import warnings
+from collections.abc import Iterator
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 from pydantic_ai_skills import LocalSkillScriptExecutor, SkillScript, SkillScriptExecutor
 
 if TYPE_CHECKING:
     from localsandbox import LocalSandbox
+
+
+def skill_root_for(script: SkillScript) -> Path:
+    """Resolve the skill folder root that a script belongs to.
+
+    ``script.name`` is relative to the skill folder (for example
+    ``scripts/run.py``), so walking that many levels up from the script file
+    yields the skill root rather than just the script's parent directory.
+
+    Args:
+        script: A file-based script with a ``uri``.
+
+    Returns:
+        Resolved path to the skill folder.
+    """
+    script_path = Path(str(script.uri)).resolve()
+    root = script_path.parent
+    for _ in range(len(PurePosixPath(script.name).parts) - 1):
+        root = root.parent
+    return root
+
+
+def iter_stageable_files(skill_root: Path) -> Iterator[tuple[str, Path]]:
+    """Yield ``(relative_posix_path, resolved_file)`` for files safe to stage.
+
+    Symlinks that resolve outside ``skill_root`` are skipped with a warning.
+    Discovery already rejects those, but staging re-walks the folder, and
+    following such a link would copy an arbitrary host file into the sandbox
+    where the script could read it back out.
+
+    Args:
+        skill_root: Resolved path to the skill folder.
+
+    Yields:
+        Tuples of the path relative to ``skill_root`` and the resolved file.
+    """
+    for path in sorted(skill_root.rglob('*')):
+        resolved = path.resolve()
+        if not resolved.is_relative_to(skill_root):
+            warnings.warn(
+                f"Skipping '{path}': resolves outside the skill folder (symlink escape detected).",
+                UserWarning,
+                stacklevel=2,
+            )
+            continue
+        if resolved.is_file():
+            yield path.relative_to(skill_root).as_posix(), resolved
+
 
 _SHELL_INTERPRETERS: dict[str, list[str]] = {
     '.sh': ['sh'],
@@ -123,38 +178,46 @@ class LocalSandboxScriptExecutor(SkillScriptExecutor):
         self._preload_packages = preload_packages
         self._reuse_sandbox = reuse_sandbox
         self._sandbox: LocalSandbox | None = None
+        self._staged_root: Path | None = None
         # Reused for its host-independent argument marshalling and output formatting.
         self._formatter = LocalSkillScriptExecutor()
 
-    def _stage_files(self, skill_folder: Path) -> dict[str, str | bytes]:
-        """Map every file in the skill folder to its path inside the sandbox."""
-        files: dict[str, str | bytes] = {}
-        for path in sorted(skill_folder.rglob('*')):
-            if path.is_file():
-                relative = path.relative_to(skill_folder).as_posix()
-                files[f'{self.workdir}/{relative}'] = path.read_bytes()
-        return files
+    def _stage_files(self, skill_root: Path) -> dict[str, str | bytes]:
+        """Map every stageable file in the skill folder to its path inside the sandbox."""
+        return {
+            f'{self.workdir}/{relative}': resolved.read_bytes()
+            for relative, resolved in iter_stageable_files(skill_root)
+        }
 
-    def _get_sandbox(self, skill_folder: Path) -> LocalSandbox:
-        """Return the sandbox to run in, creating and staging one when needed."""
+    def _get_sandbox(self, skill_root: Path) -> LocalSandbox:
+        """Return the sandbox to run in, creating and staging one when needed.
+
+        Staging happens at construction, so a reused sandbox is rebuilt whenever
+        the skill changes. One executor instance serves every skill in a
+        ``SkillsDirectory``, and without this the second skill would find the
+        first skill's files still in place.
+        """
         if self._reuse_sandbox and self._sandbox is not None:
-            return self._sandbox
+            if self._staged_root == skill_root:
+                return self._sandbox
+            self.close()
 
         sandbox_cls = _require_localsandbox()
-        kwargs: dict[str, Any] = {'files': self._stage_files(skill_folder), 'cwd': self.workdir}
+        kwargs: dict[str, Any] = {'files': self._stage_files(skill_root), 'cwd': self.workdir}
         if self._preset is not None:
             kwargs['preset'] = self._preset
 
         sandbox: LocalSandbox = sandbox_cls(**kwargs)
         if self._reuse_sandbox:
             self._sandbox = sandbox
+            self._staged_root = skill_root
         return sandbox
 
     async def _run_python(
-        self, sandbox: LocalSandbox, remote_path: str, args: dict[str, Any] | None
+        self, sandbox: LocalSandbox, remote_path: str, cwd: str, args: dict[str, Any] | None
     ) -> tuple[str, str, int]:
         """Run a Python script through Pyodide with an injected argv."""
-        argv: list[str] = [Path(remote_path).name]
+        argv: list[str] = [PurePosixPath(remote_path).name]
         if args:
             self._formatter._build_args(argv, args)
 
@@ -165,7 +228,7 @@ class LocalSandboxScriptExecutor(SkillScriptExecutor):
         )
         result = await sandbox.aexecute_python(
             code,
-            cwd=self.workdir,
+            cwd=cwd,
             preload_packages=self._preload_packages,
         )
 
@@ -222,10 +285,12 @@ class LocalSandboxScriptExecutor(SkillScriptExecutor):
         if script.uri is None:
             raise ValueError(f"Script '{script.name}' has no URI for sandbox execution")
 
-        script_path = Path(script.uri)
-        skill_folder = script_path.parent
+        script_path = Path(script.uri).resolve()
+        skill_root = skill_root_for(script)
         suffix = script_path.suffix.lower()
-        remote_path = f'{self.workdir}/{script_path.relative_to(skill_folder).as_posix()}'
+        remote_path = f'{self.workdir}/{script_path.relative_to(skill_root).as_posix()}'
+        # cwd is the script's own directory, matching LocalSkillScriptExecutor.
+        cwd = str(PurePosixPath(remote_path).parent)
 
         # Validated before provisioning, so an unsupported script never starts a sandbox.
         if suffix != '.py' and suffix not in _SHELL_INTERPRETERS:
@@ -234,10 +299,10 @@ class LocalSandboxScriptExecutor(SkillScriptExecutor):
                 f'Supported: .py (Pyodide), {", ".join(sorted(_SHELL_INTERPRETERS))} (just-bash).'
             )
 
-        sandbox = self._get_sandbox(skill_folder)
+        sandbox = self._get_sandbox(skill_root)
         try:
             if suffix == '.py':
-                stdout, stderr, exit_code = await self._run_python(sandbox, remote_path, args)
+                stdout, stderr, exit_code = await self._run_python(sandbox, remote_path, cwd, args)
             else:
                 stdout, stderr, exit_code = await self._run_shell(sandbox, remote_path, suffix, args)
         finally:
@@ -251,3 +316,4 @@ class LocalSandboxScriptExecutor(SkillScriptExecutor):
         if self._sandbox is not None:
             self._sandbox.__exit__(None, None, None)
             self._sandbox = None
+            self._staged_root = None

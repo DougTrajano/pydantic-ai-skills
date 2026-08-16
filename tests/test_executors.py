@@ -152,6 +152,57 @@ def test_localsandbox_example_reports_missing_extra(localsandbox_example: Any) -
             localsandbox_example._require_localsandbox()
 
 
+@pytest.fixture
+def staged_skill(tmp_path: Path) -> Path:
+    """A skill folder with a nested script, a top-level resource, and a symlink escape."""
+    outside = tmp_path / 'outside'
+    outside.mkdir()
+    (outside / 'secret.txt').write_text('host secret')
+
+    skill = tmp_path / 'demo-skill'
+    (skill / 'scripts').mkdir(parents=True)
+    (skill / 'resources').mkdir()
+    (skill / 'SKILL.md').write_text('---\nname: demo-skill\ndescription: Demo.\n---\n\nBody.\n')
+    (skill / 'resources' / 'data.json').write_text('{"k": 1}')
+    (skill / 'scripts' / 'run.py').write_text('print("hi")\n')
+    (skill / 'scripts' / 'escape.txt').symlink_to(outside / 'secret.txt')
+    return skill
+
+
+@pytest.mark.parametrize('module_name', ['sandbox_opensandbox', 'sandbox_localsandbox'])
+def test_staging_uses_skill_root_not_script_parent(module_name: str, staged_skill: Path) -> None:
+    """script.name is relative to the skill folder, so the root is above scripts/."""
+    example = _load_example(module_name)
+    script = SkillScript(name='scripts/run.py', uri=str(staged_skill / 'scripts' / 'run.py'))
+
+    assert example.skill_root_for(script) == staged_skill.resolve()
+
+
+@pytest.mark.parametrize('module_name', ['sandbox_opensandbox', 'sandbox_localsandbox'])
+def test_staging_includes_whole_skill_folder(module_name: str, staged_skill: Path) -> None:
+    """SKILL.md and resources/ are staged, not just the script's own directory."""
+    example = _load_example(module_name)
+
+    with pytest.warns(UserWarning, match='symlink escape'):
+        staged = dict(example.iter_stageable_files(staged_skill.resolve()))
+
+    assert 'SKILL.md' in staged
+    assert 'resources/data.json' in staged
+    assert 'scripts/run.py' in staged
+
+
+@pytest.mark.parametrize('module_name', ['sandbox_opensandbox', 'sandbox_localsandbox'])
+def test_staging_skips_symlinks_escaping_the_skill_folder(module_name: str, staged_skill: Path) -> None:
+    """Following an escaping symlink would copy a host file into the sandbox."""
+    example = _load_example(module_name)
+
+    with pytest.warns(UserWarning, match='symlink escape'):
+        staged = dict(example.iter_stageable_files(staged_skill.resolve()))
+
+    assert 'scripts/escape.txt' not in staged
+    assert not any('secret' in path.name for path in staged.values())
+
+
 def _script_without_uri() -> SkillScript:
     """Build a script whose uri is None."""
     # __post_init__ requires a uri or a function, so clear it afterwards.

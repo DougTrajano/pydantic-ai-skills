@@ -9,8 +9,11 @@ Lifecycle: a fresh sandbox is created for every script run and killed afterwards
 so runs cannot observe each other's state. Pass ``reuse_sandbox=True`` to keep one
 sandbox warm across runs — much faster, but state leaks between skill invocations.
 
-Staging: the whole skill directory (the script's parent folder) is uploaded, so
-sibling modules and bundled data files resolve exactly as they do locally.
+Staging: the whole skill folder is copied in — ``SKILL.md``, ``resources/``,
+``scripts/`` and anything else — and the script runs with its own directory as
+the working directory, so sibling modules and ``../resources/data.json`` resolve
+exactly as they do locally. Symlinks resolving outside the skill folder are
+skipped with a warning, so staging cannot pull host files into the sandbox.
 
 Requirements:
     pip install "pydantic-ai-skills[opensandbox]"
@@ -25,7 +28,7 @@ Example:
     ```python
     from pydantic_ai_skills import SkillsDirectory
 
-    from examples.sandbox_opensandbox import OpenSandboxScriptExecutor
+    from myapp.sandbox_opensandbox import OpenSandboxScriptExecutor
 
     executor = OpenSandboxScriptExecutor(image='opensandbox/code-interpreter:v1.1.0')
     directory = SkillsDirectory(path='./skills', script_executor=executor)
@@ -35,8 +38,10 @@ Example:
 from __future__ import annotations
 
 import shlex
+import warnings
+from collections.abc import Iterator
 from datetime import timedelta
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 from pydantic_ai_skills import LocalSkillScriptExecutor, SkillScript, SkillScriptExecutor
@@ -52,6 +57,53 @@ _SANDBOX_INTERPRETERS: dict[str, list[str]] = {
     '.zsh': ['zsh'],
     '.fish': ['fish'],
 }
+
+
+def skill_root_for(script: SkillScript) -> Path:
+    """Resolve the skill folder root that a script belongs to.
+
+    ``script.name`` is relative to the skill folder (for example
+    ``scripts/run.py``), so walking that many levels up from the script file
+    yields the skill root rather than just the script's parent directory.
+
+    Args:
+        script: A file-based script with a ``uri``.
+
+    Returns:
+        Resolved path to the skill folder.
+    """
+    script_path = Path(str(script.uri)).resolve()
+    root = script_path.parent
+    for _ in range(len(PurePosixPath(script.name).parts) - 1):
+        root = root.parent
+    return root
+
+
+def iter_stageable_files(skill_root: Path) -> Iterator[tuple[str, Path]]:
+    """Yield ``(relative_posix_path, resolved_file)`` for files safe to stage.
+
+    Symlinks that resolve outside ``skill_root`` are skipped with a warning.
+    Discovery already rejects those, but staging re-walks the folder, and
+    following such a link would copy an arbitrary host file into the sandbox
+    where the script could read it back out.
+
+    Args:
+        skill_root: Resolved path to the skill folder.
+
+    Yields:
+        Tuples of the path relative to ``skill_root`` and the resolved file.
+    """
+    for path in sorted(skill_root.rglob('*')):
+        resolved = path.resolve()
+        if not resolved.is_relative_to(skill_root):
+            warnings.warn(
+                f"Skipping '{path}': resolves outside the skill folder (symlink escape detected).",
+                UserWarning,
+                stacklevel=2,
+            )
+            continue
+        if resolved.is_file():
+            yield path.relative_to(skill_root).as_posix(), resolved
 
 
 def _require_opensandbox() -> Any:
@@ -120,32 +172,26 @@ class OpenSandboxScriptExecutor(SkillScriptExecutor):
             self._sandbox = sandbox
         return sandbox
 
-    async def _stage_skill_folder(self, sandbox: Sandbox, skill_folder: Path) -> None:
-        """Upload every file in the skill folder into the sandbox workdir."""
+    async def _stage_skill_folder(self, sandbox: Sandbox, skill_root: Path) -> None:
+        """Upload every stageable file in the skill folder into the sandbox workdir."""
         from opensandbox.models import WriteEntry
 
         entries: list[WriteEntry] = []
-        for path in sorted(skill_folder.rglob('*')):
-            if not path.is_file():
-                continue
-            relative = path.relative_to(skill_folder).as_posix()
+        for relative, resolved in iter_stageable_files(skill_root):
             entries.append(
                 WriteEntry(
                     path=f'{self._workdir}/{relative}',
-                    data=path.read_bytes(),
-                    mode=0o755 if path.stat().st_mode & 0o111 else 0o644,
+                    data=resolved.read_bytes(),
+                    mode=0o755 if resolved.stat().st_mode & 0o111 else 0o644,
                 )
             )
 
         if entries:
             await sandbox.files.write_files(entries)
 
-    def _build_command(self, script_path: Path, skill_folder: Path, args: dict[str, Any] | None) -> str:
+    def _build_command(self, remote_path: str, suffix: str, args: dict[str, Any] | None) -> str:
         """Build the shell command line executed inside the sandbox."""
-        relative = script_path.relative_to(skill_folder).as_posix()
-        remote_path = f'{self._workdir}/{relative}'
-
-        interpreter = _SANDBOX_INTERPRETERS.get(script_path.suffix.lower())
+        interpreter = _SANDBOX_INTERPRETERS.get(suffix)
         cmd = [*interpreter, remote_path] if interpreter else [remote_path]
 
         if args:
@@ -177,9 +223,12 @@ class OpenSandboxScriptExecutor(SkillScriptExecutor):
         if script.uri is None:
             raise ValueError(f"Script '{script.name}' has no URI for sandbox execution")
 
-        script_path = Path(script.uri)
-        skill_folder = script_path.parent
-        command = self._build_command(script_path, skill_folder, args)
+        script_path = Path(script.uri).resolve()
+        skill_root = skill_root_for(script)
+        remote_path = f'{self._workdir}/{script_path.relative_to(skill_root).as_posix()}'
+        # cwd is the script's own directory, matching LocalSkillScriptExecutor.
+        working_directory = str(PurePosixPath(remote_path).parent)
+        command = self._build_command(remote_path, script_path.suffix.lower(), args)
 
         # _get_sandbox raises the ImportError naming the extra, so import the SDK
         # models only once a sandbox exists.
@@ -187,11 +236,11 @@ class OpenSandboxScriptExecutor(SkillScriptExecutor):
         from opensandbox.models.execd import RunCommandOpts
 
         try:
-            await self._stage_skill_folder(sandbox, skill_folder)
+            await self._stage_skill_folder(sandbox, skill_root)
             execution = await sandbox.commands.run(
                 command,
                 opts=RunCommandOpts(
-                    working_directory=self._workdir,
+                    working_directory=working_directory,
                     timeout=timedelta(seconds=self.timeout),
                     envs=self._env_vars or None,
                 ),
