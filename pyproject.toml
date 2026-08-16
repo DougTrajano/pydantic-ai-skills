@@ -1,10 +1,10 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [project]
 name = "pydantic-ai-skills"
-version = "1.3.0"
+dynamic = ["version"]
 description = "A lightweight agent skill implementation for Pydantic AI"
 authors = [
     { name = "Douglas Trajano", email = "douglas.trajano@outlook.com" },
@@ -125,6 +125,12 @@ quote-style = "single"
 
 [tool.ruff.lint.per-file-ignores]
 "examples/**/*.py" = ["D101", "D103"]
+
+[tool.hatch.version]
+# Version comes from the git tag (e.g. 1.4.0) so releases never need a commit
+# back to main. fallback-version covers builds from a tarball with no git data.
+source = "vcs"
+fallback-version = "0.0.0"
 
 [tool.hatch.build.targets.wheel]
 packages = ["pydantic_ai_skills"]
