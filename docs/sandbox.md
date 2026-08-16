@@ -131,8 +131,8 @@ This is a real trade-off, not a tuning knob: with reuse, files written by one sc
 
 The protocol is deliberately small, so adding a backend is mostly plumbing:
 
-1. Derive the skill root and stage it — reuse `skill_root_for` from `pydantic_ai_skills.sandboxes`. **Not** `Path(script.uri).parent`, which is the `scripts/` directory for the usual layout and would leave out `SKILL.md` and `resources/`; and not a walk up by `script.name` depth either, since discovery stores a *resolved* uri, so an in-tree symlink that changes depth would land above the skill and stage its siblings. Anchor on the nearest `SKILL.md` ancestor.
-2. Skip symlinks that resolve outside the skill root, or staging will copy host files into the sandbox — reuse `iter_stageable_files`.
+1. Derive the skill root and stage it — call `skill_root_for` from `pydantic_ai_skills.sandboxes`. Discovery records the folder it loaded the skill from on `FileBasedSkillScript.skill_root`, and that is the authoritative answer. Do not infer it: `Path(script.uri).parent` is the `scripts/` directory for the usual layout; the nearest `SKILL.md` ancestor picks the wrong folder when a skill nests another skill; and walking up by `script.name` depth walks too far when an in-tree symlink changes the depth, staging sibling skills.
+2. Skip symlinks that resolve outside the skill root, and anything resolving into version-control metadata such as `.git` — a clone URL can carry a token. Reuse `iter_stageable_files`, which handles both.
 3. Build the command. Reuse `LocalSkillScriptExecutor._build_args` for the `--flag value` marshalling rather than reimplementing the bool/list/`None` rules.
 4. Execute with the script's own directory as the working directory, so relative paths behave as they do locally, and collect stdout, stderr and the exit code.
 5. Format with `LocalSkillScriptExecutor._format_output(stdout_chunks, stderr_chunks, exit_code)` so the returned string matches local execution.

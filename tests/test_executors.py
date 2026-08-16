@@ -1078,3 +1078,20 @@ async def test_reused_opensandbox_restages_when_only_the_skill_root_differs(
 
     staged_scripts = [e.data for e in sandbox.written if e.path.endswith('scripts/run.py')]
     assert staged_scripts[-1] == b'print("B")\n', "skill B's script must replace skill A's"
+
+
+def test_staging_rejects_symlink_aliases_into_excluded_directories(cloned_skill: Path) -> None:
+    """Pruning directories does not stop an alias to a file inside one.
+
+    A committed `resources/config -> ../.git/config` is an ordinary file entry
+    whose target still lives under the skill root, so it would otherwise carry
+    the clone token into the sandbox.
+    """
+    (cloned_skill / 'resources').mkdir()
+    (cloned_skill / 'resources' / 'config').symlink_to(cloned_skill / '.git' / 'config')
+
+    with pytest.warns(UserWarning, match='excluded directory'):
+        staged = _collect_staged(cloned_skill.resolve())
+
+    assert 'resources/config' not in staged
+    assert not any('ghp_SECRETTOKEN' in source.read_text(errors='ignore') for source in staged.values())

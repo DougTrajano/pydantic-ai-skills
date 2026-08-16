@@ -67,7 +67,8 @@ def iter_stageable_files(skill_root: Path) -> Iterator[tuple[str, Path]]:
     Two things are filtered out:
 
     - :data:`EXCLUDED_STAGING_DIRS`, most importantly version-control metadata,
-      which can hold the credentials a registry cloned with.
+      which can hold the credentials a registry cloned with. Both the directories
+      themselves and symlinks resolving into them are skipped.
     - Symlinks resolving outside ``skill_root``. Discovery already rejects those,
       but staging re-walks the folder, and following such a link would copy an
       arbitrary host file into the sandbox where the script could read it back out.
@@ -92,6 +93,18 @@ def iter_stageable_files(skill_root: Path) -> Iterator[tuple[str, Path]]:
                     stacklevel=2,
                 )
                 continue
+
+            # Pruning directories is not enough: a symlink elsewhere in the skill
+            # (resources/config -> ../.git/config) is an ordinary file entry whose
+            # target still lives under skill_root, and would alias a credential in.
+            if EXCLUDED_STAGING_DIRS.intersection(resolved.relative_to(skill_root).parts):
+                warnings.warn(
+                    f"Skipping '{path}': resolves into an excluded directory.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+                continue
+
             if resolved.is_file():
                 yield path.relative_to(skill_root).as_posix(), resolved
 
