@@ -44,6 +44,34 @@ _SANDBOX_INTERPRETERS: dict[str, list[str]] = {
 }
 
 
+def _shebang_command(script_path: Path) -> list[str] | None:
+    """Return the interpreter command a script's shebang asks for, or None.
+
+    The tokens are returned verbatim, exactly as the kernel would use them
+    inside the sandbox. Unlike
+    :meth:`~pydantic_ai_skills.LocalSkillScriptExecutor._extract_shebang_command`
+    nothing is resolved against the host filesystem: ``/bin/bash`` must exist in
+    the container, not here.
+
+    Args:
+        script_path: Local path to the staged script file.
+
+    Returns:
+        The shebang's tokens, or None when there is no usable shebang.
+    """
+    try:
+        with script_path.open('rb') as handle:
+            first_line = handle.readline()
+    except OSError:  # pragma: no cover - unreadable files are skipped earlier
+        return None
+
+    if not first_line.startswith(b'#!'):
+        return None
+
+    parts = shlex.split(first_line[2:].decode('utf-8', errors='ignore').strip())
+    return parts or None
+
+
 def _require_opensandbox() -> Any:
     """Import the opensandbox SDK, or explain which extra installs it."""
     try:
@@ -150,9 +178,15 @@ class OpenSandboxScriptExecutor:
             ]
         )
 
-    def _build_command(self, remote_path: str, suffix: str, args: dict[str, Any] | None) -> str:
-        """Build the shell command line executed inside the sandbox."""
-        interpreter = _SANDBOX_INTERPRETERS.get(suffix)
+    def _build_command(self, script_path: Path, remote_path: str, suffix: str, args: dict[str, Any] | None) -> str:
+        """Build the shell command line executed inside the sandbox.
+
+        A shebang wins over the suffix fallback, matching
+        [`LocalSkillScriptExecutor`][pydantic_ai_skills.LocalSkillScriptExecutor];
+        otherwise a ``#!/bin/bash`` script using bash-only syntax would run under
+        ``sh`` here but bash locally.
+        """
+        interpreter = _shebang_command(script_path) or _SANDBOX_INTERPRETERS.get(suffix)
         cmd = [*interpreter, remote_path] if interpreter else [remote_path]
 
         if args:
@@ -191,7 +225,7 @@ class OpenSandboxScriptExecutor:
         remote_path = f'{self._workdir}/{script_path.relative_to(skill_root).as_posix()}'
         # cwd is the script's own directory, matching LocalSkillScriptExecutor.
         working_directory = str(PurePosixPath(remote_path).parent)
-        command = self._build_command(remote_path, script_path.suffix.lower(), args)
+        command = self._build_command(script_path, remote_path, script_path.suffix.lower(), args)
 
         # _get_sandbox raises the ImportError naming the extra, so import the SDK
         # models only once a sandbox exists.

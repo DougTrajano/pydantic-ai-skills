@@ -761,3 +761,61 @@ async def test_localsandbox_shell_script_runs_from_its_own_directory(
     await executor.run(_script_in(runnable_skill, 'scripts/go.sh'))
 
     assert (created[0].command or '').startswith('cd /data/skill/scripts && ')
+
+
+# ---------------------------------------------------------------------------
+# OpenSandbox command construction
+# ---------------------------------------------------------------------------
+
+
+def _opensandbox_command(executor: OpenSandboxScriptExecutor, script: Path, args: Any = None) -> str:
+    """Build the command line the executor would run for a local script file."""
+    return executor._build_command(script, f'/workspace/skills/{script.name}', script.suffix.lower(), args)
+
+
+@pytest.mark.parametrize(
+    ('shebang', 'expected_prefix'),
+    [
+        ('#!/bin/bash\n', '/bin/bash '),
+        ('#!/usr/bin/env bash\n', '/usr/bin/env bash '),
+        ('#!/usr/bin/env python3\n', '/usr/bin/env python3 '),
+    ],
+)
+def test_opensandbox_honors_shebang(tmp_path: Path, shebang: str, expected_prefix: str) -> None:
+    """A bash-only script must not be launched with sh just because it ends in .sh."""
+    script = tmp_path / 'go.sh'
+    script.write_text(f'{shebang}echo hi\n')
+
+    command = _opensandbox_command(OpenSandboxScriptExecutor(), script)
+
+    assert command.startswith(expected_prefix)
+
+
+def test_opensandbox_falls_back_to_suffix_without_shebang(tmp_path: Path) -> None:
+    """Without a shebang the suffix mapping still applies."""
+    script = tmp_path / 'go.sh'
+    script.write_text('echo hi\n')
+
+    command = _opensandbox_command(OpenSandboxScriptExecutor(), script)
+
+    assert command.startswith('sh ')
+
+
+def test_opensandbox_runs_unknown_types_directly(tmp_path: Path) -> None:
+    """An executable with no shebang and no known suffix is run as-is."""
+    script = tmp_path / 'tool'
+    script.write_text('binary-ish\n')
+
+    command = _opensandbox_command(OpenSandboxScriptExecutor(), script)
+
+    assert command == '/workspace/skills/tool'
+
+
+def test_opensandbox_shebang_does_not_resolve_against_the_host(tmp_path: Path) -> None:
+    """The interpreter must be taken verbatim; it has to exist in the container, not here."""
+    script = tmp_path / 'go.sh'
+    script.write_text('#!/opt/custom/bin/bash\necho hi\n')
+
+    command = _opensandbox_command(OpenSandboxScriptExecutor(), script)
+
+    assert command.startswith('/opt/custom/bin/bash ')
