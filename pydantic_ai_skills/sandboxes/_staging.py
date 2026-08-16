@@ -132,11 +132,11 @@ class StagedFile:
 def _stage_snapshot(skill_root: Path) -> tuple[list[StagedFile], str]:
     """Walk the skill folder once, returning its files and a content fingerprint.
 
-    The fingerprint is a digest of every staged path and its contents, so a
-    reused sandbox can tell whether the source skill changed since it was
-    staged. Size and mtime are not enough: reproducible-build tooling pins
-    mtimes, so an edit that preserves file size would go unnoticed and the
-    sandbox would keep running the previously staged script.
+    The fingerprint is a digest of every staged path, its executable bit and its
+    contents, so a reused sandbox can tell whether the source skill changed since
+    it was staged. Size and mtime are not enough: reproducible-build tooling pins
+    mtimes, so an edit that preserves file size would go unnoticed and the sandbox
+    would keep running the previously staged script.
 
     Contents are read once here and carried on the returned entries, so hashing
     costs no extra I/O over staging itself.
@@ -151,15 +151,13 @@ def _stage_snapshot(skill_root: Path) -> tuple[list[StagedFile], str]:
     digest = hashlib.sha256()
     for relative, resolved in iter_stageable_files(skill_root):
         data = resolved.read_bytes()
-        entries.append(
-            StagedFile(
-                relative=relative,
-                source=resolved,
-                data=data,
-                executable=bool(resolved.stat().st_mode & 0o111),
-            )
-        )
+        executable = bool(resolved.stat().st_mode & 0o111)
+        entries.append(StagedFile(relative=relative, source=resolved, data=data, executable=executable))
+
         digest.update(relative.encode('utf-8'))
         digest.update(b'\0')
+        # The mode matters too: chmod +x with no content change makes discovery
+        # treat the file as a script, and a stale 0644 copy would fail to execute.
+        digest.update(b'x' if executable else b'-')
         digest.update(hashlib.sha256(data).digest())
     return entries, digest.hexdigest()

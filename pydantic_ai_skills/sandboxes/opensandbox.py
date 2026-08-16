@@ -178,11 +178,15 @@ class OpenSandboxScriptExecutor:
             return
 
         paths = {f'{self._workdir}/{entry.relative}' for entry in entries}
+        # Every ancestor, not just the immediate parent: creating resources/a/b also
+        # leaves resources/a behind, and an untracked ancestor would survive pruning
+        # and block a later skill that needs a file at that path.
         directories = {self._workdir}
         for entry in entries:
             parent = PurePosixPath(entry.relative).parent
-            if parent != PurePosixPath('.'):
+            while parent != PurePosixPath('.'):
                 directories.add(f'{self._workdir}/{parent}')
+                parent = parent.parent
 
         stale_files = sorted(self._staged_paths - paths)
         if stale_files:

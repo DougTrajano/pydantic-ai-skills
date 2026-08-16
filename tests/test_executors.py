@@ -1181,3 +1181,53 @@ async def test_reused_opensandbox_removes_directories_replaced_by_files(
     await executor.run(_script_in(second, 'run.py'))
 
     assert '/workspace/skills/resources/config' in sandbox.deleted_dirs
+
+
+async def test_reused_sandbox_restages_when_only_the_executable_bit_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_opensandbox_models: None
+) -> None:
+    """Chmod +x makes discovery treat a file as a script; a stale 0644 copy cannot run."""
+    skill = tmp_path / 'demo-skill'
+    skill.mkdir()
+    (skill / 'SKILL.md').write_text('---\nname: demo-skill\ndescription: Demo.\n---\n\nBody.\n')
+    tool = skill / 'tool'
+    tool.write_text('#!/bin/sh\necho hi\n')
+
+    sandbox = _FakeOpenSandboxRun()
+    monkeypatch.setattr(opensandbox_module, '_require_opensandbox', lambda: SimpleNamespace(create=_returning(sandbox)))
+    executor = OpenSandboxScriptExecutor(reuse_sandbox=True)
+    script = _script_in(skill, 'tool')
+
+    await executor.run(script)
+    tool.chmod(0o755)  # Contents untouched.
+    await executor.run(script)
+
+    modes = [entry.mode for entry in sandbox.written if entry.path.endswith('/tool')]
+    assert modes[-1] == 0o755, 'the executable bit must trigger a restage'
+
+
+async def test_reused_opensandbox_prunes_ancestor_directories(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_opensandbox_models: None
+) -> None:
+    """Creating resources/config/sub also leaves resources/config, which must be pruned."""
+    first = tmp_path / 'skill-a'
+    (first / 'resources' / 'config' / 'sub').mkdir(parents=True)
+    (first / 'SKILL.md').write_text('---\nname: skill-a\ndescription: A.\n---\n\nBody.\n')
+    (first / 'resources' / 'config' / 'sub' / 'item').write_text('deep\n')
+    (first / 'run.py').write_text('print("A")\n')
+
+    second = tmp_path / 'skill-b'
+    (second / 'resources').mkdir(parents=True)
+    (second / 'SKILL.md').write_text('---\nname: skill-b\ndescription: B.\n---\n\nBody.\n')
+    (second / 'resources' / 'config').write_text('now a file\n')
+    (second / 'run.py').write_text('print("B")\n')
+
+    sandbox = _FakeOpenSandboxRun()
+    monkeypatch.setattr(opensandbox_module, '_require_opensandbox', lambda: SimpleNamespace(create=_returning(sandbox)))
+    executor = OpenSandboxScriptExecutor(workdir='/workspace/skills', reuse_sandbox=True)
+
+    await executor.run(_script_in(first, 'run.py'))
+    await executor.run(_script_in(second, 'run.py'))
+
+    assert '/workspace/skills/resources/config' in sandbox.deleted_dirs
+    assert '/workspace/skills/resources/config/sub' in sandbox.deleted_dirs
