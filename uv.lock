@@ -3,17 +3,20 @@ revision = 3
 requires-python = ">=3.10"
 resolution-markers = [
     "python_full_version >= '3.15' and sys_platform == 'win32'",
-    "python_full_version == '3.14.*' and sys_platform == 'win32'",
     "python_full_version >= '3.15' and sys_platform == 'emscripten'",
-    "python_full_version == '3.14.*' and sys_platform == 'emscripten'",
     "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "python_full_version == '3.14.*' and sys_platform == 'win32'",
+    "python_full_version == '3.14.*' and sys_platform == 'emscripten'",
     "python_full_version == '3.14.*' and sys_platform != 'emscripten' and sys_platform != 'win32'",
     "python_full_version == '3.13.*' and sys_platform == 'win32'",
     "python_full_version == '3.13.*' and sys_platform == 'emscripten'",
     "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'win32'",
-    "python_full_version >= '3.11' and python_full_version < '3.13' and sys_platform == 'win32'",
-    "python_full_version >= '3.11' and python_full_version < '3.13' and sys_platform == 'emscripten'",
-    "python_full_version >= '3.11' and python_full_version < '3.13' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "python_full_version == '3.12.*' and sys_platform == 'win32'",
+    "python_full_version == '3.11.*' and sys_platform == 'win32'",
+    "python_full_version == '3.12.*' and sys_platform == 'emscripten'",
+    "python_full_version == '3.11.*' and sys_platform == 'emscripten'",
+    "python_full_version == '3.12.*' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "python_full_version == '3.11.*' and sys_platform != 'emscripten' and sys_platform != 'win32'",
     "python_full_version < '3.11'",
 ]
 
@@ -38,17 +41,20 @@ version = "3.11.1"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "python_full_version >= '3.15' and sys_platform == 'win32'",
-    "python_full_version == '3.14.*' and sys_platform == 'win32'",
     "python_full_version >= '3.15' and sys_platform == 'emscripten'",
-    "python_full_version == '3.14.*' and sys_platform == 'emscripten'",
     "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "python_full_version == '3.14.*' and sys_platform == 'win32'",
+    "python_full_version == '3.14.*' and sys_platform == 'emscripten'",
     "python_full_version == '3.14.*' and sys_platform != 'emscripten' and sys_platform != 'win32'",
     "python_full_version == '3.13.*' and sys_platform == 'win32'",
     "python_full_version == '3.13.*' and sys_platform == 'emscripten'",
     "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'win32'",
-    "python_full_version >= '3.11' and python_full_version < '3.13' and sys_platform == 'win32'",
-    "python_full_version >= '3.11' and python_full_version < '3.13' and sys_platform == 'emscripten'",
-    "python_full_version >= '3.11' and python_full_version < '3.13' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "python_full_version == '3.12.*' and sys_platform == 'win32'",
+    "python_full_version == '3.11.*' and sys_platform == 'win32'",
+    "python_full_version == '3.12.*' and sys_platform == 'emscripten'",
+    "python_full_version == '3.11.*' and sys_platform == 'emscripten'",
+    "python_full_version == '3.12.*' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "python_full_version == '3.11.*' and sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 dependencies = [
     { name = "caio" },
@@ -1942,6 +1948,18 @@ wheels = [
 ]
 
 [[package]]
+name = "localsandbox"
+version = "0.3.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pydantic" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/cd/b9/784895095d064cf8406865bb630f960d173dfe3bc25f916c988f875ac57d/localsandbox-0.3.2.tar.gz", hash = "sha256:c6b25f9868e64db8ca3fe360ba5b1c638d076eda84e7b89bf5363f0bf7d95065", size = 36105, upload-time = "2026-04-03T07:55:40.749Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/bd/b5/146a3b5b3fdba6502de33bc240dbbb843c0a388785236c8a6d6a9fb4bcb8/localsandbox-0.3.2-py3-none-any.whl", hash = "sha256:f825eada16820186ff8056d98244f7273d886700fbeb88546e08dab28035a4d7", size = 38963, upload-time = "2026-04-03T07:55:39.262Z" },
+]
+
+[[package]]
 name = "logfire"
 version = "4.32.1"
 source = { registry = "https://pypi.org/simple" }
@@ -2786,17 +2804,20 @@ version = "2.4.4"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "python_full_version >= '3.15' and sys_platform == 'win32'",
-    "python_full_version == '3.14.*' and sys_platform == 'win32'",
     "python_full_version >= '3.15' and sys_platform == 'emscripten'",
-    "python_full_version == '3.14.*' and sys_platform == 'emscripten'",
     "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "python_full_version == '3.14.*' and sys_platform == 'win32'",
+    "python_full_version == '3.14.*' and sys_platform == 'emscripten'",
     "python_full_version == '3.14.*' and sys_platform != 'emscripten' and sys_platform != 'win32'",
     "python_full_version == '3.13.*' and sys_platform == 'win32'",
     "python_full_version == '3.13.*' and sys_platform == 'emscripten'",
     "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'win32'",
-    "python_full_version >= '3.11' and python_full_version < '3.13' and sys_platform == 'win32'",
-    "python_full_version >= '3.11' and python_full_version < '3.13' and sys_platform == 'emscripten'",
-    "python_full_version >= '3.11' and python_full_version < '3.13' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "python_full_version == '3.12.*' and sys_platform == 'win32'",
+    "python_full_version == '3.11.*' and sys_platform == 'win32'",
+    "python_full_version == '3.12.*' and sys_platform == 'emscripten'",
+    "python_full_version == '3.11.*' and sys_platform == 'emscripten'",
+    "python_full_version == '3.12.*' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "python_full_version == '3.11.*' and sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/d7/9f/b8cef5bffa569759033adda9481211426f12f53299629b410340795c2514/numpy-2.4.4.tar.gz", hash = "sha256:2d390634c5182175533585cc89f3608a4682ccb173cc9bb940b2881c8d6f8fa0", size = 20731587, upload-time = "2026-03-29T13:22:01.298Z" }
 wheels = [
@@ -2890,6 +2911,21 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/af/ac/f725c4efbda8657d02be684607e5a2e5ce362e4790fdbcbdfb7c15018647/openai-2.46.0.tar.gz", hash = "sha256:0421e0735ac41451cad894af4cddf0435bfbf8cbc538ac0e15b3c062f2ddc06a", size = 1114628, upload-time = "2026-07-17T02:48:06.05Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ea/7b/206238ebcb50b235942b1c66dba4974776f2057402a8d91c399be587d66a/openai-2.46.0-py3-none-any.whl", hash = "sha256:672381db55efb3a1e2610f29304c130cccdd0b319bace4d492b2443cb64c1e7c", size = 1637556, upload-time = "2026-07-17T02:48:03.695Z" },
+]
+
+[[package]]
+name = "opensandbox"
+version = "0.1.15"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "attrs" },
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "python-dateutil" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/43/21/654a3d69815b09690e926d553f3f4a178640d1206000a1b49f5e22c8eb68/opensandbox-0.1.15.tar.gz", hash = "sha256:017abc9b399b88da51bf077d6fb94ee89b1783e601495e85ba85fed478fed1b0", size = 228729, upload-time = "2026-07-24T09:36:29.988Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d5/5c/ab87ea696531210790feb8f575471036fccba29dedaff201736f15bbb3a7/opensandbox-0.1.15-py3-none-any.whl", hash = "sha256:992b01490551f4d8e3f99caa25e34cb9d1690f0c5027eeebab912738291957d1", size = 538522, upload-time = "2026-07-24T09:36:28.277Z" },
 ]
 
 [[package]]
@@ -3183,17 +3219,20 @@ version = "3.0.2"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "python_full_version >= '3.15' and sys_platform == 'win32'",
-    "python_full_version == '3.14.*' and sys_platform == 'win32'",
     "python_full_version >= '3.15' and sys_platform == 'emscripten'",
-    "python_full_version == '3.14.*' and sys_platform == 'emscripten'",
     "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "python_full_version == '3.14.*' and sys_platform == 'win32'",
+    "python_full_version == '3.14.*' and sys_platform == 'emscripten'",
     "python_full_version == '3.14.*' and sys_platform != 'emscripten' and sys_platform != 'win32'",
     "python_full_version == '3.13.*' and sys_platform == 'win32'",
     "python_full_version == '3.13.*' and sys_platform == 'emscripten'",
     "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'win32'",
-    "python_full_version >= '3.11' and python_full_version < '3.13' and sys_platform == 'win32'",
-    "python_full_version >= '3.11' and python_full_version < '3.13' and sys_platform == 'emscripten'",
-    "python_full_version >= '3.11' and python_full_version < '3.13' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "python_full_version == '3.12.*' and sys_platform == 'win32'",
+    "python_full_version == '3.11.*' and sys_platform == 'win32'",
+    "python_full_version == '3.12.*' and sys_platform == 'emscripten'",
+    "python_full_version == '3.11.*' and sys_platform == 'emscripten'",
+    "python_full_version == '3.12.*' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "python_full_version == '3.11.*' and sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 dependencies = [
     { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" } },
@@ -3612,7 +3651,7 @@ email = [
 
 [[package]]
 name = "pydantic-ai-skills"
-version = "1.2.0"
+version = "1.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "anyio" },
@@ -3653,6 +3692,12 @@ examples = [
 git = [
     { name = "gitpython" },
 ]
+localsandbox = [
+    { name = "localsandbox", marker = "python_full_version >= '3.12'" },
+]
+opensandbox = [
+    { name = "opensandbox" },
+]
 s3 = [
     { name = "boto3" },
 ]
@@ -3666,17 +3711,18 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "anyio", specifier = ">=4.0.0" },
-    { name = "arxiv", marker = "extra == 'examples'", specifier = ">=3.0.0,<4.0.0" },
-    { name = "black", marker = "extra == 'dev'", specifier = ">=26.5.0,<27.0.0" },
+    { name = "arxiv", marker = "extra == 'examples'", specifier = ">=3.0.0" },
+    { name = "black", marker = "extra == 'dev'", specifier = ">=26.5.0" },
     { name = "boto3", marker = "extra == 's3'", specifier = ">=1.26.0" },
-    { name = "datasets", marker = "extra == 'examples'", specifier = ">=4.8.0,<5.0.0" },
-    { name = "ddgs", marker = "extra == 'examples'", specifier = ">=9.14.0,<10.0.0" },
-    { name = "gitpython", marker = "extra == 'examples'", specifier = ">=3.1.0,<4.0.0" },
+    { name = "datasets", marker = "extra == 'examples'", specifier = ">=4.8.0" },
+    { name = "ddgs", marker = "extra == 'examples'", specifier = ">=9.14.0" },
+    { name = "gitpython", marker = "extra == 'examples'", specifier = ">=3.1.0" },
     { name = "gitpython", marker = "extra == 'git'", specifier = ">=3.1.40" },
-    { name = "httpx", marker = "extra == 'examples'", specifier = ">=0.28.0,<0.29.0" },
-    { name = "isort", marker = "extra == 'dev'", specifier = ">=8.0.0,<9.0.0" },
-    { name = "langchain-community", marker = "extra == 'examples'", specifier = ">=0.4.0,<0.5.0" },
-    { name = "logfire", marker = "extra == 'examples'", specifier = ">=4.32.0,<5.0.0" },
+    { name = "httpx", marker = "extra == 'examples'", specifier = ">=0.28.0" },
+    { name = "isort", marker = "extra == 'dev'", specifier = ">=8.0.0" },
+    { name = "langchain-community", marker = "extra == 'examples'", specifier = ">=0.4.0" },
+    { name = "localsandbox", marker = "python_full_version >= '3.12' and extra == 'localsandbox'", specifier = ">=0.3.2" },
+    { name = "logfire", marker = "extra == 'examples'", specifier = ">=4.32.0" },
     { name = "mkdocs", marker = "extra == 'docs'", specifier = ">=1.6.1" },
     { name = "mkdocs-git-revision-date-localized-plugin", marker = "extra == 'docs'", specifier = ">=1.5.0" },
     { name = "mkdocs-llmstxt", marker = "extra == 'docs'", specifier = ">=0.2.0" },
@@ -3685,20 +3731,21 @@ requires-dist = [
     { name = "mkdocs-section-index", marker = "extra == 'docs'", specifier = ">=0.3.10" },
     { name = "mkdocs-tooltips", marker = "extra == 'docs'", specifier = ">=0.1.0" },
     { name = "mkdocstrings", extras = ["python"], marker = "extra == 'docs'", specifier = ">=1.0.0" },
-    { name = "mypy", marker = "extra == 'dev'", specifier = ">=2.3.0,<3.0.0" },
-    { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4.6.0,<5.0.0" },
+    { name = "mypy", marker = "extra == 'dev'", specifier = ">=2.3.0" },
+    { name = "opensandbox", marker = "extra == 'opensandbox'", specifier = ">=0.1.15" },
+    { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4.6.0" },
     { name = "pydantic-ai-slim", specifier = ">=1.105" },
     { name = "pydantic-ai-slim", extras = ["mcp", "openai", "logfire"], marker = "extra == 'examples'", specifier = ">=2.0.0" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0.0" },
     { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.23.0" },
     { name = "pytest-cov", marker = "extra == 'test'", specifier = ">=4.1.0" },
-    { name = "python-dotenv", marker = "extra == 'examples'", specifier = ">=1.2.0,<2.0.0" },
+    { name = "python-dotenv", marker = "extra == 'examples'", specifier = ">=1.2.0" },
     { name = "pyyaml", specifier = ">=6.0" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.15.0,<0.16.0" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.15.0" },
     { name = "types-pyyaml", marker = "extra == 'test'", specifier = ">=6.0.12" },
-    { name = "uvicorn", marker = "extra == 'examples'", specifier = ">=0.46.0,<0.47.0" },
+    { name = "uvicorn", marker = "extra == 'examples'", specifier = ">=0.46.0" },
 ]
-provides-extras = ["docs", "git", "s3", "test", "dev", "examples"]
+provides-extras = ["docs", "git", "s3", "opensandbox", "localsandbox", "test", "dev", "examples"]
 
 [[package]]
 name = "pydantic-ai-slim"

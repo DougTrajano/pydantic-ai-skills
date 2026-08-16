@@ -100,6 +100,12 @@ directory = SkillsDirectory(path="./skills", script_executor=executor)
 pip install "pydantic-ai-skills[localsandbox]"
 ```
 
+!!! note "Python 3.12 or newer"
+    `localsandbox` requires Python 3.12, while this package supports 3.10. The
+    extra carries a marker so it stays resolvable on 3.10 and 3.11 — it simply
+    installs nothing there, and `LocalSandboxScriptExecutor` raises an
+    `ImportError` saying so. `OpenSandboxScriptExecutor` has no such limit.
+
 ```python
 from pydantic_ai_skills import LocalSandboxScriptExecutor, SkillsDirectory
 

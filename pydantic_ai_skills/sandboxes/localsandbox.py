@@ -99,7 +99,9 @@ def _require_localsandbox() -> Any:
     except ImportError as exc:  # pragma: no cover - depends on the environment
         raise ImportError(
             'LocalSandboxScriptExecutor requires the "localsandbox" package. '
-            'Install it with: pip install "pydantic-ai-skills[localsandbox]"'
+            'Install it with: pip install "pydantic-ai-skills[localsandbox]". '
+            'Note that localsandbox requires Python 3.12 or newer, so the extra '
+            'installs nothing on 3.10 and 3.11.'
         ) from exc
 
     return _LocalSandbox

@@ -58,7 +58,10 @@ opensandbox = [
     "opensandbox>=0.1.15",
 ]
 localsandbox = [
-    "localsandbox>=0.3.2",
+    # localsandbox requires Python >=3.12 while this project supports >=3.10, so
+    # the marker keeps the extra resolvable on 3.10/3.11 (where it installs
+    # nothing and LocalSandboxScriptExecutor raises a clear ImportError).
+    "localsandbox>=0.3.2; python_version >= '3.12'",
 ]
 test = [
     "pytest>=8.0.0",
