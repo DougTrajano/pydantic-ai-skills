@@ -1,25 +1,33 @@
-"""Tests for the SkillScriptExecutor protocol.
-
-The sandbox executors live inside ``examples/sandbox_*.py``, which build an
-``Agent`` at import time and so cannot be imported here. They are exercised the
-same way every other example is: by running them.
-"""
+"""Tests for the SkillScriptExecutor protocol and the bundled sandbox executors."""
 
 from __future__ import annotations
 
+import contextlib
+import io
+from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
 from pydantic_ai_skills import (
     CallableSkillScriptExecutor,
+    LocalSandboxScriptExecutor,
     LocalSkillScriptExecutor,
+    OpenSandboxScriptExecutor,
     SkillScript,
     SkillScriptExecutor,
     SkillsDirectory,
     SkillsToolset,
+)
+from pydantic_ai_skills.local import FileBasedSkillScript
+from pydantic_ai_skills.sandboxes import (
+    iter_stageable_files,
+    localsandbox as localsandbox_module,
+    opensandbox as opensandbox_module,
+    skill_root_for,
 )
 
 # ---------------------------------------------------------------------------
@@ -102,10 +110,10 @@ async def test_duck_typed_executor_runs_through_toolset(skill_dir: Path) -> None
 
 
 async def test_custom_executor_receives_skill_relative_script_name(skill_dir: Path) -> None:
-    """script.name stays relative to the skill folder, which the sandbox executors rely on.
+    """script.name stays relative to the skill folder, and uri points inside it.
 
-    They derive the skill root by walking up that many levels from ``script.uri``;
-    if this contract changed they would stage the wrong directory.
+    The sandbox executors anchor the skill root on the nearest ``SKILL.md``
+    ancestor of ``script.uri``; this pins the layout that relies on.
     """
     executor = DuckTypedExecutor()
     toolset = SkillsToolset(directories=[SkillsDirectory(path=skill_dir, script_executor=executor)])
@@ -114,3 +122,315 @@ async def test_custom_executor_receives_skill_relative_script_name(skill_dir: Pa
 
     assert script.name == 'scripts/run.py'
     assert Path(str(script.uri)).parent.name == 'scripts'
+
+
+# ---------------------------------------------------------------------------
+# Registry skills are the least-trusted source, so they must be sandboxable
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def registry_skills_root(tmp_path: Path) -> Path:
+    """A skills root shaped like a cloned registry checkout."""
+    skill = tmp_path / 'remote-skill'
+    (skill / 'scripts').mkdir(parents=True)
+    (skill / 'SKILL.md').write_text('---\nname: remote-skill\ndescription: From a registry.\n---\n\nBody.\n')
+    (skill / 'scripts' / 'run.py').write_text('#!/usr/bin/env python3\nprint("hi")\n')
+    return tmp_path
+
+
+def test_git_registry_forwards_script_executor(registry_skills_root: Path) -> None:
+    """Without this, registry scripts always run on the host."""
+    pytest.importorskip('git')
+    from pydantic_ai_skills import GitSkillsRegistry
+
+    executor = DuckTypedExecutor()
+    registry = GitSkillsRegistry(
+        repo_url='https://example.invalid/repo.git',
+        target_dir=registry_skills_root,
+        auto_install=False,
+        script_executor=executor,
+    )
+
+    script = next(s for s in registry.get_skills()[0].scripts if s.name.endswith('run.py'))
+
+    assert isinstance(script, FileBasedSkillScript)
+    assert script.executor is executor
+
+
+def test_s3_registry_forwards_script_executor(registry_skills_root: Path) -> None:
+    """Without this, registry scripts always run on the host."""
+    executor = DuckTypedExecutor()
+    from pydantic_ai_skills import S3SkillsRegistry
+
+    registry = S3SkillsRegistry(
+        bucket='irrelevant',
+        target_dir=registry_skills_root,
+        boto3_client=object(),
+        auto_install=False,
+        script_executor=executor,
+    )
+
+    script = next(s for s in registry.get_skills()[0].scripts if s.name.endswith('run.py'))
+
+    assert isinstance(script, FileBasedSkillScript)
+    assert script.executor is executor
+
+
+# ---------------------------------------------------------------------------
+# Sandbox executors: staging boundary
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def staged_skill(tmp_path: Path) -> Path:
+    """A skill folder with a nested script, a top-level resource, and a symlink escape."""
+    outside = tmp_path / 'outside'
+    outside.mkdir()
+    (outside / 'secret.txt').write_text('host secret')
+
+    skill = tmp_path / 'demo-skill'
+    (skill / 'scripts').mkdir(parents=True)
+    (skill / 'resources').mkdir()
+    (skill / 'SKILL.md').write_text('---\nname: demo-skill\ndescription: Demo.\n---\n\nBody.\n')
+    (skill / 'resources' / 'data.json').write_text('{"k": 1}')
+    (skill / 'scripts' / 'run.py').write_text('print("hi")\n')
+    (skill / 'scripts' / 'escape.txt').symlink_to(outside / 'secret.txt')
+    return skill
+
+
+def _collect_staged(skill_root: Path) -> dict[str, Path]:
+    """Drain the staging generator into a mapping of relative path to source file."""
+    return dict(iter_stageable_files(skill_root))
+
+
+def test_staging_uses_skill_root_not_script_parent(staged_skill: Path) -> None:
+    """script.name is relative to the skill folder, so the root is above scripts/."""
+    script = SkillScript(name='scripts/run.py', uri=str(staged_skill / 'scripts' / 'run.py'))
+
+    assert skill_root_for(script) == staged_skill.resolve()
+
+
+def test_skill_root_survives_depth_changing_symlink(tmp_path: Path) -> None:
+    """A resolved uri can be shallower than script.name; anchoring on SKILL.md fixes it.
+
+    Walking up by name depth would land on the skills root and stage every
+    sibling skill into the sandbox.
+    """
+    root = tmp_path / 'skills-root'
+    (root / 'skill-a' / 'scripts').mkdir(parents=True)
+    (root / 'skill-a' / 'SKILL.md').write_text('---\nname: skill-a\ndescription: A.\n---\n\nBody.\n')
+    (root / 'skill-a' / 'run.py').write_text('print("hi")\n')
+    (root / 'skill-a' / 'scripts' / 'run.py').symlink_to(root / 'skill-a' / 'run.py')
+
+    # Mirrors what discovery stores: unresolved name, resolved uri.
+    script = SkillScript(name='scripts/run.py', uri=str((root / 'skill-a' / 'run.py').resolve()))
+
+    assert skill_root_for(script) == (root / 'skill-a').resolve()
+
+
+@pytest.mark.filterwarnings('ignore:Skipping.*symlink escape:UserWarning')
+def test_staging_includes_whole_skill_folder(staged_skill: Path) -> None:
+    """SKILL.md and resources/ are staged, not just the script's own directory."""
+    staged = _collect_staged(staged_skill.resolve())
+
+    assert 'SKILL.md' in staged
+    assert 'resources/data.json' in staged
+    assert 'scripts/run.py' in staged
+
+
+@pytest.mark.filterwarnings('ignore:Skipping.*symlink escape:UserWarning')
+def test_staging_skips_symlinks_escaping_the_skill_folder(staged_skill: Path) -> None:
+    """Following an escaping symlink would copy a host file into the sandbox."""
+    staged = _collect_staged(staged_skill.resolve())
+
+    assert 'scripts/escape.txt' not in staged
+    assert not any('secret' in path.name for path in staged.values())
+
+
+def test_staging_warns_about_symlink_escape(staged_skill: Path) -> None:
+    """The skipped symlink is reported rather than silently dropped."""
+    skill_root = staged_skill.resolve()
+
+    with pytest.warns(UserWarning, match='symlink escape'):
+        _collect_staged(skill_root)
+
+
+# ---------------------------------------------------------------------------
+# LocalSandbox: Pyodide wrapper semantics
+# ---------------------------------------------------------------------------
+
+
+class _StubPyodideSandbox:
+    """Runs the generated wrapper under CPython so the tests need no SDK."""
+
+    async def aexecute_python(self, code: str, cwd: str | None = None, preload_packages: Any = None) -> Any:
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            exec(compile(code, '<wrapper>', 'exec'), {'__name__': '__wrapper__'})
+        return SimpleNamespace(stdout=buffer.getvalue(), stderr='', error=None, exit_code=0)
+
+    def read_file(self, path: str) -> str:
+        return Path(path).read_text(encoding='utf-8')
+
+
+async def test_python_wrapper_normalizes_boolean_exit_codes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """sys.exit(not ok) yields a bool, which must be written as 1 rather than 'True'."""
+    monkeypatch.setattr(localsandbox_module, '_EXIT_CODE_FILE', str(tmp_path / 'exit_code'))
+    script = tmp_path / 'run.py'
+    script.write_text('import sys\nsys.exit(not False)\n', encoding='utf-8')
+
+    _, _, exit_code = await LocalSandboxScriptExecutor()._run_python(
+        _StubPyodideSandbox(), str(script), str(tmp_path), None
+    )
+
+    assert exit_code == 1
+
+
+async def test_python_wrapper_preserves_non_bmp_arguments(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """JSON-escaping argv would deliver lone surrogates instead of the character."""
+    monkeypatch.setattr(localsandbox_module, '_EXIT_CODE_FILE', str(tmp_path / 'exit_code'))
+    script = tmp_path / 'run.py'
+    script.write_text('import sys\nprint(sys.argv[1:])\n', encoding='utf-8')
+
+    stdout, _, _ = await LocalSandboxScriptExecutor()._run_python(
+        _StubPyodideSandbox(), str(script), str(tmp_path), {'msg': 'hi 😀'}
+    )
+
+    assert 'hi 😀' in stdout
+    assert '\\ud83d' not in stdout
+
+
+# ---------------------------------------------------------------------------
+# Sandbox reuse
+# ---------------------------------------------------------------------------
+
+
+class _FakeLocalSandbox:
+    """Records the files staged into it and whether it was closed."""
+
+    instances: list[_FakeLocalSandbox] = []
+
+    def __init__(self, files: dict[str, Any], cwd: str, **kwargs: Any) -> None:
+        self.files = files
+        self.closed = False
+        type(self).instances.append(self)
+
+    def __exit__(self, *exc: Any) -> None:
+        self.closed = True
+
+
+@pytest.mark.filterwarnings('ignore:Skipping.*symlink escape:UserWarning')
+def test_reused_localsandbox_restages_after_same_root_edits(
+    staged_skill: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """auto_reload surfaces edits under an unchanged root, so the fingerprint must catch them."""
+    monkeypatch.setattr(_FakeLocalSandbox, 'instances', [])
+    monkeypatch.setattr(localsandbox_module, '_require_localsandbox', lambda: _FakeLocalSandbox)
+    executor = LocalSandboxScriptExecutor(reuse_sandbox=True)
+    skill_root = staged_skill.resolve()
+
+    first = executor._get_sandbox(skill_root)
+    assert executor._get_sandbox(skill_root) is first, 'unchanged skill should reuse the sandbox'
+
+    (staged_skill / 'scripts' / 'run.py').write_text('print("edited")\n')
+    second = executor._get_sandbox(skill_root)
+
+    assert second is not first, 'edited skill must be restaged'
+    assert first.closed, 'the stale sandbox should be closed'
+    assert b'edited' in second.files[f'{executor.workdir}/scripts/run.py']
+
+
+class _FakeOpenSandbox:
+    """Counts creations and kills so lifetime handling is observable."""
+
+    created = 0
+    killed = 0
+
+    @classmethod
+    async def create(cls, image: str, env: Any = None, timeout: Any = None) -> _FakeOpenSandbox:
+        cls.created += 1
+        return cls()
+
+    async def kill(self) -> None:
+        type(self).killed += 1
+
+
+async def test_reused_opensandbox_recreated_after_lifetime_expires(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Sandbox.create fixes the lifetime, so a stale handle must not be handed out forever."""
+    monkeypatch.setattr(_FakeOpenSandbox, 'created', 0)
+    monkeypatch.setattr(_FakeOpenSandbox, 'killed', 0)
+    monkeypatch.setattr(opensandbox_module, '_require_opensandbox', lambda: _FakeOpenSandbox)
+
+    # Lifetime shorter than the per-script timeout leaves no headroom, so the
+    # deadline is already in the past when the sandbox is handed back.
+    executor = OpenSandboxScriptExecutor(timeout=30, reuse_sandbox=True, sandbox_timeout=timedelta(seconds=1))
+    await executor._get_sandbox()
+    await executor._get_sandbox()
+
+    assert _FakeOpenSandbox.created == 2, 'expired sandbox must be replaced'
+    assert _FakeOpenSandbox.killed == 1, 'the expired sandbox must be killed'
+
+
+async def test_reused_opensandbox_kept_within_its_lifetime(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A sandbox with time left is reused rather than recreated every run."""
+    monkeypatch.setattr(_FakeOpenSandbox, 'created', 0)
+    monkeypatch.setattr(opensandbox_module, '_require_opensandbox', lambda: _FakeOpenSandbox)
+
+    executor = OpenSandboxScriptExecutor(timeout=30, reuse_sandbox=True, sandbox_timeout=timedelta(minutes=10))
+
+    assert await executor._get_sandbox() is await executor._get_sandbox()
+    assert _FakeOpenSandbox.created == 1
+
+
+# ---------------------------------------------------------------------------
+# Missing optional dependencies
+# ---------------------------------------------------------------------------
+
+
+def test_opensandbox_reports_missing_extra() -> None:
+    """Without the SDK installed, the error names the extra that provides it."""
+    with patch.dict('sys.modules', {'opensandbox': None}):
+        with pytest.raises(ImportError, match=r'pydantic-ai-skills\[opensandbox\]'):
+            opensandbox_module._require_opensandbox()
+
+
+def test_localsandbox_reports_missing_extra() -> None:
+    """Without the SDK installed, the error names the extra that provides it."""
+    with patch.dict('sys.modules', {'localsandbox': None}):
+        with pytest.raises(ImportError, match=r'pydantic-ai-skills\[localsandbox\]'):
+            localsandbox_module._require_localsandbox()
+
+
+async def test_localsandbox_rejects_unsupported_script_type(tmp_path: Path) -> None:
+    """LocalSandbox supports .py and shell scripts only, and says so before provisioning."""
+    script_file = tmp_path / 'thing.rb'
+    script_file.write_text('puts "hi"\n')
+    script = SkillScript(name='thing.rb', uri=str(script_file))
+
+    with pytest.raises(ValueError, match='unsupported type'):
+        await LocalSandboxScriptExecutor().run(script)
+
+
+def _script_without_uri() -> SkillScript:
+    """Build a script whose uri is None."""
+    # __post_init__ requires a uri or a function, so clear it afterwards.
+    script = SkillScript(name='no-uri', uri='placeholder')
+    script.uri = None
+    return script
+
+
+async def test_localsandbox_requires_a_uri() -> None:
+    """The LocalSandbox executor rejects scripts with no URI."""
+    executor = LocalSandboxScriptExecutor()
+
+    with pytest.raises(ValueError, match='has no URI'):
+        await executor.run(_script_without_uri())
+
+
+async def test_opensandbox_requires_a_uri() -> None:
+    """The OpenSandbox executor rejects scripts with no URI."""
+    executor = OpenSandboxScriptExecutor()
+
+    with pytest.raises(ValueError, match='has no URI'):
+        await executor.run(_script_without_uri())

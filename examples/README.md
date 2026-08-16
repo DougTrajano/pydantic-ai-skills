@@ -14,7 +14,7 @@ This folder contains runnable examples demonstrating how to use `pydantic-ai-ski
 | `sandbox_opensandbox.py` | Agent whose skill scripts run in an [OpenSandbox](https://github.com/opensandbox-group/OpenSandbox) container, via a custom `SkillScriptExecutor` wired in through `SkillsCapability`. Needs `pip install -e ".[examples,opensandbox]"` and a reachable OpenSandbox server. |
 | `sandbox_localsandbox.py` | Agent whose skill scripts run in a [LocalSandbox](https://github.com/coplane/localsandbox) virtual filesystem (just-bash + Pyodide, no container runtime), via a custom `SkillScriptExecutor` wired in through `SkillsCapability`. Needs `pip install -e ".[examples,localsandbox]"`. |
 
-Both sandbox examples are self-contained: the executor lives in the same file as the agent, so you can copy one file into your own project. They load the same `skills/` directory as the other examples — only the `script_executor=` argument differs from `basic_usage_capability.py`.
+Both sandbox examples use executors that ship with the package (`pydantic_ai_skills.sandboxes`), so they stay as short as the other examples — only the `script_executor=` argument differs from `basic_usage_capability.py`.
 
 Note that `arxiv-search` is the only bundled skill with a script, and it needs the `arxiv` package plus network access. It cannot run under LocalSandbox (Pyodide has no sockets), and under OpenSandbox only if the image provides it. The resource-only skills work normally in both, since resources are read on the host.
 

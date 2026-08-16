@@ -12,6 +12,8 @@ Key components:
 - [`SkillScriptExecutor`][pydantic_ai_skills.SkillScriptExecutor]: Protocol for custom script executors
 - [`LocalSkillScriptExecutor`][pydantic_ai_skills.LocalSkillScriptExecutor]: Execute scripts via subprocess
 - [`CallableSkillScriptExecutor`][pydantic_ai_skills.CallableSkillScriptExecutor]: Wrap callables as script executors
+- [`OpenSandboxScriptExecutor`][pydantic_ai_skills.OpenSandboxScriptExecutor]: Run scripts in an OpenSandbox container
+- [`LocalSandboxScriptExecutor`][pydantic_ai_skills.LocalSandboxScriptExecutor]: Run scripts in a LocalSandbox virtual filesystem
 
 Example:
     ```python
@@ -42,6 +44,7 @@ from pydantic_ai_skills.directory import SkillsDirectory, discover_skills, parse
 from pydantic_ai_skills.executors import SkillScriptExecutor
 from pydantic_ai_skills.local import CallableSkillScriptExecutor, LocalSkillScriptExecutor
 from pydantic_ai_skills.registries import GitCloneOptions, GitSkillsRegistry, S3SkillsRegistry, SkillRegistry
+from pydantic_ai_skills.sandboxes import LocalSandboxScriptExecutor, OpenSandboxScriptExecutor
 from pydantic_ai_skills.toolset import SkillsToolset
 from pydantic_ai_skills.types import Skill, SkillResource, SkillScript
 
@@ -55,6 +58,9 @@ __all__ = [
     'SkillScriptExecutor',
     'LocalSkillScriptExecutor',
     'CallableSkillScriptExecutor',
+    # Sandbox executors
+    'OpenSandboxScriptExecutor',
+    'LocalSandboxScriptExecutor',
     # Types
     'Skill',
     'SkillResource',

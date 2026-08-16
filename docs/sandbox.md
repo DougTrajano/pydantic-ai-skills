@@ -36,18 +36,31 @@ toolset = SkillsToolset(directories=[directory])
 !!! note "Executors are per skill source"
     `SkillsToolset(directories=["./skills"])` builds a `SkillsDirectory` with the default local executor. To use a sandbox, construct the `SkillsDirectory` yourself and pass it in.
 
-## Two reference implementations
+Registries take the same argument, which matters most here — a registry is the least-trusted source of skills you have:
 
-!!! warning "These ship as examples, not as library code"
-    Both executors live in [`examples/`](https://github.com/DougTrajano/pydantic-ai-skills/tree/main/examples), which is **not** part of the installed wheel — `pip install "pydantic-ai-skills[opensandbox]"` gives you the SDK, not the executor. Each example is self-contained, so copy the single file into your own project and import it from there. The snippets below use `myapp.*` to make that explicit; the extras exist so you can install the provider SDK the executor depends on.
+```python
+from pydantic_ai_skills import GitSkillsRegistry, SkillsToolset
 
-Each is a complete, runnable agent example — one file holding the executor plus an `Agent` wired through `SkillsCapability`, serving on `http://127.0.0.1:7932`:
+registry = GitSkillsRegistry(
+    repo_url="https://github.com/example/skills.git",
+    script_executor=MySandboxExecutor(),
+)
+toolset = SkillsToolset(registries=[registry])
+```
+
+`S3SkillsRegistry` accepts `script_executor` too. Without it, scripts from a cloned repo or synced bucket run as local subprocesses on your host.
+
+## Two bundled implementations
+
+Both ship with the package and are exported from `pydantic_ai_skills`. The provider SDKs are imported lazily — exactly like `GitSkillsRegistry` and `S3SkillsRegistry` — so importing them never requires an extra to be installed; you only need the extra when you actually run a script.
+
+Runnable agent examples live in [`examples/`](https://github.com/DougTrajano/pydantic-ai-skills/tree/main/examples):
 
 ```bash
 python -m examples.sandbox_localsandbox
 ```
 
-They load the same `examples/skills` directory as every other example, so only the `script_executor=` argument differs from `basic_usage_capability.py`. The executor class is the part you copy and adapt. Both stage the **whole skill folder** into the sandbox — `SKILL.md`, `resources/`, `scripts/` and anything else — and run the script with its own directory as the working directory, so sibling modules, `../resources/data.json` and bundled data files resolve exactly as they do locally. Both return output in the same format as local execution, so switching backends does not change what the model sees.
+Both stage the **whole skill folder** into the sandbox — `SKILL.md`, `resources/`, `scripts/` and anything else — and run the script with its own directory as the working directory, so sibling modules, `../resources/data.json` and bundled data files resolve exactly as they do locally. Both return output in the same format as local execution, so switching backends does not change what the model sees.
 
 Symlinks that resolve outside the skill folder are skipped with a warning during staging. Discovery already rejects them, but staging re-walks the folder, and following such a link would copy an arbitrary host file *into* the sandbox where the script could read it back out.
 
@@ -68,9 +81,7 @@ osb config set connection.api_key <your-api-key>
 ```
 
 ```python
-from pydantic_ai_skills import SkillsDirectory
-
-from myapp.sandbox_opensandbox import OpenSandboxScriptExecutor
+from pydantic_ai_skills import OpenSandboxScriptExecutor, SkillsDirectory
 
 executor = OpenSandboxScriptExecutor(
     image="opensandbox/code-interpreter:v1.1.0",
@@ -88,9 +99,7 @@ pip install "pydantic-ai-skills[localsandbox]"
 ```
 
 ```python
-from pydantic_ai_skills import SkillsDirectory
-
-from myapp.sandbox_localsandbox import LocalSandboxScriptExecutor
+from pydantic_ai_skills import LocalSandboxScriptExecutor, SkillsDirectory
 
 directory = SkillsDirectory(path="./skills", script_executor=LocalSandboxScriptExecutor())
 ```
@@ -122,8 +131,8 @@ This is a real trade-off, not a tuning knob: with reuse, files written by one sc
 
 The protocol is deliberately small, so adding a backend is mostly plumbing:
 
-1. Derive the skill root and stage it. **Not** `Path(script.uri).parent` — that is the `scripts/` directory for the usual layout, which would leave out `SKILL.md` and `resources/`. `script.name` is relative to the skill folder (`scripts/run.py`), so walk that many levels up from the script file; both examples do this in `skill_root_for`.
-2. Skip symlinks that resolve outside the skill root, or staging will copy host files into the sandbox. Both examples do this in `iter_stageable_files`.
+1. Derive the skill root and stage it — reuse `skill_root_for` from `pydantic_ai_skills.sandboxes`. **Not** `Path(script.uri).parent`, which is the `scripts/` directory for the usual layout and would leave out `SKILL.md` and `resources/`; and not a walk up by `script.name` depth either, since discovery stores a *resolved* uri, so an in-tree symlink that changes depth would land above the skill and stage its siblings. Anchor on the nearest `SKILL.md` ancestor.
+2. Skip symlinks that resolve outside the skill root, or staging will copy host files into the sandbox — reuse `iter_stageable_files`.
 3. Build the command. Reuse `LocalSkillScriptExecutor._build_args` for the `--flag value` marshalling rather than reimplementing the bool/list/`None` rules.
 4. Execute with the script's own directory as the working directory, so relative paths behave as they do locally, and collect stdout, stderr and the exit code.
 5. Format with `LocalSkillScriptExecutor._format_output(stdout_chunks, stderr_chunks, exit_code)` so the returned string matches local execution.
