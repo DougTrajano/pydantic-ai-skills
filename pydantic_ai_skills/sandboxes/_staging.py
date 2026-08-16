@@ -32,12 +32,12 @@ EXCLUDED_STAGING_DIRS = frozenset({'.git', '.hg', '.svn', '.bzr', '__pycache__'}
 def skill_root_for(script: SkillScript) -> Path:
     """Resolve the skill folder root that a script belongs to.
 
-    Anchored on the nearest ancestor holding a ``SKILL.md``, which is what
-    actually defines a skill folder. Deriving it from ``script.name`` alone is
-    not safe: discovery stores a *resolved* ``uri`` but an *unresolved* name, so
-    an in-tree symlink that changes depth (``skill/scripts/run.py`` pointing at
-    ``skill/run.py``) would walk up too far and stage the parent directory,
-    exposing sibling skills. The name-depth walk is kept only as a fallback for
+    Discovery records the folder it loaded the skill from on the script, and that
+    is authoritative. Both fallbacks are lossy, which is why the recorded value
+    exists: the nearest ``SKILL.md`` ancestor picks the wrong folder when a skill
+    nests another skill, while walking up by ``script.name`` depth walks too far
+    when an in-tree symlink changes the script's depth (``skill/scripts/run.py``
+    pointing at ``skill/run.py``), staging sibling skills. They are used only for
     scripts built outside discovery.
 
     Args:
@@ -46,6 +46,10 @@ def skill_root_for(script: SkillScript) -> Path:
     Returns:
         Resolved path to the skill folder.
     """
+    recorded = getattr(script, 'skill_root', None)
+    if recorded:
+        return Path(recorded).resolve()
+
     script_path = Path(str(script.uri)).resolve()
     for candidate in script_path.parents:
         if (candidate / 'SKILL.md').is_file():

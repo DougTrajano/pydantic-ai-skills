@@ -264,6 +264,7 @@ def _discover_scripts(
                     uri=str(resolved_path),
                     skill_name=skill_name,
                     executor=executor,
+                    skill_root=str(skill_folder_resolved),
                 )
             )
 

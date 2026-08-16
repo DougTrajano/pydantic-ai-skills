@@ -126,6 +126,8 @@ class OpenSandboxScriptExecutor:
         self._sandbox_timeout = sandbox_timeout
         self._sandbox: Sandbox | None = None
         self._sandbox_deadline: float = 0.0
+        self._staged_paths: set[str] = set()
+        self._staged_fingerprint: tuple[tuple[str, int, int], ...] | None = None
         # Serializes runs that share one sandbox; see run().
         self._reuse_lock = anyio.Lock()
         # Reused for its host-independent argument marshalling and output formatting.
@@ -142,6 +144,7 @@ class OpenSandboxScriptExecutor:
         if self._reuse_sandbox and self._sandbox is not None:
             if time.monotonic() < self._sandbox_deadline:
                 return self._sandbox
+            # aclose() also clears the staging record: the replacement starts empty.
             await self.aclose()
 
         sandbox_cls = _require_opensandbox()
@@ -156,31 +159,48 @@ class OpenSandboxScriptExecutor:
         return sandbox
 
     async def _stage_skill_folder(self, sandbox: Sandbox, skill_root: Path) -> None:
-        """Upload every stageable file in the skill folder into the sandbox workdir."""
+        """Upload the skill folder into the sandbox workdir.
+
+        A reused sandbox keeps whatever earlier runs wrote, so restaging has to
+        remove files that no longer exist in the source skill. Without that, a
+        resource deleted or renamed between runs stays readable and the script
+        goes on using stale data. When nothing changed, staging is skipped.
+        """
         from opensandbox.models import WriteEntry
 
-        entries, _ = _stage_snapshot(skill_root)
-        if not entries:
+        entries, fingerprint = _stage_snapshot(skill_root)
+        if self._reuse_sandbox and fingerprint == self._staged_fingerprint:
             return
 
-        # write_files does not create parents, so every directory is made first.
-        directories = {self._workdir}
-        for relative, _resolved in entries:
-            parent = PurePosixPath(relative).parent
-            if parent != PurePosixPath('.'):
-                directories.add(f'{self._workdir}/{parent}')
-        await sandbox.files.create_directories([WriteEntry(path=path) for path in sorted(directories)])
+        paths = {f'{self._workdir}/{relative}' for relative, _resolved in entries}
 
-        await sandbox.files.write_files(
-            [
-                WriteEntry(
-                    path=f'{self._workdir}/{relative}',
-                    data=resolved.read_bytes(),
-                    mode=0o755 if resolved.stat().st_mode & 0o111 else 0o644,
-                )
-                for relative, resolved in entries
-            ]
-        )
+        stale = sorted(self._staged_paths - paths)
+        if stale:
+            await sandbox.files.delete_files(stale)
+
+        if entries:
+            # write_files does not create parents, so every directory is made first.
+            directories = {self._workdir}
+            for relative, _resolved in entries:
+                parent = PurePosixPath(relative).parent
+                if parent != PurePosixPath('.'):
+                    directories.add(f'{self._workdir}/{parent}')
+            await sandbox.files.create_directories([WriteEntry(path=path) for path in sorted(directories)])
+
+            await sandbox.files.write_files(
+                [
+                    WriteEntry(
+                        path=f'{self._workdir}/{relative}',
+                        data=resolved.read_bytes(),
+                        mode=0o755 if resolved.stat().st_mode & 0o111 else 0o644,
+                    )
+                    for relative, resolved in entries
+                ]
+            )
+
+        if self._reuse_sandbox:
+            self._staged_paths = paths
+            self._staged_fingerprint = fingerprint
 
     def _build_command(self, script_path: Path, remote_path: str, suffix: str, args: dict[str, Any] | None) -> str:
         """Build the shell command line executed inside the sandbox.
@@ -274,3 +294,5 @@ class OpenSandboxScriptExecutor:
             await self._sandbox.kill()
             self._sandbox = None
             self._sandbox_deadline = 0.0
+            self._staged_paths = set()
+            self._staged_fingerprint = None

@@ -24,6 +24,7 @@ from pydantic_ai_skills import (
     SkillScriptExecutor,
     SkillsDirectory,
     SkillsToolset,
+    discover_skills,
 )
 from pydantic_ai_skills.local import FileBasedSkillScript
 from pydantic_ai_skills.sandboxes import (
@@ -471,10 +472,15 @@ class _FakeOpenSandboxRun:
     def __init__(self) -> None:
         self.written: list[Any] = []
         self.directories: list[str] = []
+        self.deleted: list[str] = []
         self.command: str | None = None
         self.opts: Any = None
         self.killed = False
-        self.files = SimpleNamespace(write_files=self._write_files, create_directories=self._create_directories)
+        self.files = SimpleNamespace(
+            write_files=self._write_files,
+            create_directories=self._create_directories,
+            delete_files=self._delete_files,
+        )
         self.commands = SimpleNamespace(run=self._run)
 
     async def _create_directories(self, entries: list[Any]) -> None:
@@ -482,6 +488,9 @@ class _FakeOpenSandboxRun:
 
     async def _write_files(self, entries: list[Any]) -> None:
         self.written.extend(entries)
+
+    async def _delete_files(self, paths: list[str]) -> None:
+        self.deleted.extend(paths)
 
     async def _run(self, command: str, opts: Any = None) -> Any:
         self.command = command
@@ -894,7 +903,7 @@ class _SlowOpenSandbox:
 
     def __init__(self) -> None:
         self.killed = False
-        self.files = SimpleNamespace(write_files=self._noop, create_directories=self._noop)
+        self.files = SimpleNamespace(write_files=self._noop, create_directories=self._noop, delete_files=self._noop)
         self.commands = SimpleNamespace(run=self._run)
 
     @classmethod
@@ -970,3 +979,74 @@ async def test_opensandbox_kills_container_even_when_cancelled(
 
     assert sandboxes, 'the run should have created a container'
     assert sandboxes[0].killed, 'a cancelled run must still tear its container down'
+
+
+async def test_reused_opensandbox_removes_deleted_files_on_restage(
+    runnable_skill: Path, monkeypatch: pytest.MonkeyPatch, fake_opensandbox_models: None
+) -> None:
+    """A reused container keeps what earlier runs wrote, so restaging must prune."""
+    sandbox = _FakeOpenSandboxRun()
+    monkeypatch.setattr(opensandbox_module, '_require_opensandbox', lambda: SimpleNamespace(create=_returning(sandbox)))
+    executor = OpenSandboxScriptExecutor(workdir='/workspace/skills', reuse_sandbox=True)
+    script = _script_in(runnable_skill, 'scripts/run.py')
+
+    await executor.run(script)
+    (runnable_skill / 'resources' / 'data.json').unlink()
+    await executor.run(script)
+
+    assert sandbox.deleted == ['/workspace/skills/resources/data.json']
+
+
+async def test_reused_opensandbox_skips_restaging_when_unchanged(
+    runnable_skill: Path, monkeypatch: pytest.MonkeyPatch, fake_opensandbox_models: None
+) -> None:
+    """An unchanged skill need not be re-uploaded on every run."""
+    sandbox = _FakeOpenSandboxRun()
+    monkeypatch.setattr(opensandbox_module, '_require_opensandbox', lambda: SimpleNamespace(create=_returning(sandbox)))
+    executor = OpenSandboxScriptExecutor(reuse_sandbox=True)
+    script = _script_in(runnable_skill, 'scripts/run.py')
+
+    await executor.run(script)
+    uploaded_after_first = len(sandbox.written)
+    await executor.run(script)
+
+    assert len(sandbox.written) == uploaded_after_first
+
+
+# ---------------------------------------------------------------------------
+# Skill root comes from discovery, not from inference
+# ---------------------------------------------------------------------------
+
+
+def test_skill_root_prefers_the_root_recorded_by_discovery(tmp_path: Path) -> None:
+    """A skill nesting another skill makes the nearest SKILL.md the wrong answer.
+
+    Discovery records the folder it loaded the skill from, so the parent's script
+    still stages the parent's resources rather than the nested skill's folder.
+    """
+    root = tmp_path / 'root'
+    parent = root / 'parent'
+    (parent / 'scripts').mkdir(parents=True)
+    (parent / 'resources').mkdir()
+    (parent / 'SKILL.md').write_text('---\nname: parent-skill\ndescription: Parent.\n---\n\nBody.\n')
+    (parent / 'scripts' / 'SKILL.md').write_text('---\nname: nested-skill\ndescription: Nested.\n---\n\nBody.\n')
+    (parent / 'resources' / 'data.json').write_text('{"v": 1}')
+    (parent / 'scripts' / 'run.py').write_text('print("hi")\n')
+
+    skills = {skill.name: skill for skill in discover_skills(root)}
+    script = next(s for s in skills['parent-skill'].scripts if s.name.endswith('run.py'))
+
+    assert skill_root_for(script) == parent.resolve()
+    assert 'resources/data.json' in dict(iter_stageable_files(skill_root_for(script)))
+
+
+def test_skill_root_falls_back_when_not_recorded(tmp_path: Path) -> None:
+    """Scripts built outside discovery still resolve via the SKILL.md anchor."""
+    skill = tmp_path / 'demo-skill'
+    (skill / 'scripts').mkdir(parents=True)
+    (skill / 'SKILL.md').write_text('---\nname: demo-skill\ndescription: Demo.\n---\n\nBody.\n')
+    (skill / 'scripts' / 'run.py').write_text('print("hi")\n')
+
+    script = SkillScript(name='scripts/run.py', uri=str(skill / 'scripts' / 'run.py'))
+
+    assert skill_root_for(script) == skill.resolve()
