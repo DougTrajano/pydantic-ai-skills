@@ -16,7 +16,7 @@ This folder contains runnable examples demonstrating how to use `pydantic-ai-ski
 
 Both sandbox examples use executors that ship with the package (`pydantic_ai_skills.sandboxes`), so they stay as short as the other examples — only the `script_executor=` argument differs from `basic_usage_capability.py`.
 
-Use the bundled `weather-report` skill to exercise them. Its `climate_lookup` script is standard-library only and reads a resource from the skill root, so it produces byte-identical output on the host and in a sandbox. Its `live_weather` script calls the OpenWeather API, so it works on the host but not under LocalSandbox — which forwards no host environment and runs Pyodide under Deno without `--allow-net`. Running both is a compact check that a sandbox executes real work while keeping secrets and egress out.
+Use the bundled `data-analysis` skill to exercise them. It profiles and aggregates a 96-row sales dataset — group revenue by region, sum units by category, filter by channel — using only the standard library, so it does real work with no network and no third-party packages. Every script produces byte-identical output on the host and in a sandbox, exit codes included, which is the property that makes swapping executors safe.
 
 The other scripted skill, `arxiv-search`, needs the `arxiv` package plus network access, so it runs under OpenSandbox only if the image provides them.
 
@@ -24,7 +24,7 @@ The other scripted skill, `arxiv-search`, needs the `arxiv` package plus network
 
 | Path | Skills |
 |------|--------|
-| `skills/` | `web-research`, `arxiv-search`, `pydanticai-docs`, `weather-report` |
+| `skills/` | `web-research`, `arxiv-search`, `pydanticai-docs`, `data-analysis` |
 | `anthropic-skills/` | Anthropic's official skill collection (algorithmic-art, canvas-design, docx, pdf, pptx, slack-gif-creator, webapp-testing, and more) |
 
 ## Prerequisites

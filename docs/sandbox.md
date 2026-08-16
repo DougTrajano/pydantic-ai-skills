@@ -60,6 +60,8 @@ Runnable agent examples live in [`examples/`](https://github.com/DougTrajano/pyd
 python -m examples.sandbox_localsandbox
 ```
 
+Ask the running agent something like *"which region had the highest revenue?"* — the bundled `data-analysis` skill answers it by executing a real aggregation script inside the sandbox, with byte-identical output to running it on the host.
+
 Both stage the **whole skill folder** into the sandbox — `SKILL.md`, `resources/`, `scripts/` and anything else — and run the script with its own directory as the working directory, so sibling modules, `../resources/data.json` and bundled data files resolve exactly as they do locally. Both return output in the same format as local execution, so switching backends does not change what the model sees.
 
 Symlinks that resolve outside the skill folder are skipped with a warning during staging. Discovery already rejects them, but staging re-walks the folder, and following such a link would copy an arbitrary host file *into* the sandbox where the script could read it back out.
