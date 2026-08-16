@@ -113,7 +113,8 @@ def _load_example(module_name: str) -> Any:
     file resolvable under two module names.
     """
     spec = importlib.util.spec_from_file_location(f'_example_{module_name}', EXAMPLES_DIR / f'{module_name}.py')
-    assert spec is not None and spec.loader is not None
+    assert spec is not None
+    assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -151,23 +152,38 @@ def test_localsandbox_example_reports_missing_extra(localsandbox_example: Any) -
             localsandbox_example._require_localsandbox()
 
 
+def _script_without_uri() -> SkillScript:
+    """Build a script whose uri is None."""
+    # __post_init__ requires a uri or a function, so clear it afterwards.
+    script = SkillScript(name='no-uri', uri='placeholder')
+    script.uri = None
+    return script
+
+
 async def test_localsandbox_example_rejects_unsupported_script_type(localsandbox_example: Any, tmp_path: Path) -> None:
     """LocalSandbox supports .py and shell scripts only, and says so before provisioning."""
     script_file = tmp_path / 'thing.rb'
     script_file.write_text('puts "hi"\n')
     script = SkillScript(name='thing.rb', uri=str(script_file))
+    executor = localsandbox_example.LocalSandboxScriptExecutor()
 
     with pytest.raises(ValueError, match='unsupported type'):
-        await localsandbox_example.LocalSandboxScriptExecutor().run(script)
+        await executor.run(script)
 
 
-async def test_sandbox_examples_require_a_uri(opensandbox_example: Any, localsandbox_example: Any) -> None:
-    """Both sandbox executors reject scripts with no URI."""
-    # __post_init__ requires a uri or a function, so clear it afterwards.
-    script = SkillScript(name='no-uri', uri='placeholder')
-    script.uri = None
+async def test_localsandbox_example_requires_a_uri(localsandbox_example: Any) -> None:
+    """The LocalSandbox executor rejects scripts with no URI."""
+    script = _script_without_uri()
+    executor = localsandbox_example.LocalSandboxScriptExecutor()
 
     with pytest.raises(ValueError, match='has no URI'):
-        await localsandbox_example.LocalSandboxScriptExecutor().run(script)
+        await executor.run(script)
+
+
+async def test_opensandbox_example_requires_a_uri(opensandbox_example: Any) -> None:
+    """The OpenSandbox executor rejects scripts with no URI."""
+    script = _script_without_uri()
+    executor = opensandbox_example.OpenSandboxScriptExecutor()
+
     with pytest.raises(ValueError, match='has no URI'):
-        await opensandbox_example.OpenSandboxScriptExecutor().run(script)
+        await executor.run(script)
