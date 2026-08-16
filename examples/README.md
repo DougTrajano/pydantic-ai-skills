@@ -16,13 +16,15 @@ This folder contains runnable examples demonstrating how to use `pydantic-ai-ski
 
 Both sandbox examples use executors that ship with the package (`pydantic_ai_skills.sandboxes`), so they stay as short as the other examples — only the `script_executor=` argument differs from `basic_usage_capability.py`.
 
-Note that `arxiv-search` is the only bundled skill with a script, and it needs the `arxiv` package plus network access. It cannot run under LocalSandbox (Pyodide has no sockets), and under OpenSandbox only if the image provides it. The resource-only skills work normally in both, since resources are read on the host.
+Use the bundled `weather-report` skill to exercise them. Its `climate_lookup` script is standard-library only and reads a resource from the skill root, so it produces byte-identical output on the host and in a sandbox. Its `live_weather` script calls the OpenWeather API, so it works on the host but not under LocalSandbox — which forwards no host environment and runs Pyodide under Deno without `--allow-net`. Running both is a compact check that a sandbox executes real work while keeping secrets and egress out.
+
+The other scripted skill, `arxiv-search`, needs the `arxiv` package plus network access, so it runs under OpenSandbox only if the image provides them.
 
 ### Bundled skills
 
 | Path | Skills |
 |------|--------|
-| `skills/` | `web-research`, `arxiv-search`, `pydanticai-docs` |
+| `skills/` | `web-research`, `arxiv-search`, `pydanticai-docs`, `weather-report` |
 | `anthropic-skills/` | Anthropic's official skill collection (algorithmic-art, canvas-design, docx, pdf, pptx, slack-gif-creator, webapp-testing, and more) |
 
 ## Prerequisites
