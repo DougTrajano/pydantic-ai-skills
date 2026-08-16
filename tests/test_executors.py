@@ -178,13 +178,18 @@ def test_staging_uses_skill_root_not_script_parent(module_name: str, staged_skil
     assert example.skill_root_for(script) == staged_skill.resolve()
 
 
+def _collect_staged(example: Any, skill_root: Path) -> dict[str, Path]:
+    """Drain the staging generator into a mapping of relative path to source file."""
+    return dict(example.iter_stageable_files(skill_root))
+
+
 @pytest.mark.parametrize('module_name', ['sandbox_opensandbox', 'sandbox_localsandbox'])
+@pytest.mark.filterwarnings('ignore:Skipping.*symlink escape:UserWarning')
 def test_staging_includes_whole_skill_folder(module_name: str, staged_skill: Path) -> None:
     """SKILL.md and resources/ are staged, not just the script's own directory."""
     example = _load_example(module_name)
 
-    with pytest.warns(UserWarning, match='symlink escape'):
-        staged = dict(example.iter_stageable_files(staged_skill.resolve()))
+    staged = _collect_staged(example, staged_skill.resolve())
 
     assert 'SKILL.md' in staged
     assert 'resources/data.json' in staged
@@ -192,15 +197,25 @@ def test_staging_includes_whole_skill_folder(module_name: str, staged_skill: Pat
 
 
 @pytest.mark.parametrize('module_name', ['sandbox_opensandbox', 'sandbox_localsandbox'])
+@pytest.mark.filterwarnings('ignore:Skipping.*symlink escape:UserWarning')
 def test_staging_skips_symlinks_escaping_the_skill_folder(module_name: str, staged_skill: Path) -> None:
     """Following an escaping symlink would copy a host file into the sandbox."""
     example = _load_example(module_name)
 
-    with pytest.warns(UserWarning, match='symlink escape'):
-        staged = dict(example.iter_stageable_files(staged_skill.resolve()))
+    staged = _collect_staged(example, staged_skill.resolve())
 
     assert 'scripts/escape.txt' not in staged
     assert not any('secret' in path.name for path in staged.values())
+
+
+@pytest.mark.parametrize('module_name', ['sandbox_opensandbox', 'sandbox_localsandbox'])
+def test_staging_warns_about_symlink_escape(module_name: str, staged_skill: Path) -> None:
+    """The skipped symlink is reported rather than silently dropped."""
+    example = _load_example(module_name)
+    skill_root = staged_skill.resolve()
+
+    with pytest.warns(UserWarning, match='symlink escape'):
+        _collect_staged(example, skill_root)
 
 
 def _script_without_uri() -> SkillScript:
