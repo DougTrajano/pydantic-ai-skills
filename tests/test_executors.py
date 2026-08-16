@@ -1089,9 +1089,10 @@ def test_staging_rejects_symlink_aliases_into_excluded_directories(cloned_skill:
     """
     (cloned_skill / 'resources').mkdir()
     (cloned_skill / 'resources' / 'config').symlink_to(cloned_skill / '.git' / 'config')
+    skill_root = cloned_skill.resolve()
 
     with pytest.warns(UserWarning, match='excluded directory'):
-        staged = _collect_staged(cloned_skill.resolve())
+        staged = _collect_staged(skill_root)
 
     assert 'resources/config' not in staged
     assert not any('ghp_SECRETTOKEN' in source.read_text(errors='ignore') for source in staged.values())
