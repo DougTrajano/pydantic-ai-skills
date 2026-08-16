@@ -234,6 +234,24 @@ class StagedFile:
     executable: bool
 
 
+def _iter_alias_dirs(alias: str, target: Path) -> Iterator[str]:
+    """Yield the directory paths a staged alias contributes, including itself.
+
+    Args:
+        alias: Skill-relative path of the directory symlink.
+        target: Its resolved in-tree target.
+
+    Yields:
+        Directory paths relative to the skill root, posix-style.
+    """
+    yield alias
+    for dirpath, dirnames, _filenames in os.walk(target):
+        # Pruned in place, so excluded trees are never descended into.
+        dirnames[:] = sorted(name for name in dirnames if name not in EXCLUDED_STAGING_DIRS)
+        for name in dirnames:
+            yield f'{alias}/{(Path(dirpath) / name).relative_to(target).as_posix()}'
+
+
 def iter_stageable_dirs(skill_root: Path) -> Iterator[str]:
     """Yield skill-relative directory paths that are safe to create in a sandbox.
 
@@ -253,11 +271,7 @@ def iter_stageable_dirs(skill_root: Path) -> Iterator[str]:
         for name in kept:
             yield (Path(dirpath) / name).relative_to(skill_root).as_posix()
         for alias, target in aliases:
-            yield alias
-            for sub, _dirs, _files in os.walk(target):
-                for nested in sorted(_dirs):
-                    if nested not in EXCLUDED_STAGING_DIRS:
-                        yield f'{alias}/{(Path(sub) / nested).relative_to(target).as_posix()}'
+            yield from _iter_alias_dirs(alias, target)
 
 
 def _stage_snapshot(skill_root: Path) -> tuple[list[StagedFile], list[str], str]:
