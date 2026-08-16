@@ -968,4 +968,5 @@ async def test_opensandbox_kills_container_even_when_cancelled(
     with anyio.move_on_after(0.05):
         await executor.run(_script_in(runnable_skill, 'scripts/run.py'))
 
-    assert sandboxes and sandboxes[0].killed, 'a cancelled run must still tear its container down'
+    assert sandboxes, 'the run should have created a container'
+    assert sandboxes[0].killed, 'a cancelled run must still tear its container down'
