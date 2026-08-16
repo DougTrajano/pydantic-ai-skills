@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import os
 import sys
 import types
 from datetime import timedelta
@@ -1050,3 +1051,30 @@ def test_skill_root_falls_back_when_not_recorded(tmp_path: Path) -> None:
     script = SkillScript(name='scripts/run.py', uri=str(skill / 'scripts' / 'run.py'))
 
     assert skill_root_for(script) == skill.resolve()
+
+
+async def test_reused_opensandbox_restages_when_only_the_skill_root_differs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_opensandbox_models: None
+) -> None:
+    """Two skills can share relative paths, sizes and mtimes, so the root must be keyed too.
+
+    Without it the second skill would run the first skill's staged script.
+    """
+    timestamp = 1_700_000_000
+    for name, body in (('skill-a', 'print("A")\n'), ('skill-b', 'print("B")\n')):
+        skill = tmp_path / name
+        (skill / 'scripts').mkdir(parents=True)
+        (skill / 'SKILL.md').write_text(f'---\nname: {name}\ndescription: Same shape.\n---\n\nBody.\n')
+        (skill / 'scripts' / 'run.py').write_text(body)  # Identical length, so identical size.
+        for path in (skill / 'SKILL.md', skill / 'scripts' / 'run.py'):
+            os.utime(path, (timestamp, timestamp))
+
+    sandbox = _FakeOpenSandboxRun()
+    monkeypatch.setattr(opensandbox_module, '_require_opensandbox', lambda: SimpleNamespace(create=_returning(sandbox)))
+    executor = OpenSandboxScriptExecutor(workdir='/workspace/skills', reuse_sandbox=True)
+
+    await executor.run(_script_in(tmp_path / 'skill-a', 'scripts/run.py'))
+    await executor.run(_script_in(tmp_path / 'skill-b', 'scripts/run.py'))
+
+    staged_scripts = [e.data for e in sandbox.written if e.path.endswith('scripts/run.py')]
+    assert staged_scripts[-1] == b'print("B")\n', "skill B's script must replace skill A's"

@@ -127,6 +127,7 @@ class OpenSandboxScriptExecutor:
         self._sandbox: Sandbox | None = None
         self._sandbox_deadline: float = 0.0
         self._staged_paths: set[str] = set()
+        self._staged_root: Path | None = None
         self._staged_fingerprint: tuple[tuple[str, int, int], ...] | None = None
         # Serializes runs that share one sandbox; see run().
         self._reuse_lock = anyio.Lock()
@@ -169,7 +170,10 @@ class OpenSandboxScriptExecutor:
         from opensandbox.models import WriteEntry
 
         entries, fingerprint = _stage_snapshot(skill_root)
-        if self._reuse_sandbox and fingerprint == self._staged_fingerprint:
+        # Keyed on the root as well: two skills can share relative paths, sizes and
+        # mtimes (templates, timestamp-preserving copies), and fingerprint alone
+        # would then run skill B against skill A's staged files.
+        if self._reuse_sandbox and (skill_root, fingerprint) == (self._staged_root, self._staged_fingerprint):
             return
 
         paths = {f'{self._workdir}/{relative}' for relative, _resolved in entries}
@@ -200,6 +204,7 @@ class OpenSandboxScriptExecutor:
 
         if self._reuse_sandbox:
             self._staged_paths = paths
+            self._staged_root = skill_root
             self._staged_fingerprint = fingerprint
 
     def _build_command(self, script_path: Path, remote_path: str, suffix: str, args: dict[str, Any] | None) -> str:
@@ -295,4 +300,5 @@ class OpenSandboxScriptExecutor:
             self._sandbox = None
             self._sandbox_deadline = 0.0
             self._staged_paths = set()
+            self._staged_root = None
             self._staged_fingerprint = None
