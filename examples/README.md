@@ -11,8 +11,10 @@ This folder contains runnable examples demonstrating how to use `pydantic-ai-ski
 | `git_registry_usage.py` | Loads skills from a remote Git repository using `GitSkillsRegistry` (clones Anthropic's public skills repo). |
 | `programatic_skills.py` | Defines a skill entirely in Python using `@skill.resource` / `@skill.script` decorators — HR Analytics Agent backed by a HuggingFace dataset. |
 | `debug_local_logging.py` | Development-focused example that runs file-based skill scripts in-process for breakpoint debugging and writes a local execution log file. |
-| `sandbox_opensandbox.py` | `SkillScriptExecutor` that runs skill scripts in an [OpenSandbox](https://github.com/opensandbox-group/OpenSandbox) container. Needs `pip install "pydantic-ai-skills[opensandbox]"` and a reachable OpenSandbox server. |
-| `sandbox_localsandbox.py` | `SkillScriptExecutor` that runs skill scripts in a [LocalSandbox](https://github.com/coplane/localsandbox) virtual filesystem (just-bash + Pyodide, no container runtime). Needs `pip install "pydantic-ai-skills[localsandbox]"`. |
+| `sandbox_opensandbox.py` | Agent whose skill scripts run in an [OpenSandbox](https://github.com/opensandbox-group/OpenSandbox) container, via a custom `SkillScriptExecutor` wired in through `SkillsCapability`. Needs `pip install -e ".[examples,opensandbox]"` and a reachable OpenSandbox server. |
+| `sandbox_localsandbox.py` | Agent whose skill scripts run in a [LocalSandbox](https://github.com/coplane/localsandbox) virtual filesystem (just-bash + Pyodide, no container runtime), via a custom `SkillScriptExecutor` wired in through `SkillsCapability`. Needs `pip install -e ".[examples,localsandbox]"`. |
+
+Both sandbox examples generate their own stdlib-only demo skill under `tmp/` rather than using `skills/`, because the bundled skills import third-party packages (`arxiv`, `ddgs`) that a sandbox image or Pyodide will not have. Ask the running agent to inspect the sandbox — it reports a working directory and platform belonging to the sandbox, not your machine.
 
 ### Bundled skills
 

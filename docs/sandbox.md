@@ -41,7 +41,13 @@ toolset = SkillsToolset(directories=[directory])
 !!! warning "These ship as examples, not as library code"
     Both executors live in [`examples/`](https://github.com/DougTrajano/pydantic-ai-skills/tree/main/examples), which is **not** part of the installed wheel — `pip install "pydantic-ai-skills[opensandbox]"` gives you the SDK, not the executor. Copy the example file into your own project and import it from there. The snippets below use `myapp.sandbox_opensandbox` to make that explicit; the extras exist so you can install the provider SDK the executor depends on.
 
-Both are complete, working code you can copy and adapt. Both stage the **whole skill folder** into the sandbox — `SKILL.md`, `resources/`, `scripts/` and anything else — and run the script with its own directory as the working directory, so sibling modules, `../resources/data.json` and bundled data files resolve exactly as they do locally. Both return output in the same format as local execution, so switching backends does not change what the model sees.
+Each is a complete, runnable agent example — it generates a small demo skill, wires it to an `Agent` through `SkillsCapability`, and serves it on `http://127.0.0.1:7932`:
+
+```bash
+python -m examples.sandbox_localsandbox
+```
+
+Ask the agent to inspect the sandbox and it reports a platform and working directory belonging to the sandbox rather than your machine. The executor class itself is the part you copy and adapt. Both stage the **whole skill folder** into the sandbox — `SKILL.md`, `resources/`, `scripts/` and anything else — and run the script with its own directory as the working directory, so sibling modules, `../resources/data.json` and bundled data files resolve exactly as they do locally. Both return output in the same format as local execution, so switching backends does not change what the model sees.
 
 Symlinks that resolve outside the skill folder are skipped with a warning during staging. Discovery already rejects them, but staging re-walks the folder, and following such a link would copy an arbitrary host file *into* the sandbox where the script could read it back out.
 

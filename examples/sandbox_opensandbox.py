@@ -24,15 +24,19 @@ OpenSandbox talks to a server, so a reachable endpoint must be configured first:
     osb config set connection.protocol http
     osb config set connection.api_key <your-api-key>
 
-Example:
-    ```python
-    from pydantic_ai_skills import SkillsDirectory
-
-    from myapp.sandbox_opensandbox import OpenSandboxScriptExecutor
-
-    executor = OpenSandboxScriptExecutor(image='opensandbox/code-interpreter:v1.1.0')
-    directory = SkillsDirectory(path='./skills', script_executor=executor)
+Running this example:
+    ```bash
+    pip install -e ".[examples,opensandbox]"
+    python -m examples.sandbox_opensandbox
     ```
+
+It writes a small stdlib-only demo skill under ``examples/tmp/``, wires it to an
+agent through ``SkillsCapability``, and serves the agent on
+http://127.0.0.1:7932. Ask it to inspect the sandbox and compare the answer with
+your own machine — the paths and the visible filesystem belong to the container.
+
+The bundled ``examples/skills`` are not used here on purpose: they import
+third-party packages such as ``arxiv``, which the demo image does not carry.
 """
 
 from __future__ import annotations
@@ -44,7 +48,19 @@ from datetime import timedelta
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
-from pydantic_ai_skills import LocalSkillScriptExecutor, SkillScript, SkillScriptExecutor
+from pydantic_ai import Agent
+
+from pydantic_ai_skills import (
+    LocalSkillScriptExecutor,
+    SkillsCapability,
+    SkillScript,
+    SkillScriptExecutor,
+    SkillsDirectory,
+)
+
+EXAMPLES_DIR = Path(__file__).parent
+TMP_DIR = EXAMPLES_DIR / 'tmp'
+SKILL_DIR = TMP_DIR / 'sandbox-demo-skill'
 
 if TYPE_CHECKING:
     from opensandbox import Sandbox
@@ -258,3 +274,118 @@ class OpenSandboxScriptExecutor(SkillScriptExecutor):
         if self._sandbox is not None:
             await self._sandbox.kill()
             self._sandbox = None
+
+
+# ---------------------------------------------------------------------------
+# Demo agent
+# ---------------------------------------------------------------------------
+
+_SKILL_MD = """---
+name: sandbox-demo
+description: Inspect the environment that skill scripts execute in. Use this skill whenever the user asks where scripts run, what the sandbox looks like, or to prove that execution is isolated from the host machine.
+---
+
+# Sandbox demo
+
+Run `scripts/inspect_sandbox.py` to report the interpreter, platform, working
+directory and visible files of whatever environment the script executes in.
+
+Pass `--show-config` to also read `resources/config.json`, which lives at the
+skill root rather than next to the script. It only resolves when the whole
+skill folder was made available to the script.
+"""
+
+_INSPECT_SCRIPT = '''#!/usr/bin/env python3
+"""Report where this script is really running."""
+
+import argparse
+import json
+import platform
+import sys
+from pathlib import Path
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description='Inspect the execution environment.')
+    parser.add_argument('--label', default='sandbox-demo')
+    parser.add_argument('--show-config', action='store_true')
+    args = parser.parse_args()
+
+    script_dir = Path(__file__).resolve().parent
+    report = {
+        'label': args.label,
+        'python_version': platform.python_version(),
+        'platform': sys.platform,
+        'cwd': str(Path.cwd()),
+        'script_dir': str(script_dir),
+        'files_next_to_script': sorted(p.name for p in script_dir.iterdir()),
+    }
+
+    if args.show_config:
+        # Lives at the skill root, one level up from scripts/.
+        config = script_dir.parent / 'resources' / 'config.json'
+        report['config'] = json.loads(config.read_text(encoding='utf-8'))
+
+    print(json.dumps(report, indent=2))
+
+
+if __name__ == '__main__':
+    main()
+'''
+
+_CONFIG_JSON = '{\n  "environment": "sandbox-demo",\n  "answer": 42\n}\n'
+
+
+def write_demo_skill() -> Path:
+    """Create a self-contained, stdlib-only demo skill under ``examples/tmp/``.
+
+    The script lives in ``scripts/`` while its config lives in ``resources/``,
+    so a run only succeeds when the whole skill folder reaches the sandbox.
+
+    Returns:
+        Path to the demo skill directory.
+    """
+    (SKILL_DIR / 'scripts').mkdir(parents=True, exist_ok=True)
+    (SKILL_DIR / 'resources').mkdir(parents=True, exist_ok=True)
+
+    (SKILL_DIR / 'SKILL.md').write_text(_SKILL_MD, encoding='utf-8')
+    (SKILL_DIR / 'scripts' / 'inspect_sandbox.py').write_text(_INSPECT_SCRIPT, encoding='utf-8')
+    (SKILL_DIR / 'resources' / 'config.json').write_text(_CONFIG_JSON, encoding='utf-8')
+    return SKILL_DIR
+
+
+def build_agent(model: str = 'gateway/openai:gpt-5.2') -> Agent:
+    """Build an agent whose skill scripts execute inside an OpenSandbox container.
+
+    Args:
+        model: Model identifier passed to :class:`~pydantic_ai.Agent`.
+
+    Returns:
+        Configured agent with skills wired to the sandbox executor.
+    """
+    executor = OpenSandboxScriptExecutor()
+    skills = SkillsCapability(directories=[SkillsDirectory(path=TMP_DIR, script_executor=executor)])
+
+    return Agent(
+        model=model,
+        instructions=(
+            'You are a demo assistant for sandboxed skill execution. '
+            'When asked about the execution environment, run the sandbox-demo skill '
+            'and report exactly what it prints.'
+        ),
+        capabilities=[skills],
+    )
+
+
+if __name__ == '__main__':
+    # Imported here so the executor above stays importable without the examples extra.
+    import logfire
+    import uvicorn
+    from dotenv import load_dotenv
+
+    load_dotenv()
+    logfire.configure()
+    logfire.instrument_pydantic_ai()
+
+    write_demo_skill()
+    uvicorn.run(build_agent().to_web(), host='127.0.0.1', port=7932)
