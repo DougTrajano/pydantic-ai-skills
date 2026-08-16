@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pydantic_ai_skills.types import SkillScript
 
-__all__ = ['EXCLUDED_STAGING_DIRS', 'iter_stageable_files', 'skill_root_for']
+__all__ = ['EXCLUDED_STAGING_DIRS', 'iter_stageable_dirs', 'iter_stageable_files', 'skill_root_for']
 
 # Directories never copied into a sandbox.
 #
@@ -73,7 +73,16 @@ def _safe_staged_file(path: Path, skill_root: Path) -> Path | None:
     Returns:
         The resolved file, or None when it must not be staged.
     """
-    resolved = path.resolve()
+    try:
+        resolved = path.resolve()
+    except (OSError, RuntimeError) as exc:
+        # A symlink loop raises here on Python <=3.12; 3.13+ returns the path
+        # unresolved instead and it is dropped by the is_file() check below.
+        # Discovery tolerates such entries either way, so staging must not be
+        # the thing that fails.
+        warnings.warn(f"Skipping '{path}': {exc}", UserWarning, stacklevel=3)
+        return None
+
     if not resolved.is_relative_to(skill_root):
         warnings.warn(
             f"Skipping '{path}': resolves outside the skill folder (symlink escape detected).",
@@ -102,7 +111,11 @@ def _safe_directory_alias(directory: Path, skill_root: Path) -> Path | None:
     Returns:
         The resolved target when it is safe to stage under the alias.
     """
-    target = directory.resolve()
+    try:
+        target = directory.resolve()
+    except (OSError, RuntimeError):
+        return None  # Symlink loop; skipped like any other unusable alias.
+
     if not target.is_dir() or not target.is_relative_to(skill_root):
         return None
     if EXCLUDED_STAGING_DIRS.intersection(target.relative_to(skill_root).parts):
@@ -221,7 +234,33 @@ class StagedFile:
     executable: bool
 
 
-def _stage_snapshot(skill_root: Path) -> tuple[list[StagedFile], str]:
+def iter_stageable_dirs(skill_root: Path) -> Iterator[str]:
+    """Yield skill-relative directory paths that are safe to create in a sandbox.
+
+    Files alone are not enough: a skill may ship an empty directory that its
+    script writes into, and creating only the ancestors of staged files would
+    leave it missing.
+
+    Args:
+        skill_root: Resolved path to the skill folder.
+
+    Yields:
+        Directory paths relative to ``skill_root``, posix-style.
+    """
+    for dirpath, dirnames, _filenames in os.walk(skill_root):
+        kept, aliases = _partition_directories(dirpath, dirnames, skill_root)
+        dirnames[:] = kept
+        for name in kept:
+            yield (Path(dirpath) / name).relative_to(skill_root).as_posix()
+        for alias, target in aliases:
+            yield alias
+            for sub, _dirs, _files in os.walk(target):
+                for nested in sorted(_dirs):
+                    if nested not in EXCLUDED_STAGING_DIRS:
+                        yield f'{alias}/{(Path(sub) / nested).relative_to(target).as_posix()}'
+
+
+def _stage_snapshot(skill_root: Path) -> tuple[list[StagedFile], list[str], str]:
     """Walk the skill folder once, returning its files and a content fingerprint.
 
     The fingerprint is a digest of every staged path, its executable bit and its
@@ -237,10 +276,15 @@ def _stage_snapshot(skill_root: Path) -> tuple[list[StagedFile], str]:
         skill_root: Resolved path to the skill folder.
 
     Returns:
-        The staged files and a hex digest covering their paths and contents.
+        The staged files, the directories to create, and a hex digest covering
+        their paths and contents.
     """
     entries: list[StagedFile] = []
+    directories = sorted(set(iter_stageable_dirs(skill_root)))
     digest = hashlib.sha256()
+    for directory in directories:
+        digest.update(b'd\0')
+        digest.update(directory.encode('utf-8'))
     for relative, resolved in iter_stageable_files(skill_root):
         data = resolved.read_bytes()
         executable = bool(resolved.stat().st_mode & 0o111)
@@ -252,4 +296,4 @@ def _stage_snapshot(skill_root: Path) -> tuple[list[StagedFile], str]:
         # treat the file as a script, and a stale 0644 copy would fail to execute.
         digest.update(b'x' if executable else b'-')
         digest.update(hashlib.sha256(data).digest())
-    return entries, digest.hexdigest()
+    return entries, directories, digest.hexdigest()

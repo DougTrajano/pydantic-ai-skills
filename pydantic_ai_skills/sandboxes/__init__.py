@@ -16,13 +16,14 @@ exactly like local execution. Provider SDKs are imported lazily, so importing
 this package never requires an extra to be installed.
 """
 
-from pydantic_ai_skills.sandboxes._staging import iter_stageable_files, skill_root_for
+from pydantic_ai_skills.sandboxes._staging import iter_stageable_dirs, iter_stageable_files, skill_root_for
 from pydantic_ai_skills.sandboxes.localsandbox import LocalSandboxScriptExecutor
 from pydantic_ai_skills.sandboxes.opensandbox import OpenSandboxScriptExecutor
 
 __all__ = [
     'LocalSandboxScriptExecutor',
     'OpenSandboxScriptExecutor',
+    'iter_stageable_dirs',
     'iter_stageable_files',
     'skill_root_for',
 ]

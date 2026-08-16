@@ -29,6 +29,7 @@ from pydantic_ai_skills import (
 )
 from pydantic_ai_skills.local import FileBasedSkillScript
 from pydantic_ai_skills.sandboxes import (
+    iter_stageable_dirs,
     iter_stageable_files,
     localsandbox as localsandbox_module,
     opensandbox as opensandbox_module,
@@ -311,12 +312,28 @@ async def test_python_wrapper_preserves_non_bmp_arguments(tmp_path: Path, monkey
 # ---------------------------------------------------------------------------
 
 
-class _FakeLocalSandbox:
+class _LocalSandboxShell:
+    """Records the shell commands LocalSandbox fakes are asked to run.
+
+    Shared by every LocalSandbox stub so a new call in the executor fails them
+    all at once rather than whichever one was remembered.
+    """
+
+    def __init__(self) -> None:
+        self.shell_commands: list[str] = []
+
+    def bash(self, command: str) -> Any:
+        self.shell_commands.append(command)
+        return SimpleNamespace(stdout='', stderr='', exit_code=0, duration_ms=0)
+
+
+class _FakeLocalSandbox(_LocalSandboxShell):
     """Records the files staged into it and whether it was closed."""
 
     instances: list[_FakeLocalSandbox] = []
 
     def __init__(self, files: dict[str, Any], cwd: str, **kwargs: Any) -> None:
+        super().__init__()
         self.files = files
         self.closed = False
         type(self).instances.append(self)
@@ -611,10 +628,11 @@ async def test_opensandbox_aclose_kills_reused_sandbox(monkeypatch: pytest.Monke
     assert executor._sandbox is None
 
 
-class _FakeLocalSandboxRun:
+class _FakeLocalSandboxRun(_LocalSandboxShell):
     """A LocalSandbox stand-in covering both the Pyodide and just-bash paths."""
 
     def __init__(self, files: dict[str, Any], cwd: str, **kwargs: Any) -> None:
+        super().__init__()
         self.files = files
         self.cwd = cwd
         self.closed = False
@@ -872,7 +890,7 @@ def second_skill(tmp_path: Path) -> Path:
     return skill
 
 
-class _SlowLocalSandbox:
+class _SlowLocalSandbox(_LocalSandboxShell):
     """Yields control during execution so a competing run can interleave."""
 
     live: int = 0
@@ -880,6 +898,7 @@ class _SlowLocalSandbox:
     closed_while_running = False
 
     def __init__(self, files: dict[str, Any], cwd: str, **kwargs: Any) -> None:
+        super().__init__()
         self.files = files
         self.closed = False
         self.running = False
@@ -1312,13 +1331,13 @@ def test_staging_rejects_directory_symlinks_into_excluded_dirs(cloned_skill: Pat
 @pytest.mark.parametrize(
     ('shebang', 'expected'),
     [
-        ('#!/bin/bash\n', 'bash'),
-        ('#!/usr/bin/env bash\n', 'bash'),
-        ('#!/bin/sh\n', 'sh'),
-        ('#!/usr/bin/env -S zsh\n', 'zsh'),
+        ('#!/bin/bash\n', ['bash']),
+        ('#!/usr/bin/env bash\n', ['bash']),
+        ('#!/bin/sh\n', ['sh']),
+        ('#!/usr/bin/env -S zsh\n', ['zsh']),
     ],
 )
-def test_localsandbox_shebang_resolves_to_a_bare_shell_name(tmp_path: Path, shebang: str, expected: str) -> None:
+def test_localsandbox_shebang_resolves_to_a_bare_shell_name(tmp_path: Path, shebang: str, expected: list[str]) -> None:
     """just-bash exposes shells as built-ins, so only the basename is usable.
 
     A literal `/bin/bash` fails inside the sandbox with "command not found".
@@ -1327,6 +1346,22 @@ def test_localsandbox_shebang_resolves_to_a_bare_shell_name(tmp_path: Path, sheb
     script.write_text(f'{shebang}echo hi\n')
 
     assert localsandbox_module._shebang_shell(script) == expected
+
+
+@pytest.mark.parametrize('shebang', ['#!/bin/bash -e\n', '#!/usr/bin/env -S bash -u\n'])
+def test_localsandbox_warns_that_shebang_options_are_dropped(tmp_path: Path, shebang: str) -> None:
+    """just-bash rejects every shell flag, so options cannot be passed through.
+
+    `bash -e script` fails there with status 127, so honouring them would break
+    scripts that currently run. Dropping them is surfaced rather than silent.
+    """
+    script = tmp_path / 'go.sh'
+    script.write_text(f'{shebang}echo hi\n')
+
+    with pytest.warns(UserWarning, match='shebang options'):
+        command = localsandbox_module._shebang_shell(script)
+
+    assert command == ['bash']
 
 
 def test_localsandbox_ignores_non_shell_shebangs(tmp_path: Path) -> None:
@@ -1354,3 +1389,103 @@ async def test_localsandbox_runs_shell_script_under_its_shebang(
     await LocalSandboxScriptExecutor(workdir='/data/skill').run(_script_in(runnable_skill, 'scripts/go.sh'))
 
     assert created[0].command == 'cd /data/skill/scripts && bash /data/skill/scripts/go.sh'
+
+
+# ---------------------------------------------------------------------------
+# Staging must survive odd filesystems, and preserve the tree's shape
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.filterwarnings('ignore::UserWarning')
+def test_staging_skips_cyclic_symlinks(tmp_path: Path) -> None:
+    """A symlink loop must be skipped, not abort staging.
+
+    Asserts the outcome rather than a warning: Python <=3.12 raises RuntimeError
+    from resolve() and the guard warns, while 3.13+ returns the path unresolved
+    and it is dropped by the is_file() check. Both must leave the rest staged.
+    """
+    skill = tmp_path / 'demo-skill'
+    skill.mkdir()
+    (skill / 'SKILL.md').write_text('---\nname: demo-skill\ndescription: Demo.\n---\n\nBody.\n')
+    (skill / 'run.py').write_text('print("hi")\n')
+    loop = skill / 'loop'
+    loop.symlink_to(loop)
+
+    staged = _collect_staged(skill.resolve())
+
+    assert sorted(staged) == ['SKILL.md', 'run.py'], 'the loop is skipped, the rest still stages'
+
+
+def test_staging_captures_empty_directories(tmp_path: Path) -> None:
+    """A skill may ship an empty scratch/ for its script to write into."""
+    skill = tmp_path / 'demo-skill'
+    (skill / 'scratch').mkdir(parents=True)
+    (skill / 'out' / 'nested').mkdir(parents=True)
+    (skill / 'SKILL.md').write_text('---\nname: demo-skill\ndescription: Demo.\n---\n\nBody.\n')
+
+    directories = sorted(iter_stageable_dirs(skill.resolve()))
+
+    assert 'scratch' in directories
+    assert 'out/nested' in directories
+
+
+async def test_localsandbox_creates_empty_directories(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_localsandbox_module: None
+) -> None:
+    """The files mapping cannot express an empty directory, so mkdir must run."""
+    skill = tmp_path / 'demo-skill'
+    (skill / 'scratch').mkdir(parents=True)
+    (skill / 'SKILL.md').write_text('---\nname: demo-skill\ndescription: Demo.\n---\n\nBody.\n')
+    (skill / 'go.sh').write_text('#!/bin/sh\necho hi\n')
+
+    created: list[_FakeLocalSandboxRun] = []
+
+    def factory(**kwargs: Any) -> _FakeLocalSandboxRun:
+        sandbox = _FakeLocalSandboxRun(**kwargs)
+        created.append(sandbox)
+        return sandbox
+
+    monkeypatch.setattr(localsandbox_module, '_require_localsandbox', lambda: factory)
+
+    await LocalSandboxScriptExecutor(workdir='/data/skill').run(_script_in(skill, 'go.sh'))
+
+    mkdirs = ' '.join(created[0].shell_commands)
+    assert '/data/skill/scratch' in mkdirs
+
+
+async def test_opensandbox_creates_empty_directories(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_opensandbox_models: None
+) -> None:
+    """Ancestors of staged files are not enough when a directory holds no files."""
+    skill = tmp_path / 'demo-skill'
+    (skill / 'scratch').mkdir(parents=True)
+    (skill / 'SKILL.md').write_text('---\nname: demo-skill\ndescription: Demo.\n---\n\nBody.\n')
+    (skill / 'run.py').write_text('print("hi")\n')
+
+    sandbox = _FakeOpenSandboxRun()
+    monkeypatch.setattr(opensandbox_module, '_require_opensandbox', lambda: SimpleNamespace(create=_returning(sandbox)))
+
+    await OpenSandboxScriptExecutor(workdir='/workspace/skills').run(_script_in(skill, 'run.py'))
+
+    assert '/workspace/skills/scratch' in sandbox.directories
+
+
+# ---------------------------------------------------------------------------
+# Exit status must mean the same thing in both executors
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(('requested', 'expected'), [(256, 0), (300, 44), (3, 3), (255, 255), (-1, 255)])
+async def test_python_wrapper_truncates_exit_codes_like_a_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, requested: int, expected: int
+) -> None:
+    """A local subprocess reports code & 0xFF, so sys.exit(256) must not become failure."""
+    monkeypatch.setattr(localsandbox_module, '_EXIT_CODE_FILE', str(tmp_path / 'exit_code'))
+    script = tmp_path / 'run.py'
+    script.write_text(f'import sys\nsys.exit({requested})\n', encoding='utf-8')
+
+    _, _, exit_code = await LocalSandboxScriptExecutor()._run_python(
+        _StubPyodideSandbox(), str(script), str(tmp_path), None
+    )
+
+    assert exit_code == expected

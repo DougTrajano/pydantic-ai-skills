@@ -170,7 +170,7 @@ class OpenSandboxScriptExecutor:
         """
         from opensandbox.models import WriteEntry
 
-        entries, fingerprint = _stage_snapshot(skill_root)
+        entries, source_dirs, fingerprint = _stage_snapshot(skill_root)
         # Keyed on the root as well: two skills can share relative paths and
         # contents, and fingerprint alone would then run skill B against skill A's
         # staged files.
@@ -181,7 +181,8 @@ class OpenSandboxScriptExecutor:
         # Every ancestor, not just the immediate parent: creating resources/a/b also
         # leaves resources/a behind, and an untracked ancestor would survive pruning
         # and block a later skill that needs a file at that path.
-        directories = {self._workdir}
+        # Every source directory, so a skill's empty scratch/ exists too.
+        directories = {self._workdir} | {f'{self._workdir}/{name}' for name in source_dirs}
         for entry in entries:
             parent = PurePosixPath(entry.relative).parent
             while parent != PurePosixPath('.'):
@@ -199,9 +200,9 @@ class OpenSandboxScriptExecutor:
         if stale_dirs:
             await sandbox.files.delete_directories(stale_dirs)
 
+        await sandbox.files.create_directories([WriteEntry(path=path) for path in sorted(directories)])
+
         if entries:
-            # write_files does not create parents, so every directory is made first.
-            await sandbox.files.create_directories([WriteEntry(path=path) for path in sorted(directories)])
             await sandbox.files.write_files(
                 [
                     WriteEntry(

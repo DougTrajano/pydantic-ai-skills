@@ -15,6 +15,7 @@ pip install "pydantic-ai-skills[localsandbox]"
 from __future__ import annotations
 
 import shlex
+import warnings
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
@@ -41,18 +42,25 @@ _SHELL_INTERPRETERS: dict[str, list[str]] = {
 _SHELL_NAMES = frozenset({'sh', 'bash', 'zsh'})
 
 
-def _shebang_shell(script_path: Path) -> str | None:
-    """Return the shell named by a script's shebang, or None.
+def _shebang_shell(script_path: Path) -> list[str] | None:
+    """Return the shell command a script's shebang asks for, or None.
 
-    Only the interpreter's basename is returned, and only when it is a shell
-    just-bash knows. The path itself is discarded because paths such as
-    ``/bin/bash`` do not exist inside the sandbox.
+    The interpreter is reduced to its basename, and only accepted when it names
+    a shell just-bash knows: paths such as ``/bin/bash`` do not exist inside the
+    sandbox, where shells are built-ins.
+
+    Shell options cannot be honoured here. just-bash rejects every flag —
+    ``bash -e script`` fails with "-e: No such file or directory" and status 127 —
+    so passing them through would break scripts that currently run. They are
+    dropped with a warning instead, since ``-e`` does change behaviour.
+    OpenSandbox runs a real shell and keeps them.
 
     Args:
         script_path: Local path to the script file.
 
     Returns:
-        A shell name such as ``bash``, or None when there is no usable shebang.
+        A single-element command such as ``['bash']``, or None without a usable
+        shebang.
     """
     try:
         with script_path.open('rb') as handle:
@@ -65,12 +73,26 @@ def _shebang_shell(script_path: Path) -> str | None:
 
     parts = shlex.split(first_line[2:].decode('utf-8', errors='ignore').strip())
     if parts and PurePosixPath(parts[0]).name == 'env':
-        parts = [part for part in parts[1:] if not part.startswith('-')]
+        # Drop env's own switches (-S, -i, ...) but keep the interpreter's.
+        parts = parts[1:]
+        while parts and parts[0].startswith('-'):
+            parts = parts[1:]
     if not parts:
         return None
 
     name = PurePosixPath(parts[0]).name
-    return name if name in _SHELL_NAMES else None
+    if name not in _SHELL_NAMES:
+        return None
+
+    if parts[1:]:
+        warnings.warn(
+            f"Ignoring shebang options {' '.join(parts[1:])!r} for '{script_path.name}': "
+            'just-bash accepts no shell flags, so they cannot be passed through. '
+            'Behaviour may differ from local execution.',
+            UserWarning,
+            stacklevel=2,
+        )
+    return [name]
 
 
 _EXIT_CODE_FILE = '/data/.skill_exit_code'
@@ -83,7 +105,9 @@ try:
 except SystemExit as exc:
     if isinstance(exc.code, int):
         # int() also normalizes bool, so sys.exit(not ok) reports 1 rather than 'True'.
-        __skill_exit_code = int(exc.code)
+        # & 0xFF matches the POSIX status a local subprocess would report:
+        # sys.exit(256) is 0 and sys.exit(300) is 44.
+        __skill_exit_code = int(exc.code) & 0xFF
     elif exc.code is not None:
         __skill_exit_code = 1
         print(exc.code, file=sys.stderr)
@@ -161,7 +185,7 @@ class LocalSandboxScriptExecutor:
         serves every skill in a ``SkillsDirectory``) or edited files under the
         same root, which ``auto_reload`` and ``reload()`` both surface.
         """
-        entries, fingerprint = _stage_snapshot(skill_root)
+        entries, directories, fingerprint = _stage_snapshot(skill_root)
 
         if self._reuse_sandbox and self._sandbox is not None:
             if self._staged_root == skill_root and self._staged_fingerprint == fingerprint:
@@ -175,6 +199,12 @@ class LocalSandboxScriptExecutor:
             kwargs['preset'] = self._preset
 
         sandbox: LocalSandbox = sandbox_cls(**kwargs)
+        if directories:
+            # The files mapping cannot express an empty directory, and a skill may
+            # ship one for its script to write into.
+            paths = ' '.join(shlex.quote(f'{self.workdir}/{name}') for name in directories)
+            sandbox.bash(f'mkdir -p {paths}')
+
         if self._reuse_sandbox:
             self._sandbox = sandbox
             self._staged_root = skill_root
@@ -230,8 +260,8 @@ class LocalSandboxScriptExecutor:
         from localsandbox import CommandError
 
         # A shebang wins over the suffix, matching LocalSkillScriptExecutor.
-        shell = _shebang_shell(script_path) or _SHELL_INTERPRETERS[suffix][0]
-        cmd = [shell, remote_path]
+        shell = _shebang_shell(script_path) or _SHELL_INTERPRETERS[suffix]
+        cmd = [*shell, remote_path]
         if args:
             self._formatter._build_args(cmd, args)
 
