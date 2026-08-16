@@ -35,6 +35,44 @@ _SHELL_INTERPRETERS: dict[str, list[str]] = {
     '.zsh': ['zsh'],
 }
 
+#: Shell names just-bash accepts as commands. Only the basename of a shebang is
+#: usable: just-bash provides `sh` and `bash` as built-ins, not as files, so a
+#: literal `#!/bin/bash` would fail with "command not found".
+_SHELL_NAMES = frozenset({'sh', 'bash', 'zsh'})
+
+
+def _shebang_shell(script_path: Path) -> str | None:
+    """Return the shell named by a script's shebang, or None.
+
+    Only the interpreter's basename is returned, and only when it is a shell
+    just-bash knows. The path itself is discarded because paths such as
+    ``/bin/bash`` do not exist inside the sandbox.
+
+    Args:
+        script_path: Local path to the script file.
+
+    Returns:
+        A shell name such as ``bash``, or None when there is no usable shebang.
+    """
+    try:
+        with script_path.open('rb') as handle:
+            first_line = handle.readline()
+    except OSError:  # pragma: no cover - unreadable files are skipped earlier
+        return None
+
+    if not first_line.startswith(b'#!'):
+        return None
+
+    parts = shlex.split(first_line[2:].decode('utf-8', errors='ignore').strip())
+    if parts and PurePosixPath(parts[0]).name == 'env':
+        parts = [part for part in parts[1:] if not part.startswith('-')]
+    if not parts:
+        return None
+
+    name = PurePosixPath(parts[0]).name
+    return name if name in _SHELL_NAMES else None
+
+
 _EXIT_CODE_FILE = '/data/.skill_exit_code'
 
 _PYTHON_WRAPPER = """import runpy, sys
@@ -178,12 +216,20 @@ class LocalSandboxScriptExecutor:
         return result.stdout or '', stderr, exit_code
 
     async def _run_shell(
-        self, sandbox: LocalSandbox, remote_path: str, cwd: str, suffix: str, args: dict[str, Any] | None
+        self,
+        sandbox: LocalSandbox,
+        script_path: Path,
+        remote_path: str,
+        cwd: str,
+        suffix: str,
+        args: dict[str, Any] | None,
     ) -> tuple[str, str, int]:
         """Run a shell script through just-bash from the script's own directory."""
         from localsandbox import CommandError
 
-        cmd = [*_SHELL_INTERPRETERS[suffix], remote_path]
+        # A shebang wins over the suffix, matching LocalSkillScriptExecutor.
+        shell = _shebang_shell(script_path) or _SHELL_INTERPRETERS[suffix][0]
+        cmd = [shell, remote_path]
         if args:
             self._formatter._build_args(cmd, args)
 
@@ -240,16 +286,22 @@ class LocalSandboxScriptExecutor:
             )
 
         if not self._reuse_sandbox:
-            return await self._execute(skill_root, remote_path, cwd, suffix, args)
+            return await self._execute(skill_root, script_path, remote_path, cwd, suffix, args)
 
         # One sandbox serving concurrent runs has to serialize them: a second run
         # switching skills would otherwise close the sandbox the first is still
         # using, and both would share a filesystem mid-execution anyway.
         async with self._reuse_lock:
-            return await self._execute(skill_root, remote_path, cwd, suffix, args)
+            return await self._execute(skill_root, script_path, remote_path, cwd, suffix, args)
 
     async def _execute(
-        self, skill_root: Path, remote_path: str, cwd: str, suffix: str, args: dict[str, Any] | None
+        self,
+        skill_root: Path,
+        script_path: Path,
+        remote_path: str,
+        cwd: str,
+        suffix: str,
+        args: dict[str, Any] | None,
     ) -> Any:
         """Provision a sandbox, run the script in it, and format the output."""
         sandbox = self._get_sandbox(skill_root)
@@ -257,7 +309,7 @@ class LocalSandboxScriptExecutor:
             if suffix == '.py':
                 stdout, stderr, exit_code = await self._run_python(sandbox, remote_path, cwd, args)
             else:
-                stdout, stderr, exit_code = await self._run_shell(sandbox, remote_path, cwd, suffix, args)
+                stdout, stderr, exit_code = await self._run_shell(sandbox, script_path, remote_path, cwd, suffix, args)
         finally:
             if not self._reuse_sandbox:
                 sandbox.__exit__(None, None, None)

@@ -333,7 +333,9 @@ class Skill:
         if validate:
             validate_skill_metadata(frontmatter, instructions, uri=str(skill_folder))
 
-        executor = script_executor or _LocalExecutor()
+        # `is None`, not `or`: a falsey custom executor must not be replaced by
+        # the host one.
+        executor = _LocalExecutor() if script_executor is None else script_executor
         scripts = _discover_scripts(skill_folder, name, executor)
         resources = _discover_resources(
             skill_folder,

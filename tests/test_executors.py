@@ -1231,3 +1231,126 @@ async def test_reused_opensandbox_prunes_ancestor_directories(
 
     assert '/workspace/skills/resources/config' in sandbox.deleted_dirs
     assert '/workspace/skills/resources/config/sub' in sandbox.deleted_dirs
+
+
+# ---------------------------------------------------------------------------
+# A falsey custom executor must not be swapped for the host one
+# ---------------------------------------------------------------------------
+
+
+class FalseyExecutor(DuckTypedExecutor):
+    """A pool-backed executor that is falsey while its pool is empty."""
+
+    def __len__(self) -> int:
+        return 0
+
+
+def test_falsey_executor_is_not_replaced_by_the_local_one(skill_dir: Path) -> None:
+    """`or` would silently run untrusted scripts on the host instead."""
+    executor = FalseyExecutor()
+    assert not executor, 'the fixture must actually be falsey'
+
+    directory = SkillsDirectory(path=skill_dir, script_executor=executor)
+    skill = next(iter(directory.get_skills().values()))  # keyed by path, not name
+    script = next(s for s in skill.scripts if s.name.endswith('run.py'))
+
+    assert isinstance(script, FileBasedSkillScript)
+    assert script.executor is executor
+
+
+def test_falsey_executor_survives_discover_skills(skill_dir: Path) -> None:
+    """Same fallback bug lives in the functional entry point."""
+    executor = FalseyExecutor()
+
+    script = next(s for s in discover_skills(skill_dir)[0].scripts if s.name.endswith('run.py'))
+    assert isinstance(script, FileBasedSkillScript)
+    assert not isinstance(script.executor, FalseyExecutor), 'sanity: default is the local executor'
+
+    script = next(
+        s for s in discover_skills(skill_dir, script_executor=executor)[0].scripts if s.name.endswith('run.py')
+    )
+    assert isinstance(script, FileBasedSkillScript)
+    assert script.executor is executor
+
+
+# ---------------------------------------------------------------------------
+# In-tree directory aliases
+# ---------------------------------------------------------------------------
+
+
+def test_staging_expands_in_tree_directory_symlinks(tmp_path: Path) -> None:
+    """A script reading ../resources/current/x must find it in the sandbox too."""
+    skill = tmp_path / 'demo-skill'
+    (skill / 'data' / 'v2').mkdir(parents=True)
+    (skill / 'resources').mkdir()
+    (skill / 'SKILL.md').write_text('---\nname: demo-skill\ndescription: Demo.\n---\n\nBody.\n')
+    (skill / 'data' / 'v2' / 'config.json').write_text('{"v": 2}')
+    (skill / 'resources' / 'current').symlink_to(skill / 'data' / 'v2')
+
+    staged = dict(iter_stageable_files(skill.resolve()))
+
+    assert 'data/v2/config.json' in staged, 'the real path must still be staged'
+    assert 'resources/current/config.json' in staged, 'the alias path must be staged too'
+
+
+def test_staging_rejects_directory_symlinks_into_excluded_dirs(cloned_skill: Path) -> None:
+    """A directory alias must not become a second route into .git."""
+    (cloned_skill / 'resources').mkdir()
+    (cloned_skill / 'resources' / 'meta').symlink_to(cloned_skill / '.git')
+
+    staged = _collect_staged(cloned_skill.resolve())
+
+    assert not any(path.startswith('resources/meta') for path in staged)
+    assert not any('ghp_SECRETTOKEN' in source.read_text(errors='ignore') for source in staged.values())
+
+
+# ---------------------------------------------------------------------------
+# LocalSandbox shell dispatch
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ('shebang', 'expected'),
+    [
+        ('#!/bin/bash\n', 'bash'),
+        ('#!/usr/bin/env bash\n', 'bash'),
+        ('#!/bin/sh\n', 'sh'),
+        ('#!/usr/bin/env -S zsh\n', 'zsh'),
+    ],
+)
+def test_localsandbox_shebang_resolves_to_a_bare_shell_name(tmp_path: Path, shebang: str, expected: str) -> None:
+    """just-bash exposes shells as built-ins, so only the basename is usable.
+
+    A literal `/bin/bash` fails inside the sandbox with "command not found".
+    """
+    script = tmp_path / 'go.sh'
+    script.write_text(f'{shebang}echo hi\n')
+
+    assert localsandbox_module._shebang_shell(script) == expected
+
+
+def test_localsandbox_ignores_non_shell_shebangs(tmp_path: Path) -> None:
+    """A python shebang on a .sh file must not become a bogus command."""
+    script = tmp_path / 'go.sh'
+    script.write_text('#!/usr/bin/env python3\necho hi\n')
+
+    assert localsandbox_module._shebang_shell(script) is None
+
+
+async def test_localsandbox_runs_shell_script_under_its_shebang(
+    runnable_skill: Path, monkeypatch: pytest.MonkeyPatch, fake_localsandbox_module: None
+) -> None:
+    """A bash shebang selects bash rather than the suffix default."""
+    (runnable_skill / 'scripts' / 'go.sh').write_text('#!/bin/bash\narr=(a b)\necho "${arr[1]}"\n')
+    created: list[_FakeLocalSandboxRun] = []
+
+    def factory(**kwargs: Any) -> _FakeLocalSandboxRun:
+        sandbox = _FakeLocalSandboxRun(**kwargs)
+        created.append(sandbox)
+        return sandbox
+
+    monkeypatch.setattr(localsandbox_module, '_require_localsandbox', lambda: factory)
+
+    await LocalSandboxScriptExecutor(workdir='/data/skill').run(_script_in(runnable_skill, 'scripts/go.sh'))
+
+    assert created[0].command == 'cd /data/skill/scripts && bash /data/skill/scripts/go.sh'

@@ -309,7 +309,10 @@ def discover_skills(
     if not dir_path.is_dir():
         return skills
 
-    executor = script_executor or LocalSkillScriptExecutor()
+    # `is None`, not `or`: a custom executor defining __bool__/__len__ can be
+    # falsey, and silently swapping it for the local one would run scripts
+    # directly on the host.
+    executor = LocalSkillScriptExecutor() if script_executor is None else script_executor
     skill_files = _find_skill_files(dir_path, max_depth)
     for skill_file in skill_files:
         try:
@@ -389,7 +392,8 @@ class SkillsDirectory:
         self._path = Path(path).expanduser().resolve()
         self._validate = validate
         self._max_depth = max_depth
-        self._script_executor = script_executor or LocalSkillScriptExecutor()
+        # `is None`, not `or`: see discover_skills.
+        self._script_executor = LocalSkillScriptExecutor() if script_executor is None else script_executor
         self._exclude_resources = exclude_resources
 
         # Discover skills from directory

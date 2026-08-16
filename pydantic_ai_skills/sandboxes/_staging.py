@@ -63,6 +63,74 @@ def skill_root_for(script: SkillScript) -> Path:
     return root
 
 
+def _safe_staged_file(path: Path, skill_root: Path) -> Path | None:
+    """Resolve a file for staging, rejecting escapes and excluded targets.
+
+    Args:
+        path: Candidate file, possibly a symlink.
+        skill_root: Resolved path to the skill folder.
+
+    Returns:
+        The resolved file, or None when it must not be staged.
+    """
+    resolved = path.resolve()
+    if not resolved.is_relative_to(skill_root):
+        warnings.warn(
+            f"Skipping '{path}': resolves outside the skill folder (symlink escape detected).",
+            UserWarning,
+            stacklevel=3,
+        )
+        return None
+
+    # Pruning directories is not enough: a symlink elsewhere in the skill
+    # (resources/config -> ../.git/config) is an ordinary file entry whose target
+    # still lives under skill_root, and would alias a credential in.
+    if EXCLUDED_STAGING_DIRS.intersection(resolved.relative_to(skill_root).parts):
+        warnings.warn(f"Skipping '{path}': resolves into an excluded directory.", UserWarning, stacklevel=3)
+        return None
+
+    return resolved if resolved.is_file() else None
+
+
+def _safe_directory_alias(directory: Path, skill_root: Path) -> Path | None:
+    """Return the target of an in-tree directory symlink, or None.
+
+    Args:
+        directory: A symlinked directory inside the skill.
+        skill_root: Resolved path to the skill folder.
+
+    Returns:
+        The resolved target when it is safe to stage under the alias.
+    """
+    target = directory.resolve()
+    if not target.is_dir() or not target.is_relative_to(skill_root):
+        return None
+    if EXCLUDED_STAGING_DIRS.intersection(target.relative_to(skill_root).parts):
+        return None
+    return target
+
+
+def _walk_files(root: Path, skill_root: Path) -> Iterator[tuple[Path, Path]]:
+    """Yield ``(path, resolved)`` for stageable files under ``root``.
+
+    Directory symlinks are not followed here; callers expand those explicitly.
+
+    Args:
+        root: Directory to walk.
+        skill_root: Resolved path to the skill folder.
+
+    Yields:
+        Tuples of the walked path and its resolved target.
+    """
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = sorted(name for name in dirnames if name not in EXCLUDED_STAGING_DIRS)
+        for filename in sorted(filenames):
+            path = Path(dirpath) / filename
+            resolved = _safe_staged_file(path, skill_root)
+            if resolved is not None:
+                yield path, resolved
+
+
 def iter_stageable_files(skill_root: Path) -> Iterator[tuple[str, Path]]:
     """Yield ``(relative_posix_path, resolved_file)`` for files safe to stage.
 
@@ -75,40 +143,44 @@ def iter_stageable_files(skill_root: Path) -> Iterator[tuple[str, Path]]:
       but staging re-walks the folder, and following such a link would copy an
       arbitrary host file into the sandbox where the script could read it back out.
 
+    Directory symlinks that resolve safely inside the skill are staged under both
+    their alias and their real path, so a script reading ``resources/current/x``
+    finds it. They are expanded one level only, so aliases cannot cycle.
+
     Args:
         skill_root: Resolved path to the skill folder.
 
     Yields:
         Tuples of the path relative to ``skill_root`` and the resolved file.
     """
+    aliases: list[tuple[str, Path]] = []
     for dirpath, dirnames, filenames in os.walk(skill_root):
-        # Pruned in place so os.walk never descends into them.
-        dirnames[:] = sorted(name for name in dirnames if name not in EXCLUDED_STAGING_DIRS)
+        kept: list[str] = []
+        for name in sorted(dirnames):
+            if name in EXCLUDED_STAGING_DIRS:
+                continue
+            directory = Path(dirpath) / name
+            if not directory.is_symlink():
+                kept.append(name)
+                continue
+            # os.walk does not follow directory symlinks, so an in-tree alias such
+            # as resources/current -> data/v2 would simply be missing from the
+            # sandbox even though it resolves locally. Expand it once below; one
+            # level only, so aliases cannot cycle.
+            target = _safe_directory_alias(directory, skill_root)
+            if target is not None:
+                aliases.append((directory.relative_to(skill_root).as_posix(), target))
+        dirnames[:] = kept
 
         for filename in sorted(filenames):
             path = Path(dirpath) / filename
-            resolved = path.resolve()
-            if not resolved.is_relative_to(skill_root):
-                warnings.warn(
-                    f"Skipping '{path}': resolves outside the skill folder (symlink escape detected).",
-                    UserWarning,
-                    stacklevel=2,
-                )
-                continue
-
-            # Pruning directories is not enough: a symlink elsewhere in the skill
-            # (resources/config -> ../.git/config) is an ordinary file entry whose
-            # target still lives under skill_root, and would alias a credential in.
-            if EXCLUDED_STAGING_DIRS.intersection(resolved.relative_to(skill_root).parts):
-                warnings.warn(
-                    f"Skipping '{path}': resolves into an excluded directory.",
-                    UserWarning,
-                    stacklevel=2,
-                )
-                continue
-
-            if resolved.is_file():
+            resolved = _safe_staged_file(path, skill_root)
+            if resolved is not None:
                 yield path.relative_to(skill_root).as_posix(), resolved
+
+    for alias, target in aliases:
+        for path, resolved in _walk_files(target, skill_root):
+            yield f'{alias}/{path.relative_to(target).as_posix()}', resolved
 
 
 @dataclass(frozen=True)
