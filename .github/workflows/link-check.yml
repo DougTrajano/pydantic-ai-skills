@@ -26,7 +26,7 @@ jobs:
       # Needed by create-issue-from-file below.
       issues: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Check links
         id: lychee
@@ -40,7 +40,7 @@ jobs:
 
       - name: Open an issue when links are broken
         if: steps.lychee.outputs.exit_code != 0
-        uses: peter-evans/create-issue-from-file@v5
+        uses: peter-evans/create-issue-from-file@v6
         with:
           title: Broken links found
           content-filepath: lychee/out.md
