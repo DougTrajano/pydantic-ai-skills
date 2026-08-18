@@ -53,7 +53,7 @@ docs = [
     "mkdocs-llmstxt>=0.2.0",
 ]
 git = [
-    "gitpython>=3.1.40",
+    "gitpython>=3.1.0",
 ]
 s3 = [
     "boto3>=1.26.0",
