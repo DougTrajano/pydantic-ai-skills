@@ -1,0 +1,85 @@
+name: 🐛 Bug
+description: Report a bug or unexpected behavior in pydantic-ai-skills
+labels: ["bug"]
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report!
+
+        Please give us enough detail to reproduce the problem.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Initial checks
+      description: Just making sure we're on the same page.
+      options:
+        - label: I'm using the [latest version](https://github.com/dougtrajano/pydantic-ai-skills/releases/latest) of pydantic-ai-skills
+          required: true
+        - label: I've searched [the issue tracker](https://github.com/dougtrajano/pydantic-ai-skills/issues) for this issue before opening it
+          required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What did you see, and what did you expect to see instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: example
+    attributes:
+      label: Minimal, reproducible example
+      description: >
+        A self-contained
+        [minimal, reproducible example](https://stackoverflow.com/help/minimal-reproducible-example)
+        makes this dramatically faster to fix.
+
+        (This is formatted as code automatically, so no backticks needed.)
+      placeholder: |
+        from pydantic_ai import Agent
+        from pydantic_ai_skills import SkillsToolset
+
+        ...
+      render: Python
+
+  - type: textarea
+    id: traceback
+    attributes:
+      label: Traceback or logs
+      description: The full traceback, if there is one.
+      render: text
+
+  - type: input
+    id: skills-version
+    attributes:
+      label: pydantic-ai-skills version
+      placeholder: "1.4.0"
+    validations:
+      required: true
+
+  - type: input
+    id: pydantic-ai-version
+    attributes:
+      label: pydantic-ai-slim version
+      description: Output of `pip show pydantic-ai-slim | grep -i version`. This package supports >=1.105.
+      placeholder: "2.30.0"
+    validations:
+      required: true
+
+  - type: input
+    id: python-version
+    attributes:
+      label: Python version
+      placeholder: "3.12.8"
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: "macOS 15.6 / Ubuntu 24.04 / Windows 11"

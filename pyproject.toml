@@ -21,6 +21,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Intended Audience :: Developers",
     "Intended Audience :: Information Technology",
     "Operating System :: OS Independent",
@@ -30,7 +31,10 @@ requires-python = ">=3.10"
 dependencies = [
     "anyio>=4.0.0",
     "pydantic-ai-slim>=1.105",
-    "pyyaml>=6.0",
+    # 6.0.1 is the floor, not 6.0: pyyaml 6.0 ships no wheels for Python 3.12+
+    # and its sdist fails to build against Cython 3 ("build_ext has no attribute
+    # cython_sources"). Caught by the test-lowest-versions CI job.
+    "pyyaml>=6.0.1",
 ]
 
 [project.urls]
@@ -65,7 +69,10 @@ localsandbox = [
 ]
 test = [
     "pytest>=8.0.0",
-    "pytest-asyncio>=0.23.0",
+    # 0.23.5 is the floor, not 0.23.0: earlier 0.23.x crashes at collection
+    # against pytest 8 ("'Package' object has no attribute 'obj'").
+    # Caught by the test-lowest-versions CI job.
+    "pytest-asyncio>=0.23.5",
     "pytest-cov>=4.1.0",
     "types-PyYAML>=6.0.12",
 ]
@@ -92,7 +99,7 @@ examples = [
 [tool.ruff]
 line-length = 120
 target-version = "py310"
-include = ["pydantic_ai_skills/**/*.py", "examples/**/*.py"]
+include = ["pydantic_ai_skills/**/*.py", "examples/**/*.py", "tests/**/*.py"]
 
 [tool.ruff.lint]
 extend-select = [
@@ -142,3 +149,9 @@ packages = ["pydantic_ai_skills"]
 # which Sonar resolves from the repo root and fails to match -> 0% coverage.
 relative_files = true
 source = ["pydantic_ai_skills"]
+
+[tool.mypy]
+# Kept here rather than in .pre-commit-config.yaml args so a bare `mypy` run
+# behaves the same as the pre-commit hook and CI.
+ignore_missing_imports = true
+strict_optional = false

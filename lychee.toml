@@ -1,0 +1,25 @@
+# Configuration for the weekly link check (.github/workflows/link-check.yml).
+
+# Some hosts answer automated requests with 403/429 while serving the page fine
+# in a browser. Treating those as broken would train us to ignore the report.
+accept = ["200..=299", "403", "429"]
+user_agent = "Mozilla/5.0 (compatible; lychee link checker; +https://github.com/dougtrajano/pydantic-ai-skills)"
+scheme = ["https", "http"]
+
+max_concurrency = 8
+max_retries = 2
+timeout = 20
+
+exclude_path = [
+  ".venv",
+  "site",
+  "htmlcov",
+  "examples/anthropic-skills",
+]
+
+exclude = [
+  # Placeholder URLs used in documentation examples.
+  "^https?://(localhost|127\\.0\\.0\\.1|example\\.com)",
+  # Login-gated, always 401/403 for an anonymous checker.
+  "^https?://(www\\.)?linkedin\\.com",
+]

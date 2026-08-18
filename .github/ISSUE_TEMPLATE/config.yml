@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 Ask a question
+    url: https://github.com/dougtrajano/pydantic-ai-skills/discussions
+    about: Usage questions and open-ended discussion belong in Discussions.
+  - name: 📖 Documentation
+    url: https://dougtrajano.github.io/pydantic-ai-skills/
+    about: Concepts, guides, and the API reference.

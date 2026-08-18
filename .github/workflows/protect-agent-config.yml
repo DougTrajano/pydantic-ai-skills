@@ -1,0 +1,149 @@
+name: Protect Agent Config
+
+# Two kinds of file are guarded here, for the same reason:
+#
+#   - `.github/**` — workflows and the scripts they run execute with this
+#     repository's credentials, so changing them is a supply-chain boundary
+#     rather than an ordinary code review.
+#   - `AGENTS.md`, `CLAUDE.md`, `.claude/**` — these are the standing
+#     instructions every coding agent working in this repo reads and follows.
+#     An edit here silently redirects future agent runs, including ones a
+#     maintainer kicks off against a later branch, which makes it a far more
+#     durable change than the diff's size suggests.
+#
+# A maintainer carries any legitimate change to these forward in their own PR.
+#
+# Deliberately no `paths:` filter on the trigger. A `pull_request_target`
+# filtered to these paths would not run at all on PRs that don't touch them,
+# and a required check that never runs stays *pending* forever, blocking every
+# merge. The job runs on every PR and exits 0 when nothing protected changed.
+
+on:
+  # pull_request_target is required so the guard runs from the base repository's
+  # default branch (a fork cannot disable it by editing this file) and can comment
+  # on fork PRs. Nothing here checks out or executes PR code: it only reads PR
+  # metadata via the API.
+  pull_request_target:
+    # `edited` is included because it is the only event fired when a PR's BASE
+    # branch changes, and the verdict is a diff against that base: without it a
+    # green check survives a base switch that changes which files the PR touches.
+    types: [opened, synchronize, reopened, edited]
+
+permissions: {}
+
+concurrency:
+  group: protect-agent-config-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  guard:
+    name: Agent Config Guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # `pull-requests: write` covers listing and posting the PR comment. No
+    # `contents:` scope: this job never checks out the repository.
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Block external changes to agent config
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_STATE: ${{ github.event.pull_request.state }}
+        run: |
+          set -euo pipefail
+
+          echo "PR #${PR_NUMBER} by ${PR_AUTHOR}"
+
+          # `edited` also fires on closed and merged PRs (a bot rewriting the
+          # description, an author tidying the title), where there is no merge to guard.
+          if [ "$PR_STATE" != "open" ]; then
+            echo "PR is ${PR_STATE}; nothing to guard."
+            exit 0
+          fi
+
+          # Changed files first: most PRs touch nothing protected and stop here, so the
+          # permission lookup below only runs when it matters. One JSON object per file.
+          TOTAL_FILES=$(gh api "repos/${REPO}/pulls/${PR_NUMBER}" --jq '.changed_files')
+          PR_FILES=$(gh api "repos/${REPO}/pulls/${PR_NUMBER}/files?per_page=100" --paginate \
+            --jq '.[] | {filename, previous_filename} | tojson')
+          RETRIEVED_FILES=$(printf '%s' "$PR_FILES" | grep -c '^{') || true
+
+          # That endpoint hard-caps at 3000 files and truncates rather than erroring, so a
+          # PR padded past the cap could push a protected edit out of the response and be
+          # waved through. Fail closed on a short list rather than deciding on a partial
+          # changeset.
+          if [ "$RETRIEVED_FILES" -lt "$TOTAL_FILES" ]; then
+            echo "::error::Retrieved only ${RETRIEVED_FILES} of ${TOTAL_FILES} changed files (the PR files API caps at 3000)." \
+              "Cannot verify the protected paths are untouched, so failing closed rather than passing blind."
+            exit 1
+          fi
+
+          # `previous_filename` catches a rename *out of* a protected path, which changes
+          # the effective config just as much as an edit in place.
+          PROTECTED_FILES=$(printf '%s\n' "$PR_FILES" \
+            | jq -r '.filename, (.previous_filename // empty)' \
+            | grep -E '^(\.github/|\.claude/|AGENTS\.md$|CLAUDE\.md$)' | sort -u) || true
+
+          if [ -z "$PROTECTED_FILES" ]; then
+            echo "No protected files changed."
+            exit 0
+          fi
+
+          echo "Protected files changed:"
+          printf '%s\n' "$PROTECTED_FILES"
+
+          # Dependabot bumps the action pins in `.github/workflows/` — it is configured for
+          # the `github-actions` ecosystem in `.github/dependabot.yml`, so blocking it would
+          # freeze those updates. It is the *only* allowlisted bot; a blanket `*[bot]` glob
+          # would hand the bypass to any bot installed later.
+          if [ "$PR_AUTHOR" = "dependabot[bot]" ]; then
+            echo "Author is dependabot; allowed."
+            exit 0
+          fi
+
+          # The author's resolved permission on THIS repository is the only trust signal:
+          #   - a base-repo head branch does NOT imply push access, since GitHub Apps push
+          #     branches straight into this repo.
+          #   - `author_association` reports CONTRIBUTOR for maintainers with private org
+          #     membership, so it wrongly blocks people it should wave through.
+          # `.permission`, not `.role_name`: the latter can be an arbitrary custom role name
+          # that fails a hardcoded match, while `.permission` maps maintain and custom roles
+          # onto their stable base access level. Fails closed — this is a security boundary.
+          AUTHOR_PERMISSION=$(gh api "repos/${REPO}/collaborators/${PR_AUTHOR}/permission" --jq '.permission' 2>/dev/null || echo "unknown")
+          case "$AUTHOR_PERMISSION" in
+            write | admin)
+              echo "Author ${PR_AUTHOR} has ${AUTHOR_PERMISSION} access to this repo; allowed."
+              exit 0
+              ;;
+            *)
+              echo "Author ${PR_AUTHOR} repo permission: ${AUTHOR_PERMISSION}; not permitted to change agent config."
+              ;;
+          esac
+
+          # One comment per PR. `synchronize` re-runs this on every push, and repeating the
+          # explanation each time would bury the rest of the review; the failing check is the
+          # signal that the branch is still blocked. Matching on the marker alone would let
+          # anyone suppress the explanation for good by pasting it into a comment, so the
+          # poster has to be us too.
+          MARKER="<!-- protect-agent-config-guard -->"
+          EXISTING=$(gh api "repos/${REPO}/issues/${PR_NUMBER}/comments?per_page=100" --paginate \
+            --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | contains(\"${MARKER}\"))) | .id")
+
+          if [ -z "$EXISTING" ]; then
+            PROTECTED_LIST=$(printf '%s\n' "$PROTECTED_FILES" | awk '{ print "- `" $0 "`" }')
+            COMMENT=$(printf '%s\n\n%s\n\n%s\n\n%s\n%s\n\n%s\n' \
+              "Thanks for the PR! One thing blocks it: it changes CI or coding-agent configuration, which we can only accept from maintainers." \
+              "**What to do:** drop those changes from this branch (\`git checkout origin/main -- .github .claude AGENTS.md CLAUDE.md\` and push) — the rest of your work is unaffected and still very welcome. If the change is needed for the rest to work, say so in a comment and a maintainer will carry it forward in a separate PR." \
+              "**Why:** files under \`.github/\` run with this repository's credentials, and \`AGENTS.md\` / \`CLAUDE.md\` / \`.claude/\` are the standing instructions every coding agent in this repo follows. Both are supply-chain boundaries. This is an automatic rule, not a judgement on your change." \
+              "Protected files changed by this PR:" \
+              "$PROTECTED_LIST" \
+              "$MARKER")
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body "$COMMENT"
+          else
+            echo "Explanatory comment already posted; not repeating it."
+          fi
+
+          exit 1

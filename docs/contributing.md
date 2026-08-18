@@ -165,19 +165,17 @@ def test_get_skill_not_found():
 - Add/update docstrings
 - Update relevant docs/ pages
 
-### 2. Update CHANGELOG
+### 2. Label the PR for the release notes
 
-Add an entry under "Unreleased":
+There is no `CHANGELOG.md`. Release notes are generated from merged PR titles, grouped by
+label, as configured in [`.github/release.yml`](https://github.com/dougtrajano/pydantic-ai-skills/blob/main/.github/release.yml).
 
-```markdown
-## [Unreleased]
+So two things matter:
 
-### Added
-- New feature description (#PR_NUMBER)
-
-### Fixed
-- Bug fix description (#PR_NUMBER)
-```
+- **The PR title is the changelog entry.** Write it for someone reading the
+  [releases page](https://github.com/dougtrajano/pydantic-ai-skills/releases), not for the diff.
+- **Apply one label**: `feature`, `bug`, or `dependency` to place it in a section;
+  `docs` or `chore` to leave it out of the notes entirely.
 
 ### 3. Create Pull Request
 
@@ -188,42 +186,27 @@ Add an entry under "Unreleased":
 
 ### PR Template
 
-```markdown
-## Description
-Brief description of changes
+GitHub fills this in for you from
+[`.github/pull_request_template.md`](https://github.com/dougtrajano/pydantic-ai-skills/blob/main/.github/pull_request_template.md)
+when you open the PR. Work through the checklist it gives you rather than copying one from here.
 
-## Type of Change
-- [ ] Bug fix
-- [ ] New feature
-- [ ] Breaking change
-- [ ] Documentation update
-
-## Checklist
-- [ ] Tests added/updated
-- [ ] Documentation updated
-- [ ] CHANGELOG updated
-- [ ] All tests pass
-- [ ] Pre-commit checks pass
-```
+One item on it is worth calling out: if you used an AI coding agent, you are attesting that
+you reviewed its output line by line and stand behind it. Generated code is welcome; unread
+generated code is not.
 
 ## Reporting Issues
 
-### Bug Reports
+Open an issue from the [issue templates](https://github.com/dougtrajano/pydantic-ai-skills/issues/new/choose).
+The bug and feature-request forms prompt for everything needed to act on the report —
+versions, a minimal reproducible example, expected versus actual behavior for bugs; use case,
+proposal, and alternatives considered for features.
 
-Include:
-- Python version
-- pydantic-ai-skills version
-- Minimal reproducible example
-- Expected vs actual behavior
-- Full error traceback
+Usage questions belong in
+[Discussions](https://github.com/dougtrajano/pydantic-ai-skills/discussions) instead.
 
-### Feature Requests
-
-Include:
-- Use case description
-- Proposed solution
-- Alternative approaches considered
-- Examples of usage
+Security vulnerabilities are the exception: **do not open a public issue**. Report them
+privately as described in
+[`SECURITY.md`](https://github.com/dougtrajano/pydantic-ai-skills/blob/main/SECURITY.md).
 
 ## Community Guidelines
 

@@ -100,9 +100,6 @@ validation:
   unrecognized_links: warn
   anchors: warn
 
-extra_css:
-  - "extra/tweaks.css"
-
 markdown_extensions:
   - abbr
   - admonition
@@ -132,9 +129,6 @@ markdown_extensions:
   - pymdownx.emoji:
       emoji_index: !!python/name:material.extensions.emoji.twemoji
       emoji_generator: !!python/name:material.extensions.emoji.to_svg
-      options:
-        custom_icons:
-          - docs/.overrides/.icons
   - pymdownx.tabbed:
       alternate_style: true
   - pymdownx.tasklist:

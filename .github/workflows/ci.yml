@@ -7,9 +7,14 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # PRs cancel their own superseded runs. Pushes get a group keyed on run_id so
+  # one commit to main never cancels the run for the previous one.
+  group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   lint:
@@ -20,7 +25,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - uses: pre-commit/action@v3.0.1
+      - uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd # v3.0.1
 
   test:
     name: Test (Python ${{ matrix.python-version }}, pydantic-ai ${{ matrix.pydantic-ai-version }})
@@ -39,7 +44,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
 
       - name: Install dependencies
         run: uv pip install --system -e ".[test,git]"
@@ -79,3 +84,99 @@ jobs:
           name: pr-metadata-${{ github.run_id }}
           path: pr-metadata.env
           retention-days: 7
+
+  test-lowest-versions:
+    # Resolves every direct dependency to its declared floor (anyio>=4.0.0,
+    # pydantic-ai-slim>=1.105, pyyaml>=6.0) so a floor we no longer actually
+    # support fails here instead of in a user's environment.
+    name: Test lowest direct versions (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+
+      - name: Install dependencies at their lowest declared versions
+        run: uv pip install --system --resolution lowest-direct -e ".[test,git]"
+
+      - name: Show resolved versions
+        run: uv pip freeze
+
+      - name: Run pytest
+        run: pytest --no-cov
+
+  build:
+    # Catches packaging breakage on the PR that causes it, rather than on
+    # release day when pypi-publish.yml runs the build for the first time.
+    name: Build distributions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # hatch-vcs derives the version from the git tag history.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+
+      - name: Build sdist and wheel
+        run: uv build
+
+      - name: Check distribution metadata
+        run: uvx twine check --strict dist/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ github.run_id }}
+          path: dist/
+          retention-days: 7
+
+  docs:
+    # gh-pages.yml only builds on push to main, so without this a docs break
+    # is invisible until it has already been merged.
+    name: Build docs (strict)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The git-revision-date-localized plugin needs full history.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+
+      - name: Install dependencies
+        run: uv pip install --system -e ".[docs]"
+
+      - name: Build docs
+        run: mkdocs build --strict
+
+  check:
+    # The single required status check for branch protection. Keeping the
+    # matrix job names out of branch protection means the matrix can change
+    # without a settings change, and a job that never runs still fails here.
+    name: Check
+    if: always()
+    needs: [lint, test, test-lowest-versions, build, docs]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify all jobs succeeded
+        uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe # release/v1
+        with:
+          jobs: ${{ toJSON(needs) }}
