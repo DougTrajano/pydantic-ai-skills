@@ -6,6 +6,13 @@ on:
     types:
       - completed
 
+permissions:
+  contents: read
+  # Reading artifacts from the triggering CI run.
+  actions: read
+  # Posting the quality gate check run onto the PR head commit (final step).
+  checks: write
+
 jobs:
   sonarcloud:
     name: SonarCloud Scan
@@ -55,7 +62,11 @@ jobs:
           echo "pr_head_ref=${PR_HEAD_REF}" >> $GITHUB_OUTPUT
 
       - name: SonarCloud Scan (PR)
+        id: sonar_pr
         if: steps.pr_meta.outputs.pr_number != ''
+        # Must reach the reporting step below even when the gate fails, so the
+        # verdict lands on the PR instead of being lost as a red job against main.
+        continue-on-error: true
         uses: SonarSource/sonarqube-scan-action@v8
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
@@ -64,9 +75,69 @@ jobs:
             -Dsonar.pullrequest.key=${{ steps.pr_meta.outputs.pr_number }}
             -Dsonar.pullrequest.branch=${{ steps.pr_meta.outputs.pr_head_ref }}
             -Dsonar.pullrequest.base=${{ steps.pr_meta.outputs.pr_base_ref }}
+            -Dsonar.qualitygate.wait=true
 
       - name: SonarCloud Scan (push to main)
         if: steps.pr_meta.outputs.pr_number == ''
         uses: SonarSource/sonarqube-scan-action@v8
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+      # This workflow is triggered by `workflow_run`, and GitHub attributes such runs
+      # to the default branch — so this job's own check run lands on main's HEAD, never
+      # on the PR being analysed. That makes it impossible to require in branch
+      # protection: a required check that never appears on the PR leaves it pending
+      # forever. The scan itself is fine (SonarCloud decorates the PR with a comment);
+      # only the *check* goes to the wrong commit.
+      #
+      # So report the gate explicitly against the PR head SHA, which the CI run
+      # captured in pr-metadata.env. `SonarCloud Quality Gate` is then a normal check
+      # on the PR and can be made a required status check.
+      - name: Report quality gate on the PR commit
+        # `always()` because the scan step above is expected to fail on a failing gate.
+        if: always() && steps.pr_meta.outputs.pr_number != '' && steps.pr_meta.outputs.pr_head_sha != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ steps.pr_meta.outputs.pr_head_sha }}
+          PR_NUMBER: ${{ steps.pr_meta.outputs.pr_number }}
+          # 'success' | 'failure' — the outcome before continue-on-error masked it.
+          SCAN_OUTCOME: ${{ steps.sonar_pr.outcome }}
+        run: |
+          set -euo pipefail
+
+          PROJECT_KEY=$(grep -E '^sonar\.projectKey=' sonar-project.properties | cut -d= -f2-)
+          DETAILS_URL="https://sonarcloud.io/summary/new_code?id=${PROJECT_KEY}&pullRequest=${PR_NUMBER}"
+
+          # `-Dsonar.qualitygate.wait=true` makes the scanner block until the gate is
+          # computed and exit non-zero when it fails, so the step outcome IS the verdict.
+          if [ "$SCAN_OUTCOME" = "success" ]; then
+            CONCLUSION=success
+            TITLE="Quality Gate passed"
+          else
+            CONCLUSION=failure
+            TITLE="Quality Gate failed"
+          fi
+
+          SUMMARY="SonarCloud analysis for PR #${PR_NUMBER}. [View the full report](${DETAILS_URL})."
+
+          # Built with jq so the payload survives quoting and any special characters.
+          jq -n \
+            --arg name 'SonarCloud Quality Gate' \
+            --arg head_sha "$HEAD_SHA" \
+            --arg conclusion "$CONCLUSION" \
+            --arg details_url "$DETAILS_URL" \
+            --arg title "$TITLE" \
+            --arg summary "$SUMMARY" \
+            '{
+              name: $name,
+              head_sha: $head_sha,
+              status: "completed",
+              conclusion: $conclusion,
+              details_url: $details_url,
+              output: {title: $title, summary: $summary}
+            }' \
+          | gh api "repos/${REPO}/check-runs" --input - --jq '"posted \(.name)=\(.conclusion) on \(.head_sha[0:7])"'
+
+          # Mirror the gate onto this job, so a failing gate is also visible here.
+          [ "$CONCLUSION" = "success" ]
