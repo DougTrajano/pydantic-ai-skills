@@ -4,6 +4,28 @@ Tracks the last `pydantic-ai` / `pydantic-ai-harness` releases reviewed by the w
 upstream-watch routine. Newest entry first. The top entry's tags are the lower bound
 for the next run.
 
+## 2026-08-18
+
+- **pydantic/pydantic-ai**: checked through `v2.31.1` (published 2026-08-18). Reviewed
+  `v2.31.0`–`v2.31.1`.
+- **pydantic/pydantic-ai-harness**: checked through `v0.22.0` (published 2026-08-18).
+  Reviewed `v0.21.0`–`v0.22.0`.
+- **Verdict**: No action needed. `v2.31.0` (#7292 `UIEventStream`/`AGUIEventStream`,
+  #7018 `FallbackModel` span attribution, #7464 Temporal sandbox passthrough) and `v2.31.1`
+  (#7374 Bedrock structured-output denylist, #7469 Gemini `thinking_level` fallback) only
+  touch AG-UI event streaming, span/telemetry attribution, Temporal workflow sandboxing, and
+  model-provider-specific request shaping — none of it is in `SkillsToolset`/`SkillsCapability`,
+  tool registration, or `RunContext`. `pydantic-ai-harness` `v0.21.0` (#591, #626, #627) is
+  docs/marketing only, and `v0.22.0` (#364 protected-pattern read-only walkers, #439
+  `PromptInjectionDefender`, #593 `CodeMode`/`run_code` shell-tool folding, #639 doc model-name
+  updates) is entirely harness-internal (`CodeMode`, walkers, prompt-injection defense) —
+  this package has no dependency on `pydantic-ai-harness`, so these are tracked but out of
+  scope as usual. The private symbols this package imports
+  (`pydantic_ai._function_schema.FunctionSchema`/`function_schema`,
+  `pydantic_ai._griffe.doc_descriptions`, `pydantic_ai._utils.is_async_callable`/
+  `run_in_executor`) are unchanged in this window; no PR touched `_function_schema.py`,
+  `_griffe.py`, or `_utils.py`.
+
 ## 2026-08-14
 
 - **pydantic/pydantic-ai**: checked through `v2.30.0` (published 2026-08-13). Reviewed
