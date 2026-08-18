@@ -1,0 +1,47 @@
+name: Link Check
+
+# Catches links that rot without anyone touching the file they live in — the
+# dead CODE_OF_CONDUCT.md link in docs/contributing.md sat there unnoticed
+# precisely because nothing ever re-checked it.
+
+on:
+  schedule:
+    # Mondays, 06:00 UTC.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: link-check
+  cancel-in-progress: true
+
+jobs:
+  link-check:
+    name: Check links
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Needed by create-issue-from-file below.
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check links
+        id: lychee
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: "--config lychee.toml --no-progress './**/*.md'"
+          output: lychee/out.md
+          # Report through an issue rather than a red scheduled run, which
+          # nobody sees. The step's exit code is read below instead.
+          fail: false
+
+      - name: Open an issue when links are broken
+        if: steps.lychee.outputs.exit_code != 0
+        uses: peter-evans/create-issue-from-file@v5
+        with:
+          title: Broken links found
+          content-filepath: lychee/out.md
+          labels: docs

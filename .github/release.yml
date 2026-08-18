@@ -1,0 +1,20 @@
+# Drives GitHub's "Generate release notes" button. Categories come from PR
+# labels, which is why the PR template asks for one of these to be applied.
+changelog:
+  exclude:
+    labels:
+      - docs
+      - chore
+  categories:
+    - title: 🚀 Features
+      labels:
+        - feature
+    - title: 🐛 Bug Fixes
+      labels:
+        - bug
+    - title: 📦 Dependencies
+      labels:
+        - dependency
+    - title: 🔧 Other Changes
+      labels:
+        - "*"
