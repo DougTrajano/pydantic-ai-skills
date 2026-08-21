@@ -4,6 +4,48 @@ Tracks the last `pydantic-ai` / `pydantic-ai-harness` releases reviewed by the w
 upstream-watch routine. Newest entry first. The top entry's tags are the lower bound
 for the next run.
 
+## 2026-08-21
+
+- **pydantic/pydantic-ai**: checked through `v2.33.0` (published 2026-08-20). Reviewed
+  `v2.32.0`–`v2.33.0`.
+- **pydantic/pydantic-ai-harness**: checked through `v0.24.0` (published 2026-08-19).
+  Reviewed `v0.23.0`–`v0.24.0`.
+- **Verdict**: No action needed. `v2.32.0`–`v2.33.0` migrate pydantic-ai's own HTTP layer
+  (including the Anthropic provider) from `httpx` to `httpx2` (#7351, #7657) — this package
+  declares `httpx>=0.28.0` only under the `examples` extra and never imports it, so the
+  migration doesn't reach it. The remaining feature/bugfix items (model-name suggestions,
+  xAI/OpenRouter provider changes, instrumentation v6, `RunContext.cancel()` fixes,
+  `FunctionModel` callable handling, Bedrock/DeepSeek/Temporal provider fixes) touch model
+  providers, span instrumentation, and `pydantic_evals`/Temporal integrations this package
+  doesn't use. Confirmed by diffing `v2.31.1...v2.33.0` in a local clone
+  (`git diff --stat` against `_function_schema.py`, `_griffe.py`, `_utils.py`,
+  `capabilities/capability.py`, `toolsets/abstract.py`, `toolsets/function.py`): only
+  `_utils.py`, `capabilities/hooks.py`, and `toolsets/function.py` changed, all from a single
+  PR (#7557, "Run sync hooks in thread pool and enforce timeout for blocking sync tools").
+  That PR adds an `abandon_threads_on_cancel()` context manager and wires it into
+  `run_in_executor()` and `FunctionToolset`'s per-tool timeout handling; `run_in_executor()`
+  and `is_async_callable()` keep the exact signatures this package calls in
+  `pydantic_ai_skills/local.py`, the new behavior only activates inside that context manager
+  (which `SkillsToolset`/`local.py` never enter), and `SkillsToolset` (a `FunctionToolset`
+  subclass) doesn't override the touched timeout-handling method — so the change is fully
+  transparent here. `#7571` (tool-result message ordering for Bedrock) and `#7572` (unknown-tool
+  retry message filtering) were checked directly against their file lists and confirmed to
+  touch only `_agent_graph.py`/`messages.py`/`tool_manager.py` internals, not
+  `AbstractCapability`, `AbstractToolset`, `RunContext`, or `defer_loading` semantics.
+  `pydantic-ai-harness` `v0.23.0` (`ManagedPrompt` baggage/`FallbackCompaction`) and `v0.24.0`
+  (serializer presets, `FileSystem` path/failure handling, `PlaywrightBrowser` and
+  `YouSearch`/`YouResearch` capabilities) are entirely harness-internal — this package has no
+  dependency on `pydantic-ai-harness`, so these are tracked but out of scope as usual.
+  Verified empirically: `pytest` passes identically against both `pydantic-ai-slim==2.33.0`
+  (latest) and `pydantic-ai-slim==1.105.0` (the declared floor) — 550 passed, 1 pre-existing
+  failure (`test_discover_skills_os_error_handling`, a `chmod(0o000)` permission simulation
+  that has no effect when tests run as root in this environment; unrelated to pydantic-ai and
+  identical on both versions). `pre-commit run --all-files` (ruff, ruff-format, mypy) is clean.
+  The private symbols this package imports
+  (`pydantic_ai._function_schema.FunctionSchema`/`function_schema`,
+  `pydantic_ai._griffe.doc_descriptions`, `pydantic_ai._utils.is_async_callable`/
+  `run_in_executor`) are unchanged in signature and behavior for this package's usage.
+
 ## 2026-08-18
 
 - **pydantic/pydantic-ai**: checked through `v2.31.1` (published 2026-08-18). Reviewed
