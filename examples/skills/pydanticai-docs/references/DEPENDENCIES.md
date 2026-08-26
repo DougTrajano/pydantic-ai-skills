@@ -59,4 +59,4 @@ with agent.override(deps=test_deps):
 
 ## For Details, See
 
-<https://ai.pydantic.dev/dependencies/index.md>
+<https://ai.pydantic.dev/core-concepts/dependencies/index.md>

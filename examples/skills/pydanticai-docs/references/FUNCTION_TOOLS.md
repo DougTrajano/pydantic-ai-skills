@@ -63,5 +63,5 @@ agent = Agent(
 
 ## For Details, See
 
-<https://ai.pydantic.dev/tools/index.md>
-<https://ai.pydantic.dev/tools-advanced/index.md>
+<https://ai.pydantic.dev/tools-toolsets/tools/index.md>
+<https://ai.pydantic.dev/tools-toolsets/tools-advanced/index.md>

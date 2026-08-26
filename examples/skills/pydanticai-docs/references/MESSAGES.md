@@ -65,5 +65,5 @@ Each message includes `timestamp` and `run_id` metadata.
 
 ## For Details, See
 
-<https://ai.pydantic.dev/message-history/index.md>
+<https://ai.pydantic.dev/core-concepts/message-history/index.md>
 <https://ai.pydantic.dev/api/messages/index.md>

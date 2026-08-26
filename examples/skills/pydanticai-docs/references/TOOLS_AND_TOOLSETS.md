@@ -64,5 +64,5 @@ filtered = combined.filtered(
 
 ## For Details, See
 
-<https://ai.pydantic.dev/toolsets/index.md>
+<https://ai.pydantic.dev/tools-toolsets/toolsets/index.md>
 <https://ai.pydantic.dev/api/toolsets/index.md>

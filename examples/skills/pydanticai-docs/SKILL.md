@@ -13,7 +13,7 @@ metadata:
 
 Pydantic AI is a production-grade Python agent framework for building type-safe, dependency-injected Generative AI applications. It supports multiple LLM providers, structured outputs via Pydantic models, and composable multi-agent patterns.
 
-Doc: <https://ai.pydantic.dev/index.md>
+Doc: <https://ai.pydantic.dev/>
 
 ---
 
@@ -96,19 +96,19 @@ For union types, plain scalars, `output_validator`, and partial validation: load
 
 | Topic | Reference file | Doc link |
 |---|---|---|
-| Message history / multi-turn conversations | `references/MESSAGES.md` | <https://ai.pydantic.dev/message-history/index.md> |
+| Message history / multi-turn conversations | `references/MESSAGES.md` | <https://ai.pydantic.dev/core-concepts/message-history/index.md> |
 | Model / provider setup (all providers) | `references/MODELS.md` | <https://ai.pydantic.dev/models/overview/index.md> |
-| Toolsets (`FunctionToolset`, composition) | `references/TOOLS_AND_TOOLSETS.md` | <https://ai.pydantic.dev/toolsets/index.md> |
+| Toolsets (`FunctionToolset`, composition) | `references/TOOLS_AND_TOOLSETS.md` | <https://ai.pydantic.dev/tools-toolsets/toolsets/index.md> |
 | MCP server integration | `references/MCP.md` | <https://ai.pydantic.dev/mcp/client/index.md> |
-| Multi-agent applications | doc link only | <https://ai.pydantic.dev/multi-agent-applications/index.md> |
-| Graphs (pydantic-graph) | doc link only | <https://ai.pydantic.dev/graph/index.md> |
-| Evals (pydantic-evals) | doc link only | <https://ai.pydantic.dev/evals/index.md> |
+| Multi-agent applications | doc link only | <https://ai.pydantic.dev/guides/multi-agent-applications/index.md> |
+| Graphs (pydantic-graph) | doc link only | <https://ai.pydantic.dev/graph/graph/index.md> |
+| Evals (pydantic-evals) | doc link only | <https://ai.pydantic.dev/evals/evals/index.md> |
 | Durable execution | doc link only | <https://ai.pydantic.dev/durable_execution/overview/index.md> |
-| Retries | doc link only | <https://ai.pydantic.dev/retries/index.md> |
-| Testing (`TestModel`, `override`) | doc link only | <https://ai.pydantic.dev/testing/index.md> |
-| Logfire integration | doc link only | <https://ai.pydantic.dev/logfire/index.md> |
-| Builtin tools | doc link only | <https://ai.pydantic.dev/builtin-tools/index.md> |
-| Streaming | doc link only | <https://ai.pydantic.dev/agent/index.md> |
+| Retries | doc link only | <https://ai.pydantic.dev/core-concepts/retries/index.md> |
+| Testing (`TestModel`, `override`) | doc link only | <https://ai.pydantic.dev/guides/testing/index.md> |
+| Logfire integration | doc link only | <https://ai.pydantic.dev/integrations/logfire/index.md> |
+| Native tools (formerly builtin tools) | doc link only | <https://ai.pydantic.dev/tools-toolsets/native-tools/index.md> |
+| Streaming | doc link only | <https://ai.pydantic.dev/core-concepts/agent/index.md> |
 
 ---
 

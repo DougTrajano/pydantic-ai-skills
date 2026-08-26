@@ -1,6 +1,6 @@
 # Examples
 
-This folder contains runnable examples demonstrating how to use `pydantic-ai-skills` in different scenarios. Most scripts spin up a Pydantic AI agent as a web server using [uvicorn](https://www.uvicorn.org/) on `http://127.0.0.1:7932`.
+This folder contains runnable examples demonstrating how to use `pydantic-ai-skills` in different scenarios. Most scripts spin up a Pydantic AI agent as a web server using [uvicorn](https://uvicorn.dev/) on `http://127.0.0.1:7932`.
 
 ## Contents
 
