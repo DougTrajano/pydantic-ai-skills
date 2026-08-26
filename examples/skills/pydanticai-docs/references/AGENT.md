@@ -66,5 +66,5 @@ Common kwargs: `deps`, `model_settings`, `message_history`, `usage_limits`, `ins
 
 ## For Details, See
 
-<https://ai.pydantic.dev/agent/index.md>
+<https://ai.pydantic.dev/core-concepts/agent/index.md>
 <https://ai.pydantic.dev/api/agent/index.md>

@@ -48,5 +48,5 @@ print(result.output.city)    # 'London'
 
 ## For Details, See
 
-<https://ai.pydantic.dev/output/index.md>
+<https://ai.pydantic.dev/core-concepts/output/index.md>
 <https://ai.pydantic.dev/api/output/index.md>
