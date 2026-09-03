@@ -4,6 +4,53 @@ Tracks the last `pydantic-ai` / `pydantic-ai-harness` releases reviewed by the w
 upstream-watch routine. Newest entry first. The top entry's tags are the lower bound
 for the next run.
 
+## 2026-08-28
+
+- **pydantic/pydantic-ai**: checked through `v2.35.3` (published 2026-08-28). Reviewed
+  `v2.34.0`–`v2.35.3`.
+- **pydantic/pydantic-ai-harness**: checked through `v0.27.0` (published 2026-08-27).
+  Reviewed `v0.25.0`–`v0.27.0`.
+- **Verdict**: No action needed. Confirmed by diffing `v2.33.0...v2.35.3` in a local clone
+  (`git diff --stat` against `pydantic_ai/_function_schema.py`, `_griffe.py`, `_utils.py`,
+  `toolsets/abstract.py`, `toolsets/function.py`, `capabilities/`, `tools.py`): the three
+  private symbols this package imports (`pydantic_ai._function_schema.FunctionSchema`/
+  `function_schema`, `pydantic_ai._griffe.doc_descriptions`,
+  `pydantic_ai._utils.is_async_callable`/`run_in_executor`) have zero diff across the whole
+  window — untouched. `v2.35.0` (#7454, "deprecate `RunContext.capability_loaded`/
+  `available_capability_ids` in favor of `capability_active`/`active_capability_ids`") does
+  rename fields on `RunContext` and ripples through `CombinedCapability`'s internal
+  `_ctx_for_available_cap`→`_ctx_for_active_cap` plumbing, but `SkillsCapability` never reads
+  either old or new name (confirmed by grep: it only implements `get_toolset`,
+  `get_instructions`, and `get_description`, none of the `before_run`/`after_run`/
+  `prepare_tools`/etc. hooks `CombinedCapability` threads `capability_active` through), so the
+  rename is fully transparent here. `v2.35.0` (#7759, "tool descriptions explicitly set to
+  empty now remain empty rather than defaulting to the docstring") changed
+  `Tool.__init__`'s `description = description or self.function_schema.description` to
+  `description if description is not None else ...` in `tools.py` — the four tools this
+  package registers (`list_skills`, `load_skill`, `read_skill_resource`, `run_skill_script`)
+  are all added via the bare `@self.tool` decorator with no explicit `description=` argument,
+  so this only changes behavior for callers that pass `description=''`, which this package
+  never does. `v2.34.0`'s `#7679` ("Add a LangChain migration skill") only adds a `SKILL.md`
+  under pydantic-ai's own `.claude/`-style repo tooling for an internal migration guide — not
+  a change to any Agent Skills *support* in the library itself, and doesn't overlap with this
+  package's skill discovery. The remaining `v2.34.0`–`v2.35.3` items (GLM-5.3/Heroku model
+  support, `TestModel` JSON Schema edge cases, `VercelAIAdapter`/`VercelProvider`/`CohereModel`
+  fixes, Bedrock guardrail traces and structured-output routing, Temporal cancellation and
+  metric export changes, `dbos` extra dependency capping) touch model providers, evaluation
+  helpers, and Temporal/durable-execution integrations this package doesn't use. `#6937`
+  ("honor agent tool retry budget for `load_capability`") only affects the agent's own
+  built-in `load_capability` tool implementation, which `SkillsCapability` doesn't override.
+  `pydantic-ai-harness` `v0.25.0`–`v0.27.0` (compaction/spend-store internals, `Shell` spawn
+  failure handling, release-gate tooling, doc snippet checks) are entirely harness-internal —
+  this package has no dependency on `pydantic-ai-harness`, so these are tracked but out of
+  scope as usual; none mention Agent Skills, `SKILL.md`, or skill discovery. Verified
+  empirically: `pytest` passes identically against both `pydantic-ai-slim==2.35.3` (latest)
+  and `pydantic-ai-slim==1.105.0` (the declared floor) — 550 passed, 1 pre-existing failure
+  (`test_discover_skills_os_error_handling`, the same `chmod(0o000)`-as-root artifact noted in
+  prior entries, unrelated to pydantic-ai and identical on both versions). `pre-commit run
+  --all-files` (ruff, ruff-format, mypy) is clean. The private symbols this package imports
+  are unchanged in both signature and behavior for this package's usage.
+
 ## 2026-08-21
 
 - **pydantic/pydantic-ai**: checked through `v2.33.0` (published 2026-08-20). Reviewed
