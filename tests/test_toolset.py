@@ -5,8 +5,22 @@ from typing import Any
 from unittest.mock import Mock
 
 import pytest
+from pydantic_ai.messages import InstructionPart
 
 from pydantic_ai_skills import SkillsToolset
+
+
+def _instructions_text(prompt: str | InstructionPart | Any) -> str:
+    """Flatten a get_instructions() result (str, InstructionPart, or a sequence of either) into text.
+
+    pydantic-ai's composition wrappers (filtered/prefixed/prepared/renamed/approval_required) may
+    return any of these shapes.
+    """
+    if isinstance(prompt, str):
+        return prompt
+    if isinstance(prompt, InstructionPart):
+        return prompt.content
+    return '\n'.join(part if isinstance(part, str) else part.content for part in prompt)
 
 
 @pytest.fixture
@@ -449,9 +463,10 @@ async def test_composition_wrappers_delegate_get_instructions(
     prompt = await composed_toolset.get_instructions(Mock())
 
     assert prompt is not None, f'{name} wrapper returned no instructions'
-    assert 'skill-one' in prompt
-    assert 'skill-two' in prompt
-    assert 'skill-three' in prompt
+    text = _instructions_text(prompt)
+    assert 'skill-one' in text
+    assert 'skill-two' in text
+    assert 'skill-three' in text
 
 
 @pytest.mark.asyncio
@@ -468,7 +483,7 @@ async def test_chained_composition_delegates_get_instructions(sample_skills_dir:
 
     prompt = await composed.get_instructions(Mock())
     assert prompt is not None
-    assert 'First test skill for basic operations' in prompt
+    assert 'First test skill for basic operations' in _instructions_text(prompt)
 
 
 def test_exclude_tools_empty_list(sample_skills_dir: Path) -> None:
