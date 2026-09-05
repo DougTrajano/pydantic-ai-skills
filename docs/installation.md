@@ -3,8 +3,7 @@
 ## Requirements
 
 - Python 3.10 or newer
-- `pydantic-ai-slim` 2.37 or newer (installed automatically; the floor comes from
-  `pydantic-ai-harness`)
+- `pydantic-ai-slim` 2.38 or newer (installed automatically)
 
 ## Install
 

@@ -62,7 +62,7 @@ Invariants to preserve:
 - AnyIO process stream readers must handle `anyio.EndOfStream` explicitly.
 - Never write `executor or LocalSkillScriptExecutor()` — use `is None`. A falsey custom executor (a pool that is empty at index time) must not silently fall back to running untrusted scripts on the host.
 - This package imports private pydantic-ai symbols (`pydantic_ai._function_schema`, `_griffe`, `_utils`). [tests/test_pydantic_ai_compat.py](tests/test_pydantic_ai_compat.py) exists so an upstream move fails loudly — keep it in sync with what the code actually imports. [tests/test_harness_compat.py](tests/test_harness_compat.py) plays the same role for harness, which is on 0.x and documents that its API may change between minor releases.
-- CI runs Python 3.10–3.14 against a floor/latest pair of `pydantic-ai-harness` + `pydantic-ai-slim`. New code must work against the floor (`pydantic-ai-harness>=0.28`, `pydantic-ai-slim>=2.37`), not just latest. The two move together because harness sets its own slim floor.
+- CI runs Python 3.10–3.14 against a floor/latest pair of `pydantic-ai-harness` + `pydantic-ai-slim`. New code must work against the floor (`pydantic-ai-harness>=0.28`, `pydantic-ai-slim>=2.38`), not just latest. The two move together because harness sets a slim floor of its own.
 - `gitpython` (`[git]`) and `boto3` (`[s3]`) are optional extras — import them lazily and raise a clear `ImportError` naming the extra, as [registries/s3.py](pydantic_ai_skills/registries/s3.py) does.
 - `TestModel` does not work with deferred capabilities: it calls `load_capability` with a synthesized id and exhausts the retry budget. Use `FunctionModel` to script tool calls.
 

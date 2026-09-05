@@ -57,7 +57,7 @@ jobs:
           if [ "${{ matrix.deps }}" = "latest" ]; then
             uv pip install --system --upgrade "pydantic-ai-harness[skills]" pydantic-ai-slim
           else
-            uv pip install --system "pydantic-ai-harness[skills]==0.28.1" "pydantic-ai-slim==2.37.0"
+            uv pip install --system "pydantic-ai-harness[skills]==0.28.1" "pydantic-ai-slim==2.38.0"
           fi
           uv pip show pydantic-ai-harness | grep -i '^version'
           uv pip show pydantic-ai-slim | grep -i '^version'
@@ -91,7 +91,7 @@ jobs:
 
   test-lowest-versions:
     # Resolves every direct dependency to its declared floor (anyio>=4.0.0,
-    # pydantic-ai-harness>=0.28, pydantic-ai-slim>=2.37, pyyaml>=6.0.1) so a floor we no
+    # pydantic-ai-harness>=0.28, pydantic-ai-slim>=2.38, pyyaml>=6.0.1) so a floor we no
     # longer actually support fails here instead of in a user's environment.
     name: Test lowest direct versions (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest

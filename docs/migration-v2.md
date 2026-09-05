@@ -32,11 +32,12 @@ agent = Agent(model, capabilities=[SkillsCapability('./skills')])
 
 | | v1 | v2 |
 | --- | --- | --- |
-| `pydantic-ai-slim` | `>=1.105` | `>=2.37` |
+| `pydantic-ai-slim` | `>=1.105` | `>=2.38` |
 | `pydantic-ai-harness` | not used | `>=0.28`, required |
 | Python | `>=3.10` | `>=3.10` |
 
-harness sets its own `pydantic-ai-slim` floor, which is what raises this package's.
+harness sets a `pydantic-ai-slim>=2.37` floor of its own; this package needs 2.38 for
+`AbstractCapability.visit_and_replace`, which `SkillsCapability` overrides.
 
 ## Removed, and what replaces it
 
