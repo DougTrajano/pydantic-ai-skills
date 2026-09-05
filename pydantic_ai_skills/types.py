@@ -14,10 +14,12 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from inspect import signature as get_signature
 from typing import Any, Generic, TypeVar
 
 from pydantic.json_schema import GenerateJsonSchema
 from pydantic_ai import _function_schema
+from pydantic_ai._griffe import doc_descriptions
 from pydantic_ai.tools import GenerateToolJsonSchema
 
 from ._parsing import validate_skill_name
@@ -384,22 +386,20 @@ class Skill:
 class SkillWrapper(Generic[DepsT]):
     """Generic wrapper for decorator-based skill creation with type-safe dependencies.
 
-    Typically created via `@skills.skill` decorator on a SkillsToolset instance.
+    Created by the [`@skill`][pydantic_ai_skills.skill] decorator.
 
     Example:
         ```python
         from dataclasses import dataclass
         from pydantic_ai import RunContext
-        from pydantic_ai_skills import SkillsToolset
+        from pydantic_ai_skills import skill
 
         @dataclass
         class MyDeps:
             database: DatabaseConn
 
-        skills = SkillsToolset[MyDeps]()
-
-        @skills.skill(resources=[], metadata={'version': '1.0'})
-        def data_analyzer(ctx: RunContext[MyDeps]) -> str:
+        @skill(resources=[], metadata={'version': '1.0'})
+        def data_analyzer() -> str:
             '''Analyze data from the database.'''
             return 'Use this skill for data analysis...'
 
@@ -613,3 +613,92 @@ class SkillWrapper(Generic[DepsT]):
             uri=None,  # __post_init__ will assign skill://{name}
             metadata=self.metadata,
         )
+
+
+def skill(
+    func: Callable[[], str] | None = None,
+    *,
+    name: str | None = None,
+    description: str | None = None,
+    license: str | None = None,
+    compatibility: str | None = None,
+    metadata: dict[str, Any] | None = None,
+    resources: list[SkillResource] | None = None,
+    scripts: list[SkillScript] | None = None,
+) -> Any:
+    """Define a skill in Python from a function returning its instructions.
+
+    The decorated function returns the skill's instructions. Its name becomes the skill's
+    name (underscores to hyphens) unless `name` is given, and its docstring becomes the
+    description unless `description` is given.
+
+    Pass the result to [`SkillsCapability`][pydantic_ai_skills.SkillsCapability] via
+    `skills=`; it joins the same deferred catalog as skills read from disk.
+
+    Example:
+        ```python
+        from pydantic_ai import Agent, RunContext
+        from pydantic_ai_skills import SkillsCapability, skill
+
+
+        @skill(metadata={'version': '1.0'})
+        def data_analyzer() -> str:
+            '''Analyze data from the application database.'''
+            return 'Query the warehouse before answering questions about usage.'
+
+
+        @data_analyzer.resource
+        async def get_schema(ctx: RunContext[MyDeps]) -> str:
+            '''The current warehouse schema.'''
+            return await ctx.deps.database.get_schema()
+
+
+        @data_analyzer.script
+        async def run_analysis(ctx: RunContext[MyDeps], query: str) -> str:
+            '''Run a read-only query.'''
+            return str(await ctx.deps.database.execute(query))
+
+
+        agent = Agent('openai:gpt-5.2', capabilities=[SkillsCapability(skills=[data_analyzer])])
+        ```
+
+    Args:
+        func: The function returning the skill's instructions.
+        name: Skill name. Defaults to the function name with underscores replaced by hyphens.
+        description: Skill description. Defaults to the function's docstring summary.
+        license: Optional license information (e.g. "Apache-2.0").
+        compatibility: Optional environment requirements.
+        metadata: Additional metadata fields.
+        resources: Initial resources to attach.
+        scripts: Initial scripts to attach.
+
+    Returns:
+        A [`SkillWrapper`][pydantic_ai_skills.SkillWrapper] that further resources and
+        scripts can be attached to with its own `resource` and `script` decorators.
+    """
+
+    def decorator(f: Callable[[], str]) -> SkillWrapper[Any]:
+        # An explicit name is validated as given; a derived one is normalized first, since
+        # `data_analyzer` is a perfectly good function name and a bad skill name.
+        skill_name = (
+            validate_skill_name(name, context=f'The name passed to @skill for {f.__name__!r}')
+            if name is not None
+            else normalize_skill_name(f.__name__)
+        )
+
+        skill_description = description
+        if skill_description is None:
+            skill_description, _ = doc_descriptions(f, get_signature(f), docstring_format='auto')
+
+        return SkillWrapper(
+            function=f,
+            name=skill_name,
+            description=skill_description,
+            license=license,
+            compatibility=compatibility,
+            metadata=metadata,
+            resources=list(resources) if resources else [],
+            scripts=list(scripts) if scripts else [],
+        )
+
+    return decorator if func is None else decorator(func)

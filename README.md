@@ -4,7 +4,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=DougTrajano_pydantic-ai-skills&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=DougTrajano_pydantic-ai-skills)
 
-[Agent Skills](https://agentskills.io/home) for [Pydantic AI](https://ai.pydantic.dev/).
+Remote skill registries and bundled-file execution for [Agent Skills](https://agentskills.io/home)
+in [Pydantic AI](https://ai.pydantic.dev/).
 
 **Agent Skills** are modular packages of instructions, resources, and scripts that teach an agent to
 handle a specialized task. On disk, a skill is just a folder: a `SKILL.md` file holding a name, a
@@ -19,15 +20,34 @@ paying for space in the prompt.
 📖 **[Full documentation](https://dougtrajano.github.io/pydantic-ai-skills)** — including
 [video tutorials](https://dougtrajano.github.io/pydantic-ai-skills/quick-start/#video-tutorials).
 
-## Why This and Not `pydantic-ai-harness`
+## How This Relates to `pydantic-ai-harness`
 
-The harness's own `Skills` capability is a minimal reader: it injects `SKILL.md` instructions but
-[does not enumerate, read, or execute bundled files](https://github.com/pydantic/pydantic-ai-harness/tree/main/pydantic_ai_harness/skills).
-`pydantic-ai-skills` implements the full package — bundled resources, script execution, remote
-registries, programmatic skills, and reload at runtime — so skills that ship a reference document or
-a script (including those in [Anthropic's skills repository](https://github.com/anthropics/skills))
-run as written. Feature-by-feature comparison:
-[Why pydantic-ai-skills](https://dougtrajano.github.io/pydantic-ai-skills/comparison/).
+[`pydantic-ai-harness`](https://github.com/pydantic/pydantic-ai-harness) ships a `Skills` capability
+that reads `SKILL.md` packages from local directories and turns each into a deferred Pydantic AI
+capability. It stops there by design — it
+[does not enumerate, read, or execute bundled files](https://github.com/pydantic/pydantic-ai-harness/tree/main/pydantic_ai_harness/skills),
+and it has no notion of a remote source.
+
+`pydantic-ai-skills` is the companion that fills those gaps. It **requires harness and delegates to
+it**, so `SKILL.md` parsing, validation, the catalog and instruction rendering are all upstream's,
+and adds:
+
+- **Remote registries** — Git and S3 sources, with composition (filter, prefix, rename, merge).
+- **Bundled files** — `read_skill_resource` and `run_skill_script`, so a skill that ships a
+  reference document or a script (including those in
+  [Anthropic's skills repository](https://github.com/anthropics/skills)) runs as written.
+- **Sandboxed execution** — keep untrusted scripts off the host.
+- **`${SKILL_DIR}` resolution** — harness leaves the placeholder in place; this substitutes the path.
+- **Programmatic skills** — skills defined in Python, in the same catalog.
+
+If your skills are instructions and nothing else, use harness directly — it is a smaller dependency
+and identical behaviour. Feature-by-feature:
+[comparison](https://dougtrajano.github.io/pydantic-ai-skills/comparison/).
+
+> **Upgrading from v1?** v2 is a clean break: `SkillsToolset`, `SkillsDirectory`, `reload()` and the
+> `list_skills` / `load_skill` tools are gone, replaced by harness and Pydantic AI's own
+> `load_capability`. See the
+> [migration guide](https://dougtrajano.github.io/pydantic-ai-skills/migration-v2/).
 
 ## Installation
 
@@ -40,7 +60,7 @@ playlist from 2013.
 
 ## Quick Start
 
-Point a `SkillsCapability` at one or more skill directories and add it to your agent:
+Point a `SkillsCapability` at one or more skill libraries and add it to your agent:
 
 ```python
 from pydantic_ai import Agent
@@ -49,29 +69,35 @@ from pydantic_ai_skills import SkillsCapability
 agent = Agent(
     model='gateway/openai:gpt-5.2',
     instructions='You are a helpful research assistant.',
-    capabilities=[SkillsCapability(directories=['./skills'])],
+    capabilities=[SkillsCapability('./skills')],
 )
 
 result = await agent.run('What are the last 3 papers on arXiv about machine learning?')
 print(result.output)
 ```
 
-`SkillsToolset` is the same thing as a toolset, for agents built around `toolsets=[...]`:
+Or pull them from a repository:
 
 ```python
-from pydantic_ai_skills import SkillsToolset
+from pydantic_ai_skills import GitSkillsRegistry, SkillsCapability
 
-agent = Agent(model='gateway/openai:gpt-5.2', toolsets=[SkillsToolset(directories=['./skills'])])
+capability = SkillsCapability(
+    './skills',
+    registries=[GitSkillsRegistry('https://github.com/anthropics/skills', path='skills')],
+)
 ```
 
-Both inject the skill catalog into the agent's instructions automatically and expose four tools:
+Each skill becomes its own **deferred capability**: the model sees names and descriptions up front,
+loads the ones it needs with Pydantic AI's built-in `load_capability`, then reaches that skill's
+files with the two tools this package adds:
 
 | Tool | Purpose |
 | --- | --- |
-| `list_skills()` | List available skills (optional — the catalog is already in the prompt) |
-| `load_skill(name)` | Read a skill's full instructions |
-| `read_skill_resource(skill_name, resource_name)` | Read a bundled file such as `REFERENCE.md` |
+| `read_skill_resource(skill_name, resource_name)` | Read a bundled file such as `references/FORMS.md` |
 | `run_skill_script(skill_name, script_name, args)` | Run a bundled script with named arguments |
+
+Both stay behind the same boundary as the skill's instructions: by default they refuse a skill the
+model has not loaded.
 
 See [Quick Start](https://dougtrajano.github.io/pydantic-ai-skills/quick-start/).
 
@@ -103,8 +129,10 @@ Use this skill when you need to...
 2. Step 2
 ```
 
-`name` (max 64 chars, lowercase letters, numbers and hyphens) and `description` (max 1024 chars) are
-required; other frontmatter fields are yours to use. See
+`name` (max 64 chars, lowercase letters, numbers and hyphens; it must match the directory) and
+`description` (max 1024 chars) are the fields the runtime acts on. Other frontmatter is accepted but
+inert — including behavioural fields such as `allowed-tools`, which do **not** restrict anything
+here. See
 [Creating Skills](https://dougtrajano.github.io/pydantic-ai-skills/creating-skills/).
 
 ## Beyond the Filesystem
@@ -112,7 +140,8 @@ required; other frontmatter fields are yours to use. See
 - **[Programmatic skills](https://dougtrajano.github.io/pydantic-ai-skills/programmatic-skills/)** — define skills in Python with decorators or dataclasses.
 - **[Registries](https://dougtrajano.github.io/pydantic-ai-skills/registries/)** — load skills from Git repositories, S3, or custom sources, and compose them (combine, filter, prefix, rename).
 - **[Skill selection](https://dougtrajano.github.io/pydantic-ai-skills/advanced/#selecting-which-skills-to-expose)** — give each agent a subset of a shared library with `include` / `exclude`.
-- **[Advanced features](https://dougtrajano.github.io/pydantic-ai-skills/advanced/)** — `reload()` / `auto_reload`, `exclude_tools`, deferred loading, recursive discovery.
+- **[Sandboxing](https://dougtrajano.github.io/pydantic-ai-skills/sandbox/)** — run a skill's scripts in a container or virtual filesystem instead of on the host.
+- **[Advanced features](https://dougtrajano.github.io/pydantic-ai-skills/advanced/)** — custom script executors, `${SKILL_DIR}` resolution, and rebuild strategies.
 
 ## Security
 

@@ -19,7 +19,7 @@ logfire.instrument_pydantic_ai()
 skills_dir = Path(__file__).parent / 'skills'
 
 # Initialize Skills Toolset
-skills_capability = SkillsCapability(directories=[skills_dir])
+skills_capability = SkillsCapability(skills_dir)
 
 # Initialize LLM
 provider = gateway_provider('openai', route='ollama')

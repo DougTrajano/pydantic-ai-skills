@@ -22,7 +22,7 @@ Key components:
 - [`SkillRegistry`][pydantic_ai_skills.SkillRegistry]: Base class for skill sources
 - [`GitSkillsRegistry`][pydantic_ai_skills.GitSkillsRegistry]: Skills from a Git repository
 - [`S3SkillsRegistry`][pydantic_ai_skills.S3SkillsRegistry]: Skills from an S3 bucket
-- [`Skill`][pydantic_ai_skills.Skill]: A skill defined in Python
+- [`Skill`][pydantic_ai_skills.Skill] / [`skill`][pydantic_ai_skills.skill]: Skills defined in Python
 - [`SkillScriptExecutor`][pydantic_ai_skills.SkillScriptExecutor]: Protocol for custom script executors
 - [`LocalSkillScriptExecutor`][pydantic_ai_skills.LocalSkillScriptExecutor]: Execute scripts via subprocess
 - [`CallableSkillScriptExecutor`][pydantic_ai_skills.CallableSkillScriptExecutor]: Wrap callables as script executors
@@ -73,7 +73,7 @@ from pydantic_ai_skills.registries import (
     SkillRegistry,
 )
 from pydantic_ai_skills.sandboxes import LocalSandboxScriptExecutor, OpenSandboxScriptExecutor
-from pydantic_ai_skills.types import Skill, SkillResource, SkillScript, SkillWrapper
+from pydantic_ai_skills.types import Skill, SkillResource, SkillScript, SkillWrapper, skill
 
 __all__ = [
     # Entry point
@@ -98,4 +98,6 @@ __all__ = [
     'SkillScript',
     'SkillInfo',
     'SkillPackage',
+    # Programmatic skill decorator
+    'skill',
 ]

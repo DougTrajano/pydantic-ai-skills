@@ -22,7 +22,7 @@ from dotenv import load_dotenv
 from pydantic_ai import Agent
 from pydantic_ai._run_context import RunContext
 
-from pydantic_ai_skills import Skill, SkillResource, SkillsToolset
+from pydantic_ai_skills import Skill, SkillResource, SkillsCapability
 
 load_dotenv()
 
@@ -198,14 +198,14 @@ async def run_query(ctx: RunContext[AnalystDeps], query: str) -> str:  # noqa: D
 
 
 # Initialize toolset with programmatic skill
-skills_toolset = SkillsToolset(skills=[hr_analytics_skill])
+skills = SkillsCapability(skills=[hr_analytics_skill])
 
 # Create agent with HR analytics capabilities and dependencies
 agent = Agent(
     model='gateway/openai:gpt-5.2',
     deps_type=AnalystDeps,
     instructions='You are an expert HR data analyst.',
-    toolsets=[skills_toolset],
+    capabilities=[skills],
 )
 
 

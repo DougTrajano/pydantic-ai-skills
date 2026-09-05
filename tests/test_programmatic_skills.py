@@ -1,11 +1,12 @@
 """Tests for programmatic skills functionality."""
 
 from dataclasses import dataclass
+from typing import Any
 
 import pytest
 from pydantic_ai import RunContext
 
-from pydantic_ai_skills import Skill, SkillResource, SkillsCapability, SkillScript
+from pydantic_ai_skills import Skill, SkillResource, SkillsCapability, SkillScript, skill
 
 
 @dataclass
@@ -273,3 +274,99 @@ async def test_skill_script_run_error_no_function() -> None:
 
     with pytest.raises(ValueError, match='has no function'):
         await script.run(None)
+
+
+# ---------------------------------------------------------------------------
+# The @skill decorator
+# ---------------------------------------------------------------------------
+
+
+def test_skill_decorator_derives_name_and_description() -> None:
+    """The function's name and docstring carry the catalog entry."""
+
+    @skill
+    def data_analyzer() -> str:
+        """Analyze application data."""
+        return 'Query the warehouse first.'
+
+    assert data_analyzer.name == 'data-analyzer'
+    assert data_analyzer.description == 'Analyze application data.'
+
+
+def test_skill_decorator_accepts_an_explicit_name() -> None:
+    """An explicit name overrides the one derived from the function."""
+
+    @skill(name='analytics')
+    def data_analyzer() -> str:
+        """Analyze application data."""
+        return 'Body.'
+
+    assert data_analyzer.name == 'analytics'
+
+
+def test_skill_decorator_rejects_an_invalid_explicit_name() -> None:
+    """The name must be one harness would accept, since it becomes a capability id."""
+    with pytest.raises(ValueError, match='invalid skill name'):
+
+        @skill(name='Not_Valid')
+        def analytics() -> str:
+            """Analyze application data."""
+            return 'Body.'
+
+
+def test_skill_decorator_rejects_an_underivable_function_name() -> None:
+    """`My_Analyzer` normalizes to `my-analyzer`, but `_leading` does not survive."""
+    with pytest.raises(ValueError, match='invalid skill name'):
+
+        @skill
+        def _leading() -> str:
+            """Analyze application data."""
+            return 'Body.'
+
+
+def test_skill_decorator_attaches_resources_and_scripts() -> None:
+    """Resources and scripts hang off the returned wrapper."""
+
+    @skill
+    def analytics() -> str:
+        """Analyze application data."""
+        return 'Body.'
+
+    @analytics.resource
+    def schema() -> str:
+        """The warehouse schema."""
+        return 'id INT'
+
+    @analytics.script
+    async def run_query(ctx: RunContext[None], query: str) -> str:
+        """Run a read-only query."""
+        return f'ran {query}'
+
+    built = analytics.to_skill()
+    assert [resource.name for resource in built.resources] == ['schema']
+    assert [script.name for script in built.scripts] == ['run_query']
+
+
+def test_a_decorated_skill_reaches_the_capability() -> None:
+    """The whole point: it joins the same deferred catalog as a file-based skill."""
+
+    @skill
+    def analytics() -> str:
+        """Analyze application data."""
+        return 'Query the warehouse first.'
+
+    @analytics.resource
+    def schema() -> str:
+        """The warehouse schema."""
+        return 'id INT'
+
+    capability = SkillsCapability(skills=[analytics])
+
+    assert capability.skill_names == ['analytics']
+    assert sorted(capability.packages['analytics'].resources_by_name) == ['schema']
+
+    leaves: list[Any] = []
+    capability.apply(leaves.append)
+    leaf = next(leaf for leaf in leaves if leaf.id == 'analytics')
+    assert leaf.get_description() == 'Analyze application data.'
+    assert leaf.get_instructions() == ['# Skill: analytics\n\nQuery the warehouse first.']
