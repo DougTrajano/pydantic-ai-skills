@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "pydantic-ai-skills"
 dynamic = ["version"]
-description = "A lightweight agent skill implementation for Pydantic AI"
+description = "Remote skill registries and bundled-file execution for Pydantic AI Agent Skills"
 authors = [
     { name = "Douglas Trajano", email = "douglas.trajano@outlook.com" },
 ]
@@ -13,7 +13,7 @@ license = "MIT"
 license-files = ["LICENSE"]
 readme = "README.md"
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
@@ -30,7 +30,15 @@ classifiers = [
 requires-python = ">=3.10"
 dependencies = [
     "anyio>=4.0.0",
-    "pydantic-ai-slim>=1.105",
+    # The harness owns Agent Skills discovery, SKILL.md validation and instruction
+    # injection; this package layers remote sources and bundled files on top. 0.28 is
+    # the floor because that is the oldest release whose `Skills` public surface matches
+    # what `SkillsCapability` re-emits (pinned by tests/test_harness_compat.py).
+    "pydantic-ai-harness[skills]>=0.28",
+    # Raised from >=1.105 in 2.0: pydantic-ai-harness itself requires >=2.37, and
+    # `RunContext.active_capability_ids` (used to gate the skill-file tools) only exists
+    # from 2.35 onwards under that name.
+    "pydantic-ai-slim>=2.37",
     # 6.0.1 is the floor, not 6.0: pyyaml 6.0 ships no wheels for Python 3.12+
     # and its sdist fails to build against Cython 3 ("build_ext has no attribute
     # cython_sources"). Caught by the test-lowest-versions CI job.
@@ -93,7 +101,7 @@ examples = [
     "gitpython>=3.1.0",
     "langchain-community>=0.4.0",
     "ddgs>=9.14.0",
-    "pydantic-ai-slim[mcp,openai,logfire]>=2.0.0",
+    "pydantic-ai-slim[mcp,openai,logfire]>=2.37",
 ]
 
 [tool.ruff]
