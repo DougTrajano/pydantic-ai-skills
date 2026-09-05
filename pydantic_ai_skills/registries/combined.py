@@ -1,115 +1,74 @@
 """Combined registry composition.
 
-Provides :class:`CombinedRegistry`, an aggregate that presents
-multiple registries as a single unified source. Follows the same
-pattern as Pydantic AI's ``CombinedToolset``.
+Provides :class:`CombinedRegistry`, an aggregate that presents several registries as a
+single library. Follows the same pattern as Pydantic AI's ``CombinedToolset``.
 """
 
 from __future__ import annotations
 
-import asyncio
+import warnings
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
+from pydantic_ai_skills._parsing import read_skill_info
 from pydantic_ai_skills.registries._base import SkillRegistry
-from pydantic_ai_skills.types import Skill
+from pydantic_ai_skills.registries._staging import copy_skill_directory, staging_directory
 
 __all__ = ['CombinedRegistry']
 
 
 @dataclass
 class CombinedRegistry(SkillRegistry):
-    """A registry that aggregates multiple registries into one.
+    """A registry that merges several registries into one library.
 
-    Searches are fanned out to every child registry in parallel.
-    ``get``, ``install``, and ``update`` try each registry in order
-    and return the first successful result.
+    Every child is synced and its packages staged into a single directory. Earlier
+    registries win on a duplicate skill name, and the shadowed one is reported with a
+    `UserWarning` — merging silently would hand harness a library whose contents depend on
+    directory iteration order.
+
+    Passing the merged library to `SkillsCapability` is equivalent to passing each child's
+    own library, except that this resolves the collisions itself rather than letting
+    harness reject the duplicate.
+
+    Attributes:
+        registries: The registries to merge, in precedence order.
+        target_dir: Where to stage the merged library. When None, a process-lifetime
+            temporary directory is used.
 
     Example:
         ```python
         from pydantic_ai_skills.registries import CombinedRegistry
 
-        combined = CombinedRegistry(registries=[github_registry, gitlab_registry])
-        results = await combined.search('pdf')
+        combined = CombinedRegistry(registries=[internal_registry, public_registry])
         ```
     """
 
     registries: Sequence[SkillRegistry]
+    target_dir: str | Path | None = field(default=None, kw_only=True)
 
-    async def search(self, query: str, limit: int = 10) -> list[Skill]:
-        """Search all child registries in parallel and merge results.
+    def sync(self) -> Path:
+        """Sync every child registry and stage their skills into one library."""
+        staged = staging_directory(self.target_dir)
+        claimed: dict[str, SkillRegistry] = {}
 
-        Results are deduplicated by skill name (first occurrence wins).
-        """
-        all_results = await asyncio.gather(*(reg.search(query, limit) for reg in self.registries))
-        seen: set[str] = set()
-        merged: list[Skill] = []
-        for results in all_results:
-            for skill in results:
-                if skill.name not in seen:
-                    seen.add(skill.name)
-                    merged.append(skill)
-                if len(merged) >= limit:
-                    return merged
-        return merged
+        for registry in self.registries:
+            source = registry.sync()
+            for child in sorted(source.iterdir()):
+                if not child.is_dir():
+                    continue
+                info = read_skill_info(child)
+                if info is None:
+                    continue
+                if owner := claimed.get(info.name):
+                    warnings.warn(
+                        f"Skill '{info.name}' is provided by more than one registry; keeping the one from "
+                        f'{owner!r} and skipping {registry!r}. Use `.prefixed()` or `.renamed()` to expose both.',
+                        UserWarning,
+                        stacklevel=2,
+                    )
+                    continue
+                claimed[info.name] = registry
+                copy_skill_directory(child, staged, info.name)
 
-    def _find_owner(self, skill_name: str) -> SkillRegistry | None:
-        """Return the first child registry that holds ``skill_name``, or None.
-
-        Uses the synchronous ``get_skills()`` cache so we don't swallow
-        unrelated ``KeyError``s from a child registry's internal logic.
-        """
-        for reg in self.registries:
-            for skill in reg.get_skills():
-                if skill.name == skill_name:
-                    return reg
-        return None
-
-    async def get(self, skill_name: str) -> Skill:
-        """Try each registry in order and return the first match.
-
-        Raises:
-            KeyError: When no registry contains the skill.
-        """
-        owner = self._find_owner(skill_name)
-        if owner is None:
-            raise KeyError(f"Skill '{skill_name}' not found in any of the {len(self.registries)} combined registries.")
-        return await owner.get(skill_name)
-
-    async def install(self, skill_name: str, target_dir: str | Path) -> Path:
-        """Install from the first registry that contains the skill.
-
-        Raises:
-            KeyError: When no registry contains the skill.
-        """
-        owner = self._find_owner(skill_name)
-        if owner is None:
-            raise KeyError(f"Skill '{skill_name}' not found in any combined registry for install.")
-        return await owner.install(skill_name, target_dir)
-
-    async def update(self, skill_name: str, target_dir: str | Path) -> Path:
-        """Update from the first registry that contains the skill.
-
-        Raises:
-            KeyError: When no registry contains the skill.
-        """
-        owner = self._find_owner(skill_name)
-        if owner is None:
-            raise KeyError(f"Skill '{skill_name}' not found in any combined registry for update.")
-        return await owner.update(skill_name, target_dir)
-
-    def get_skills(self) -> list[Skill]:
-        """Return skills from all child registries, deduplicated by name.
-
-        First occurrence wins when multiple registries provide skills with
-        the same name.
-        """
-        seen: set[str] = set()
-        merged: list[Skill] = []
-        for reg in self.registries:
-            for skill in reg.get_skills():
-                if skill.name not in seen:
-                    seen.add(skill.name)
-                    merged.append(skill)
-        return merged
+        return staged

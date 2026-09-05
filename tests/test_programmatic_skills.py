@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import pytest
 from pydantic_ai import RunContext
 
-from pydantic_ai_skills import Skill, SkillResource, SkillScript, SkillsToolset
+from pydantic_ai_skills import Skill, SkillResource, SkillsCapability, SkillScript
 
 
 @dataclass
@@ -164,21 +164,18 @@ def test_skill_script_run_with_function() -> None:
     assert script.function is not None
 
 
-def test_toolset_with_programmatic_skills() -> None:
-    """Test toolset initialization with programmatic skills."""
+def test_capability_with_programmatic_skills() -> None:
+    """Python-defined skills join the same deferred catalog as file-based ones."""
     skill1 = Skill(name='skill-one', description='First skill', content='Content 1')
     skill2 = Skill(name='skill-two', description='Second skill', content='Content 2')
 
-    toolset = SkillsToolset(skills=[skill1, skill2])
+    capability = SkillsCapability(skills=[skill1, skill2])
 
-    assert len(toolset.skills) == 2
-    assert 'skill-one' in toolset.skills
-    assert 'skill-two' in toolset.skills
+    assert capability.skill_names == ['skill-one', 'skill-two']
 
 
-def test_toolset_with_mixed_skills(tmp_path) -> None:
-    """Test toolset with both file-based and programmatic skills."""
-    # Create file-based skill
+def test_capability_with_mixed_skills(tmp_path) -> None:
+    """A capability can hold both file-based and programmatic skills."""
     skill_dir = tmp_path / 'file-skill'
     skill_dir.mkdir()
     (skill_dir / 'SKILL.md').write_text("""---
@@ -189,43 +186,31 @@ description: File-based skill
 Content here
 """)
 
-    # Create programmatic skill
     prog_skill = Skill(name='prog-skill', description='Programmatic skill', content='Prog content')
 
-    toolset = SkillsToolset(directories=[tmp_path], skills=[prog_skill])
+    capability = SkillsCapability(directories=[tmp_path], skills=[prog_skill])
 
-    assert len(toolset.skills) == 2
-    assert 'file-skill' in toolset.skills
-    assert 'prog-skill' in toolset.skills
+    assert capability.skill_names == ['file-skill', 'prog-skill']
 
 
-def test_toolset_duplicate_skill_warning() -> None:
-    """Test warning when duplicate skills are provided."""
+def test_capability_duplicate_skill_warning() -> None:
+    """Two skills under one name would collide as deferred capability ids."""
     skill1 = Skill(name='duplicate', description='First', content='Content 1')
     skill2 = Skill(name='duplicate', description='Second', content='Content 2')
 
     with pytest.warns(UserWarning, match="Duplicate skill 'duplicate' found"):
-        toolset = SkillsToolset(skills=[skill1, skill2])
+        capability = SkillsCapability(skills=[skill1, skill2])
 
-    # Last one wins
-    assert toolset.skills['duplicate'].description == 'Second'
+    leaves = []
+    capability.apply(leaves.append)
+    assert [leaf.id for leaf in leaves] == ['duplicate']
+    assert leaves[0].get_description() == 'Second', 'the last definition wins'
 
 
-def test_toolset_no_skills_or_directories_warning(tmp_path) -> None:
-    """Test warning when default skills directory doesn't exist."""
-    import os
-
-    original_dir = os.getcwd()
-    try:
-        # Change to tmp directory where ./skills doesn't exist
-        os.chdir(tmp_path)
-
-        with pytest.warns(UserWarning, match='Default skills directory'):
-            toolset = SkillsToolset()
-
-        assert len(toolset.skills) == 0
-    finally:
-        os.chdir(original_dir)
+def test_capability_requires_a_source() -> None:
+    """v1 silently defaulted to ./skills; v2 asks for a source instead of guessing."""
+    with pytest.raises(ValueError, match='at least one source'):
+        SkillsCapability()
 
 
 def test_skill_metadata_property() -> None:

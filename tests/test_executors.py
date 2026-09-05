@@ -23,11 +23,9 @@ from pydantic_ai_skills import (
     OpenSandboxScriptExecutor,
     SkillScript,
     SkillScriptExecutor,
-    SkillsDirectory,
-    SkillsToolset,
-    discover_skills,
 )
 from pydantic_ai_skills.local import FileBasedSkillScript
+from pydantic_ai_skills.packages import index_libraries
 from pydantic_ai_skills.sandboxes import (
     iter_stageable_dirs,
     iter_stageable_files,
@@ -100,13 +98,12 @@ def skill_dir(tmp_path: Path) -> Path:
     return tmp_path
 
 
-async def test_duck_typed_executor_runs_through_toolset(skill_dir: Path) -> None:
+async def test_duck_typed_executor_runs_through_the_indexed_package(skill_dir: Path) -> None:
     """A duck-typed executor reaches run_skill_script unchanged."""
     executor = DuckTypedExecutor()
-    toolset = SkillsToolset(directories=[SkillsDirectory(path=skill_dir, script_executor=executor)])
+    packages = index_libraries([skill_dir], script_executor=executor)
 
-    skill = toolset.skills['demo-skill']
-    script = next(s for s in skill.scripts if s.name == 'scripts/run.py')
+    script = packages['demo-skill'].scripts_by_name['scripts/run.py']
 
     ctx = SimpleNamespace(deps=None)
     result = await script.run(ctx=ctx, args={'query': 'x'})
@@ -122,9 +119,9 @@ async def test_custom_executor_receives_skill_relative_script_name(skill_dir: Pa
     ancestor of ``script.uri``; this pins the layout that relies on.
     """
     executor = DuckTypedExecutor()
-    toolset = SkillsToolset(directories=[SkillsDirectory(path=skill_dir, script_executor=executor)])
+    packages = index_libraries([skill_dir], script_executor=executor)
 
-    script = next(s for s in toolset.skills['demo-skill'].scripts if s.name.endswith('run.py'))
+    script = packages['demo-skill'].scripts_by_name['scripts/run.py']
 
     assert script.name == 'scripts/run.py'
     assert Path(str(script.uri)).parent.name == 'scripts'
@@ -145,39 +142,39 @@ def registry_skills_root(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def test_git_registry_forwards_script_executor(registry_skills_root: Path) -> None:
-    """Without this, registry scripts always run on the host."""
+def test_git_registry_skills_reach_the_capability_executor(registry_skills_root: Path) -> None:
+    """Without this, scripts from a remote registry always run on the host."""
     pytest.importorskip('git')
-    from pydantic_ai_skills import GitSkillsRegistry
+    from pydantic_ai_skills import GitSkillsRegistry, SkillsCapability
 
     executor = DuckTypedExecutor()
     registry = GitSkillsRegistry(
         repo_url='https://example.invalid/repo.git',
         target_dir=registry_skills_root,
         auto_install=False,
-        script_executor=executor,
     )
+    capability = SkillsCapability(registries=[registry], script_executor=executor)
 
-    script = next(s for s in registry.get_skills()[0].scripts if s.name.endswith('run.py'))
+    script = capability.packages['remote-skill'].scripts_by_name['scripts/run.py']
 
     assert isinstance(script, FileBasedSkillScript)
     assert script.executor is executor
 
 
-def test_s3_registry_forwards_script_executor(registry_skills_root: Path) -> None:
-    """Without this, registry scripts always run on the host."""
-    executor = DuckTypedExecutor()
-    from pydantic_ai_skills import S3SkillsRegistry
+def test_s3_registry_skills_reach_the_capability_executor(registry_skills_root: Path) -> None:
+    """Without this, scripts from a remote registry always run on the host."""
+    from pydantic_ai_skills import S3SkillsRegistry, SkillsCapability
 
+    executor = DuckTypedExecutor()
     registry = S3SkillsRegistry(
         bucket='irrelevant',
         target_dir=registry_skills_root,
         boto3_client=object(),
         auto_install=False,
-        script_executor=executor,
     )
+    capability = SkillsCapability(registries=[registry], script_executor=executor)
 
-    script = next(s for s in registry.get_skills()[0].scripts if s.name.endswith('run.py'))
+    script = capability.packages['remote-skill'].scripts_by_name['scripts/run.py']
 
     assert isinstance(script, FileBasedSkillScript)
     assert script.executor is executor
@@ -1083,8 +1080,8 @@ def test_skill_root_prefers_the_root_recorded_by_discovery(tmp_path: Path) -> No
     (parent / 'resources' / 'data.json').write_text('{"v": 1}')
     (parent / 'scripts' / 'run.py').write_text('print("hi")\n')
 
-    skills = {skill.name: skill for skill in discover_skills(root)}
-    script = next(s for s in skills['parent-skill'].scripts if s.name.endswith('run.py'))
+    packages = index_libraries([root])
+    script = next(s for s in packages['parent'].scripts if s.name.endswith('run.py'))
 
     assert skill_root_for(script) == parent.resolve()
     assert 'resources/data.json' in dict(iter_stageable_files(skill_root_for(script)))
@@ -1269,25 +1266,22 @@ def test_falsey_executor_is_not_replaced_by_the_local_one(skill_dir: Path) -> No
     executor = FalseyExecutor()
     assert not executor, 'the fixture must actually be falsey'
 
-    directory = SkillsDirectory(path=skill_dir, script_executor=executor)
-    skill = next(iter(directory.get_skills().values()))  # keyed by path, not name
-    script = next(s for s in skill.scripts if s.name.endswith('run.py'))
+    packages = index_libraries([skill_dir], script_executor=executor)
+    script = packages['demo-skill'].scripts_by_name['scripts/run.py']
 
     assert isinstance(script, FileBasedSkillScript)
     assert script.executor is executor
 
 
-def test_falsey_executor_survives_discover_skills(skill_dir: Path) -> None:
-    """Same fallback bug lives in the functional entry point."""
+def test_falsey_executor_is_not_replaced_when_indexing_a_library(skill_dir: Path) -> None:
+    """The default executor only applies when none was passed at all."""
     executor = FalseyExecutor()
 
-    script = next(s for s in discover_skills(skill_dir)[0].scripts if s.name.endswith('run.py'))
+    script = index_libraries([skill_dir])['demo-skill'].scripts_by_name['scripts/run.py']
     assert isinstance(script, FileBasedSkillScript)
     assert not isinstance(script.executor, FalseyExecutor), 'sanity: default is the local executor'
 
-    script = next(
-        s for s in discover_skills(skill_dir, script_executor=executor)[0].scripts if s.name.endswith('run.py')
-    )
+    script = index_libraries([skill_dir], script_executor=executor)['demo-skill'].scripts_by_name['scripts/run.py']
     assert isinstance(script, FileBasedSkillScript)
     assert script.executor is executor
 

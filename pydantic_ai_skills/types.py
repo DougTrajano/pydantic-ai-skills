@@ -12,17 +12,15 @@ Data classes:
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any, Generic, TypeVar
 
 from pydantic.json_schema import GenerateJsonSchema
 from pydantic_ai import _function_schema
 from pydantic_ai.tools import GenerateToolJsonSchema
 
-from ._parsing import SKILL_NAME_PATTERN, parse_skill_md, validate_skill_metadata
-from .executors import SkillScriptExecutor
+from ._parsing import validate_skill_name
 
 # Generic type variable for dependencies
 DepsT = TypeVar('DepsT')
@@ -49,22 +47,11 @@ def normalize_skill_name(func_name: str) -> str:
         normalize_skill_name('InvalidName')  # Raises ValueError
         ```
     """
-    # Replace underscores with hyphens and convert to lowercase
+    # Replace underscores with hyphens and convert to lowercase, then hold the result to
+    # the same rule harness applies to directory-backed skills, so a programmatic skill
+    # and a file-based one can never disagree about what a legal name is.
     normalized = func_name.replace('_', '-').lower()
-
-    # Validate against pattern
-    if not SKILL_NAME_PATTERN.match(normalized):
-        raise ValueError(
-            f"Skill name '{normalized}' (derived from function '{func_name}') is invalid. "
-            'Skill names must contain only lowercase letters, numbers, and hyphens '
-            '(no consecutive hyphens).'
-        )
-
-    # Check length
-    if len(normalized) > 64:
-        raise ValueError(f"Skill name '{normalized}' exceeds 64 characters ({len(normalized)} chars).")
-
-    return normalized
+    return validate_skill_name(normalized, context=f'Deriving a skill name from function {func_name!r}')
 
 
 @dataclass
@@ -257,103 +244,6 @@ class Skill:
         """
         if self.uri is None:
             self.uri = f'skill://{self.name}'
-
-    @classmethod
-    def from_file(
-        cls,
-        path: str | Path,
-        validate: bool = True,
-        script_executor: SkillScriptExecutor | None = None,
-        exclude_resources: Iterable[str] | None = None,
-    ) -> Skill:
-        """Load a :class:`Skill` from a SKILL.md file or its parent directory.
-
-        Args:
-            path: Path to a ``SKILL.md`` file or to the directory that contains one.
-                When a file path is given it must be named exactly ``SKILL.md``.
-            validate: When ``True`` (default), raises :exc:`ValueError` for
-                structural problems (missing ``SKILL.md``, YAML errors, absent ``name``
-                field).  Metadata quality issues (bad name format, missing description,
-                overlong body) emit :class:`UserWarning` regardless of this flag.
-            script_executor: Optional custom script executor for file-based scripts.
-            exclude_resources: Extra glob patterns to exclude from resource discovery,
-                in addition to the built-in defaults (``__pycache__``, ``*.pyc``,
-                ``.DS_Store`` …). None for defaults only. Any readable text file not
-                excluded and not discovered as a script becomes a resource.
-
-        Returns:
-            A :class:`Skill` instance.
-
-        Raises:
-            ValueError: For structural problems: wrong filename, invalid YAML
-                frontmatter, or (when *validate* is ``True``) a missing ``name``
-                field.
-            FileNotFoundError: When ``SKILL.md`` does not exist at the expected path.
-            OSError: Propagated directly for unreadable files, permission errors, or
-                I/O failures.  :func:`discover_skills` catches this and re-raises it
-                as :exc:`ValueError`, so direct callers should handle both.
-        """
-        from .directory import _discover_resources, _discover_scripts  # lazy: transitive circular via local.py
-        from .local import LocalSkillScriptExecutor as _LocalExecutor
-
-        skill_path = Path(path).expanduser().resolve()
-        if skill_path.is_dir():
-            skill_file = skill_path / 'SKILL.md'
-        else:
-            if skill_path.name != 'SKILL.md':
-                raise ValueError(f"Expected a SKILL.md file or its parent directory, got '{skill_path.name}'")
-            skill_file = skill_path
-
-        if not skill_file.exists():
-            raise FileNotFoundError(f'SKILL.md not found at {skill_file}')
-
-        skill_folder = skill_file.parent
-        raw = skill_file.read_text(encoding='utf-8')
-        frontmatter, instructions = parse_skill_md(raw)
-
-        # Coerce before the empty check so YAML scalars like `name: 0` load as '0'
-        # rather than being treated as missing.  Only None/empty-string falls back.
-        raw_name = frontmatter.get('name')
-        name = str(raw_name) if raw_name is not None else ''
-        if not name:
-            if validate:
-                raise ValueError(f'Skill at {skill_file} is missing the required "name" field')
-            name = skill_folder.name
-
-        # Coerce YAML scalar fields to str — YAML may return int/float/None
-        description = str(frontmatter.get('description') or '')
-        license_field = frontmatter.get('license')
-        license_field = str(license_field) if license_field is not None else None
-        compatibility_field = frontmatter.get('compatibility')
-        compatibility_field = str(compatibility_field) if compatibility_field is not None else None
-        metadata = {
-            k: v for k, v in frontmatter.items() if k not in ('name', 'description', 'license', 'compatibility')
-        }
-
-        if validate:
-            validate_skill_metadata(frontmatter, instructions, uri=str(skill_folder))
-
-        # `is None`, not `or`: a falsey custom executor must not be replaced by
-        # the host one.
-        executor = _LocalExecutor() if script_executor is None else script_executor
-        scripts = _discover_scripts(skill_folder, name, executor)
-        resources = _discover_resources(
-            skill_folder,
-            exclude_resources,
-            script_uris={script.uri for script in scripts if script.uri},
-        )
-
-        return cls(
-            name=name,
-            description=description,
-            content=instructions,
-            license=license_field,
-            compatibility=compatibility_field,
-            uri=str(skill_folder),
-            resources=resources,
-            scripts=scripts,
-            metadata=metadata if metadata else None,
-        )
 
     def resource(
         self,
