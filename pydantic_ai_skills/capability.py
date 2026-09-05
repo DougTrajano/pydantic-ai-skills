@@ -472,7 +472,7 @@ class SkillsCapability(AbstractCapability[AgentDepsT]):
         require_loaded: bool = True,
         resolve_skill_dir: bool = True,
         id: str | None = None,
-    ) -> SkillsCapability[Any]:
+    ) -> AbstractCapability[Any]:
         """Create from a YAML/JSON agent spec.
 
         Only serializable arguments are supported. Registries, programmatic skills, and

@@ -202,7 +202,7 @@ def test_capability_duplicate_skill_warning() -> None:
     with pytest.warns(UserWarning, match="Duplicate skill 'duplicate' found"):
         capability = SkillsCapability(skills=[skill1, skill2])
 
-    leaves = []
+    leaves: list[Any] = []
     capability.apply(leaves.append)
     assert [leaf.id for leaf in leaves] == ['duplicate']
     assert leaves[0].get_description() == 'Second', 'the last definition wins'

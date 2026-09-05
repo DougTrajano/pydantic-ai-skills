@@ -19,6 +19,7 @@ from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart, ToolCall
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from pydantic_ai_skills import Skill, SkillsCapability
+from pydantic_ai_skills._toolset import SkillFilesToolset
 from pydantic_ai_skills.registries import LocalSkillsRegistry
 
 
@@ -237,7 +238,7 @@ def test_the_file_tools_come_from_the_capability_itself(library: Path) -> None:
     """
     toolset = SkillsCapability(library).get_toolset()
 
-    assert toolset is not None
+    assert isinstance(toolset, SkillFilesToolset)
     assert sorted(toolset.tools) == ['read_skill_resource', 'run_skill_script']
 
 
@@ -245,7 +246,7 @@ def test_resources_false_drops_only_the_resource_tool(library: Path) -> None:
     """Replaces v1 `exclude_tools` for the resource tool."""
     toolset = SkillsCapability(library, resources=False).get_toolset()
 
-    assert toolset is not None
+    assert isinstance(toolset, SkillFilesToolset)
     assert sorted(toolset.tools) == ['run_skill_script']
 
 
@@ -253,7 +254,7 @@ def test_scripts_false_drops_only_the_script_tool(library: Path) -> None:
     """Replaces v1 `exclude_tools` for the script tool."""
     toolset = SkillsCapability(library, scripts=False).get_toolset()
 
-    assert toolset is not None
+    assert isinstance(toolset, SkillFilesToolset)
     assert sorted(toolset.tools) == ['read_skill_resource']
 
 
@@ -416,12 +417,18 @@ def test_from_spec_builds_the_same_catalog(library: Path) -> None:
     """A spec-built capability behaves like a Python-built one."""
     capability = SkillsCapability.from_spec(directories=[str(library)], include=['demo-skill'])
 
+    # `from_spec` returns `AbstractCapability[Any]`, matching the base class it overrides,
+    # so narrowing is the caller's job.
+    assert isinstance(capability, SkillsCapability)
     assert capability.skill_names == ['demo-skill']
 
 
 def test_from_spec_accepts_a_single_directory_string(library: Path) -> None:
     """YAML often carries one path as a bare string."""
-    assert SkillsCapability.from_spec(directories=str(library)).skill_names == ['demo-skill']
+    capability = SkillsCapability.from_spec(directories=str(library))
+
+    assert isinstance(capability, SkillsCapability)
+    assert capability.skill_names == ['demo-skill']
 
 
 # ---------------------------------------------------------------------------
