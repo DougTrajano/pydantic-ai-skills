@@ -75,8 +75,10 @@ def test_local_registry_returns_its_directory(source: LocalSkillsRegistry) -> No
 
 def test_local_registry_rejects_a_missing_directory(tmp_path: Path) -> None:
     """Failing here beats a confusing error from harness later."""
+    registry = LocalSkillsRegistry(tmp_path / 'nope')
+
     with pytest.raises(ValueError, match='does not exist'):
-        LocalSkillsRegistry(tmp_path / 'nope').sync()
+        registry.sync()
 
 
 def test_local_registry_rejects_a_file(tmp_path: Path) -> None:
@@ -84,8 +86,10 @@ def test_local_registry_rejects_a_file(tmp_path: Path) -> None:
     a_file = tmp_path / 'a-file'
     a_file.write_text('not a directory')
 
+    registry = LocalSkillsRegistry(a_file)
+
     with pytest.raises(ValueError, match='not a directory'):
-        LocalSkillsRegistry(a_file).sync()
+        registry.sync()
 
 
 def test_skill_names_reads_the_synced_library(source: LocalSkillsRegistry) -> None:
@@ -234,8 +238,10 @@ def test_prefixed_handles_a_skill_md_without_a_name_key(tmp_path: Path) -> None:
 
 def test_prefixed_rejects_a_prefix_that_yields_an_invalid_name(source: LocalSkillsRegistry) -> None:
     """Failing here names the prefix; failing inside harness would not."""
+    registry = source.prefixed('Vendor_')
+
     with pytest.raises(ValueError, match='Prefixing'):
-        source.prefixed('Vendor_').sync()
+        registry.sync()
 
 
 def test_prefixed_copies_bundled_files(source: LocalSkillsRegistry) -> None:
@@ -267,20 +273,26 @@ def test_renamed_leaves_unmapped_skills_alone(source: LocalSkillsRegistry) -> No
 
 def test_renamed_rejects_an_unknown_original(source: LocalSkillsRegistry) -> None:
     """A typo in the map is a configuration error, not a silent no-op."""
+    registry = source.renamed({'new-name': 'nope'})
+
     with pytest.raises(ValueError, match='Unknown skill in name_map: nope'):
-        source.renamed({'new-name': 'nope'}).sync()
+        registry.sync()
 
 
 def test_renamed_rejects_an_invalid_new_name(source: LocalSkillsRegistry) -> None:
     """The new name still has to be one harness accepts."""
+    registry = source.renamed({'Bad_Name': 'pdf-tools'})
+
     with pytest.raises(ValueError, match='Renaming'):
-        source.renamed({'Bad_Name': 'pdf-tools'}).sync()
+        registry.sync()
 
 
 def test_renamed_rejects_a_collision(source: LocalSkillsRegistry) -> None:
     """Renaming onto an existing name would hand harness a duplicate."""
+    registry = source.renamed({'web-research': 'pdf-tools'})
+
     with pytest.raises(ValueError, match='the same name'):
-        source.renamed({'web-research': 'pdf-tools'}).sync()
+        registry.sync()
 
 
 # ---------------------------------------------------------------------------

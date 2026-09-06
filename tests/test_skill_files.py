@@ -201,14 +201,18 @@ async def test_reading_a_resource_returns_its_content(toolset: SkillFilesToolset
 
 async def test_an_unknown_skill_lists_what_is_available(toolset: SkillFilesToolset) -> None:
     """A retry the model can act on beats a bare failure."""
+    ctx = ctx_with('demo-skill')
+
     with pytest.raises(ModelRetry, match='Skills with bundled files: demo-skill'):
-        toolset._resolve_package(ctx_with('demo-skill'), 'nope')
+        toolset._resolve_package(ctx, 'nope')
 
 
 async def test_an_unloaded_skill_is_told_how_to_load_it(toolset: SkillFilesToolset) -> None:
     """The message has to name the tool and argument the model should use next."""
+    ctx = ctx_with()
+
     with pytest.raises(ModelRetry, match=r"load_capability with id='demo-skill'"):
-        toolset._resolve_package(ctx_with(), 'demo-skill')
+        toolset._resolve_package(ctx, 'demo-skill')
 
 
 async def test_require_loaded_false_skips_the_gate(tmp_path: Path) -> None:

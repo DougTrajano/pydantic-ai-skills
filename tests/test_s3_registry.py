@@ -217,8 +217,10 @@ def test_download_failure_wrapped_in_runtime_error(client: FakeS3Client) -> None
 
     client.download_file = broken_download  # type: ignore[method-assign]
 
+    registry = _make_registry(client)
+
     with pytest.raises(RuntimeError, match=r"Failed to download 'skills/"):
-        _make_registry(client).sync()
+        registry.sync()
 
 
 def test_sync_rejects_path_traversal_key(tmp_path: Path) -> None:

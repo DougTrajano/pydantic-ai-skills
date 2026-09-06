@@ -127,7 +127,7 @@ def read_skill_info(skill_dir: Path) -> SkillInfo | None:
 
     try:
         frontmatter, _ = parse_skill_md(skill_file.read_text(encoding='utf-8'))
-    except (OSError, UnicodeDecodeError, ValueError):
+    except (OSError, ValueError):
         frontmatter = {}
 
     return SkillInfo(
@@ -195,5 +195,6 @@ def rewrite_skill_name(skill_file: Path, name: str) -> None:
             return  # End of frontmatter with no `name` key: nothing to rewrite.
         if stripped.startswith('name:'):
             lines[index] = f'name: {name}'
-            skill_file.write_text('\n'.join(lines), encoding='utf-8')
+            with skill_file.open('w', encoding='utf-8') as handle:
+                handle.write('\n'.join(lines))
             return
