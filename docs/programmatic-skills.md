@@ -14,7 +14,7 @@ Learn how to create programmatic skills by watching the Programmatic Skills Tuto
 
 ## Overview
 
-Prefer integrating programmatic skills through `SkillsCapability` and `capabilities=[...]`. Use `SkillsToolset` directly when your app is built around `toolsets=[...]`.
+Programmatic skills are passed to `SkillsCapability(skills=[...])` and reach the model as deferred capabilities, exactly like skills read from a directory.
 
 Programmatic skills let you:
 
@@ -27,7 +27,7 @@ Programmatic skills let you:
 ## Creating a Basic Programmatic Skill
 
 ```python
-from pydantic_ai_skills import Skill, SkillResource, SkillsToolset
+from pydantic_ai_skills import Skill, SkillResource, SkillsCapability
 
 # Create a skill with static resources
 my_skill = Skill(
@@ -48,11 +48,9 @@ my_skill = Skill(
     ]
 )
 
-# Initialize toolset with the programmatic skill
-skills_toolset = SkillsToolset(skills=[my_skill])
 ```
 
-### Preferred Agent Integration (SkillsCapability)
+### Agent integration
 
 ```python
 from pydantic_ai import Agent
@@ -64,18 +62,8 @@ agent = Agent(
 )
 ```
 
-### Direct SkillsToolset Integration
-
-Skill instructions are injected into the agent's context automatically.
-
-```python
-from pydantic_ai import Agent
-
-agent = Agent(
-    model='openai:gpt-5.2',
-    toolsets=[skills_toolset],
-)
-```
+The skill becomes a deferred capability, exactly like one read from a directory: its description
+sits in the catalog, and the model loads its instructions with `load_capability`.
 
 ## Adding Dynamic Resources
 
@@ -161,7 +149,7 @@ from dataclasses import dataclass, field
 
 import datasets
 from pydantic_ai import Agent, RunContext
-from pydantic_ai_skills import Skill, SkillResource, SkillsToolset
+from pydantic_ai_skills import Skill, SkillResource, SkillsCapability
 
 @dataclass
 class AnalystDeps:
@@ -297,14 +285,14 @@ async def run_query(ctx: RunContext[AnalystDeps], query: str) -> str:
     except sqlite3.Error as e:
         return f'SQL Error: {e}'
 
-# Create toolset and agent
-skills_toolset = SkillsToolset(skills=[hr_skill])
+# Create the capability and agent
+hr_skills = SkillsCapability(skills=[hr_skill])
 
 agent = Agent(
     model='openai:gpt-4o',
     deps_type=AnalystDeps,
     instructions='You are an expert HR data analyst.',
-    toolsets=[skills_toolset]
+    capabilities=[hr_skills],
 )
 
 @agent.instructions
@@ -322,10 +310,10 @@ print(result.output)
 
 ## Mixing File-Based and Programmatic Skills
 
-You can combine both approaches in the same toolset:
+Both kinds go into the same capability:
 
 ```python
-from pydantic_ai_skills import Skill, SkillsToolset
+from pydantic_ai_skills import Skill, SkillsCapability
 
 # Programmatic skill
 my_skill = Skill(
@@ -338,12 +326,20 @@ my_skill = Skill(
 async def my_script(ctx: RunContext[MyDeps]) -> str:
     return 'Script output'
 
-# Mix with file-based skills
-skills_toolset = SkillsToolset(
-    directories=["./skills"],  # File-based skills
-    skills=[my_skill]          # Programmatic skills
+capability = SkillsCapability(
+    "./skills",            # file-based skills, read by harness
+    skills=[my_skill],     # Python-defined skills
 )
 ```
+
+A programmatic skill whose name matches one found on disk wins, with a `UserWarning` — rename one of
+them to expose both.
+
+!!! note "Consider core `Capability` first"
+    Pydantic AI's own [`Capability`](https://ai.pydantic.dev/capabilities/) already covers
+    instructions and tools defined in Python. Reach for a programmatic *skill* when you want it to
+    sit in the same catalog as your file-based ones, or when you want the `read_skill_resource` /
+    `run_skill_script` shape rather than plain function tools.
 
 ## Implementation Details
 
@@ -414,17 +410,15 @@ async def my_script(ctx: RunContext[MyDeps], arg: str) -> str:
     return f'Processed: {arg}'
 ```
 
-## Advanced: Using @toolset.skill() Decorator
+## Advanced: the `@skill` decorator
 
-For concise skill definition directly on a `SkillsToolset`, use the `@toolset.skill()` decorator:
+For a more concise definition, decorate a function that returns the skill's instructions:
 
 ```python
 from pydantic_ai import Agent, RunContext
-from pydantic_ai_skills import SkillsToolset
+from pydantic_ai_skills import SkillsCapability, skill
 
-skills = SkillsToolset()
-
-@skills.skill(
+@skill(
     name='analytics',
     license='MIT',
     metadata={'version': '1.0.0'}
@@ -446,34 +440,35 @@ async def report(ctx: RunContext[AppDeps], period: str = 'week') -> str:
     """Generate report for period."""
     return await ctx.deps.database.generate_report(period)
 
-# Create agent with decorator-defined skill
+# Create agent with the decorator-defined skill
 agent = Agent(
     model='openai:gpt-4o',
-    toolsets=[skills],
-    deps=AppDeps(...)
+    capabilities=[SkillsCapability(skills=[analytics_skill])],
+    deps_type=AppDeps,
 )
 ```
 
-See [Advanced Features](advanced.md) for full decorator documentation.
+The name is derived from the function (underscores become hyphens) unless you pass `name=`, and the
+description from its docstring unless you pass `description=`. Either way it must be a valid skill
+name — the same rule harness applies — since it becomes a capability id.
+
+!!! note "This was `@toolset.skill()` in v1"
+    The decorator moved off `SkillsToolset`, which no longer exists, and is now a standalone
+    `pydantic_ai_skills.skill`. See [Migrating from v1](migration-v2.md).
 
 ## Mixing Skill Types
 
-Combine file-based and programmatic skills in a single toolset:
-
 ```python
-from pydantic_ai_skills import SkillsToolset
+from pydantic_ai_skills import SkillsCapability, skill
 
-skills = SkillsToolset(directories=['./skills'])
 
-@skills.skill()
+@skill
 def runtime_config() -> str:
-    return "Access runtime configuration"
+    """Read the application's runtime configuration."""
+    return 'Consult the deployment config before answering environment questions.'
 
-@runtime_config.resource
-async def env_info(ctx: RunContext[AppDeps]) -> str:
-    return f"Environment: {ctx.deps.environment}"
 
-agent = Agent(model='openai:gpt-4o', toolsets=[skills])
+capability = SkillsCapability('./skills', skills=[runtime_config])
 ```
 
 ## Parameter Types for Resources and Scripts

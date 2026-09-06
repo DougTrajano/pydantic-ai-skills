@@ -6,7 +6,7 @@ Sandboxing swaps the execution backend without changing anything about how skill
 
 ## The extension point
 
-Everything plugs in through the [`SkillScriptExecutor`][pydantic_ai_skills.SkillScriptExecutor] protocol:
+Everything plugs in through the [`SkillScriptExecutor`][pydantic_ai_skills.SkillScriptExecutor] protocol. Note that this is about `run_skill_script` only: reading a skill's resources is plain file I/O on the host and is not routed through an executor. Set `scripts=False` on the capability if you want no script execution at all.
 
 ```python
 from typing import Any
@@ -27,28 +27,30 @@ class MySandboxExecutor:
 The protocol is structural — no base class to import, no registration step. Pass an instance as `script_executor`:
 
 ```python
-from pydantic_ai_skills import SkillsDirectory, SkillsToolset
+from pydantic_ai_skills import SkillsCapability
 
-directory = SkillsDirectory(path="./skills", script_executor=MySandboxExecutor())
-toolset = SkillsToolset(directories=[directory])
+capability = SkillsCapability("./skills", script_executor=MySandboxExecutor())
 ```
 
-!!! note "Executors are per skill source"
-    `SkillsToolset(directories=["./skills"])` builds a `SkillsDirectory` with the default local executor. To use a sandbox, construct the `SkillsDirectory` yourself and pass it in.
-
-Registries take the same argument, which matters most here — a registry is the least-trusted source of skills you have:
+One executor covers every skill the capability exposes, wherever it came from — a local directory, a
+Git clone, an S3 bucket. That matters most for registries, which are the least-trusted source of
+skills you have:
 
 ```python
-from pydantic_ai_skills import GitSkillsRegistry, SkillsToolset
+from pydantic_ai_skills import GitSkillsRegistry, SkillsCapability
 
-registry = GitSkillsRegistry(
-    repo_url="https://github.com/example/skills.git",
+capability = SkillsCapability(
+    registries=[GitSkillsRegistry("https://github.com/example/skills.git")],
     script_executor=MySandboxExecutor(),
 )
-toolset = SkillsToolset(registries=[registry])
 ```
 
-`S3SkillsRegistry` accepts `script_executor` too. Without it, scripts from a cloned repo or synced bucket run as local subprocesses on your host.
+Without it, scripts from a cloned repo or a synced bucket run as local subprocesses on your host.
+
+!!! note "In v1 the executor lived on each source"
+    `GitSkillsRegistry(..., script_executor=...)` and `SkillsDirectory(..., script_executor=...)` are
+    gone. Setting it once on the capability means a source added later cannot quietly default back to
+    host execution. See [Migrating from v1](migration-v2.md#script-executors).
 
 ## Two bundled implementations
 
@@ -64,7 +66,7 @@ Ask the running agent something like *"which region had the highest revenue?"* �
 
 Both stage the **whole skill folder** into the sandbox — `SKILL.md`, `resources/`, `scripts/` and anything else — and run the script with its own directory as the working directory, so sibling modules, `../resources/data.json` and bundled data files resolve exactly as they do locally. Both return output in the same format as local execution, so switching backends does not change what the model sees.
 
-Symlinks that resolve outside the skill folder are skipped with a warning during staging. Discovery already rejects them, but staging re-walks the folder, and following such a link would copy an arbitrary host file *into* the sandbox where the script could read it back out.
+Symlinks that resolve outside the skill folder are skipped with a warning during staging. Indexing already rejects them, but staging re-walks the folder, and following such a link would copy an arbitrary host file *into* the sandbox where the script could read it back out.
 
 ### OpenSandbox — container isolation
 
@@ -83,13 +85,13 @@ osb config set connection.api_key <your-api-key>
 ```
 
 ```python
-from pydantic_ai_skills import OpenSandboxScriptExecutor, SkillsDirectory
+from pydantic_ai_skills import OpenSandboxScriptExecutor, SkillsCapability
 
 executor = OpenSandboxScriptExecutor(
     image="opensandbox/code-interpreter:v1.1.0",
     timeout=30,
 )
-directory = SkillsDirectory(path="./skills", script_executor=executor)
+capability = SkillsCapability("./skills", script_executor=executor)
 ```
 
 ### LocalSandbox — no container runtime
@@ -107,9 +109,9 @@ pip install "pydantic-ai-skills[localsandbox]"
     `ImportError` saying so. `OpenSandboxScriptExecutor` has no such limit.
 
 ```python
-from pydantic_ai_skills import LocalSandboxScriptExecutor, SkillsDirectory
+from pydantic_ai_skills import LocalSandboxScriptExecutor, SkillsCapability
 
-directory = SkillsDirectory(path="./skills", script_executor=LocalSandboxScriptExecutor())
+capability = SkillsCapability("./skills", script_executor=LocalSandboxScriptExecutor())
 ```
 
 There is **no CPython binary on `PATH`** inside LocalSandbox, so the executor takes two paths:
@@ -139,7 +141,7 @@ This is a real trade-off, not a tuning knob: with reuse, files written by one sc
 
 The protocol is deliberately small, so adding a backend is mostly plumbing:
 
-1. Derive the skill root and stage it — call `skill_root_for` from `pydantic_ai_skills.sandboxes`. Discovery records the folder it loaded the skill from on `FileBasedSkillScript.skill_root`, and that is the authoritative answer. Do not infer it: `Path(script.uri).parent` is the `scripts/` directory for the usual layout; the nearest `SKILL.md` ancestor picks the wrong folder when a skill nests another skill; and walking up by `script.name` depth walks too far when an in-tree symlink changes the depth, staging sibling skills.
+1. Derive the skill root and stage it — call `skill_root_for` from `pydantic_ai_skills.sandboxes`. Indexing records the folder it found the skill in on `FileBasedSkillScript.skill_root`, and that is the authoritative answer. Do not infer it: `Path(script.uri).parent` is the `scripts/` directory for the usual layout; the nearest `SKILL.md` ancestor picks the wrong folder when a skill nests another skill; and walking up by `script.name` depth walks too far when an in-tree symlink changes the depth, staging sibling skills.
 2. Skip symlinks that resolve outside the skill root, and anything resolving into version-control metadata such as `.git` — a clone URL can carry a token. Reuse `iter_stageable_files`, which handles both.
 3. Build the command. Reuse `LocalSkillScriptExecutor._build_args` for the `--flag value` marshalling rather than reimplementing the bool/list/`None` rules.
 4. Execute with the script's own directory as the working directory, so relative paths behave as they do locally, and collect stdout, stderr and the exit code.

@@ -1,446 +1,286 @@
 # Skill Registries
 
-Skill registries let you **discover, install, and manage skills from remote sources** — such as Git repositories — without manually downloading or organizing skill directories. Registries integrate seamlessly with `SkillsToolset`, so skills from a remote repo appear alongside local and programmatic skills.
+A **registry** is a source of skill libraries. It fetches Agent Skill packages from wherever they
+live and materializes them as a local directory, which `SkillsCapability` hands to harness.
 
-## Installation
-
-Git-backed registries require [GitPython](https://gitpython.readthedocs.io/):
-
-```bash
-pip install pydantic-ai-skills[git]
-```
-
-S3-backed registries require [boto3](https://boto3.amazonaws.com/v1/documentation/api/latest/index.html):
-
-```bash
-pip install pydantic-ai-skills[s3]
-```
-
-## Quick Start
-
-### Load Skills from a Git Repository
+That is the whole contract — one synchronous method:
 
 ```python
-from pydantic_ai import Agent
-from pydantic_ai_skills import SkillsCapability
-from pydantic_ai_skills.registries import GitSkillsRegistry, GitCloneOptions
+class SkillRegistry(ABC):
+    @abstractmethod
+    def sync(self) -> Path:
+        """Materialize the skills and return the local library directory."""
+```
 
-# Clone Anthropic's public skills repo (shallow, single-branch)
+`sync()` is idempotent: calling it again refreshes the local copy (a `git pull`, an S3 re-sync)
+rather than starting over. Registries do not parse `SKILL.md` — validating and rendering the
+packages in the directory they return is harness's job.
+
+## Git {#git}
+
+```bash
+pip install "pydantic-ai-skills[git]"
+```
+
+```python
+from pydantic_ai_skills import GitSkillsRegistry, SkillsCapability
+
 registry = GitSkillsRegistry(
-    repo_url='https://github.com/anthropics/skills',
-    path='skills',
-    target_dir='./anthropics-skills',
-    clone_options=GitCloneOptions(depth=1, single_branch=True),
+    'https://github.com/anthropics/skills',
+    path='skills',                      # sub-path inside the repo holding the packages
+    target_dir='~/.cache/agent-skills', # where to clone; defaults to a temp dir
 )
 
-agent = Agent(
-    model='openai:gpt-5.2',
-    instructions='You are a helpful assistant with access to a variety of skills.',
-    capabilities=[SkillsCapability(registries=[registry])],
-)
+capability = SkillsCapability(registries=[registry])
 ```
 
-### Direct SkillsToolset Integration
-
-```python
-from pydantic_ai import Agent
-from pydantic_ai_skills import SkillsToolset
-
-skills_toolset = SkillsToolset(registries=[registry])
-
-agent = Agent(
-    model='openai:gpt-5.2',
-    instructions='You are a helpful assistant with access to a variety of skills.',
-    toolsets=[skills_toolset],
-)
-```
-
-**View the complete example:** [git_registry_usage.py](https://github.com/DougTrajano/pydantic-ai-skills/blob/main/examples/git_registry_usage.py)
-
-## GitSkillsRegistry
-
-`GitSkillsRegistry` is the primary concrete registry. It clones a Git repository, discovers `SKILL.md` files, and exposes the skills to your agent.
-
-### Constructor Parameters
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `repo_url` | `str` | — | Full URL of the Git repository (HTTPS or SSH). |
-| `target_dir` | `str \| Path \| None` | `None` | Local clone directory. Defaults to a temporary directory. |
-| `path` | `str` | `""` | Sub-path inside the repo containing skill directories. |
-| `token` | `str \| None` | `None` | Personal access token. Falls back to `GITHUB_TOKEN` env var. |
-| `ssh_key_file` | `str \| Path \| None` | `None` | Path to SSH private key for SSH authentication. |
-| `clone_options` | `GitCloneOptions \| None` | `None` | Fine-grained Git clone configuration. |
-| `validate` | `bool` | `True` | Validate `SKILL.md` frontmatter after cloning. |
-| `auto_install` | `bool` | `True` | Clone/pull automatically on first access. |
-
-### GitCloneOptions
-
-Fine-tune the Git clone operation:
-
-```python
-from pydantic_ai_skills.registries import GitCloneOptions
-
-options = GitCloneOptions(
-    depth=1,                          # Shallow clone (1 commit)
-    branch='main',                    # Specific branch
-    single_branch=True,               # Only fetch one branch
-    sparse_paths=['skills/pdf'],      # Sparse checkout (specific paths only)
-    multi_options=['--filter=blob:none'],  # Blobless clone
-    env={'GIT_SSH_COMMAND': '...'},   # Custom env vars for git
-    git_options={},                   # Extra kwargs for GitPython
-)
-```
+It reads the filesystem after cloning and never calls a hosting platform's API, so it works with
+GitHub, GitLab, Bitbucket, and self-hosted servers over HTTPS or SSH.
 
 ### Authentication
 
-=== "HTTPS with Token"
+```python
+# Personal access token (falls back to $GITHUB_TOKEN when omitted)
+GitSkillsRegistry('https://github.com/acme/private-skills', token='ghp_...')
 
-    ```python
-    # Explicit token
-    registry = GitSkillsRegistry(
-        repo_url='https://github.com/my-org/private-skills.git',
-        token='ghp_...',
-    )
+# SSH key
+GitSkillsRegistry('git@github.com:acme/private-skills.git', ssh_key_file='~/.ssh/id_ed25519')
+```
 
-    # Or via environment variable
-    # export GITHUB_TOKEN=ghp_...
-    registry = GitSkillsRegistry(
-        repo_url='https://github.com/my-org/private-skills.git',
-    )
-    ```
+A token is embedded in the clone URL, never in `repr()` or in an error message. The SSH path sets
+`GIT_SSH_COMMAND` with `StrictHostKeyChecking=accept-new`, and warns if the key file is readable by
+group or other.
 
-=== "SSH Key"
+### Shallow and sparse clones
 
-    ```python
-    registry = GitSkillsRegistry(
-        repo_url='git@github.com:my-org/private-skills.git',
-        ssh_key_file='~/.ssh/id_ed25519_skills',
-    )
-    ```
-
-### Offline / Air-Gapped Mode
-
-Disable automatic cloning for environments without network access:
+A large monorepo is worth narrowing:
 
 ```python
-# Pre-clone the repo manually, then point the registry at it
-registry = GitSkillsRegistry(
-    repo_url='https://github.com/anthropics/skills',
-    target_dir='/opt/skills-mirror',
-    auto_install=False,
+from pydantic_ai_skills import GitCloneOptions, GitSkillsRegistry
+
+GitSkillsRegistry(
+    'https://github.com/anthropics/skills',
+    path='skills/pdf',
+    clone_options=GitCloneOptions(
+        depth=1,
+        single_branch=True,
+        sparse_paths=['skills/pdf'],
+        multi_options=['--filter=blob:none'],
+    ),
 )
 ```
 
-### Skill Metadata Enrichment
-
-Skills loaded from a registry automatically receive extra metadata:
+### Offline and air-gapped
 
 ```python
-skill = await registry.get('pdf')
-print(skill.metadata)
-# {
-#     'source_url': 'https://github.com/anthropics/skills/tree/main/skills/pdf',
-#     'registry': 'GitSkillsRegistry',
-#     'repo': 'https://github.com/anthropics/skills',
-#     'version': 'abc123...',  # HEAD commit SHA
-# }
+GitSkillsRegistry(
+    'https://github.com/anthropics/skills',
+    target_dir='/opt/skills-mirror',
+    auto_install=False,   # sync() never reaches the network
+)
 ```
 
-## S3SkillsRegistry
+With `auto_install=False`, `sync()` returns whatever is already on disk and raises a clear error if
+nothing has been cloned.
 
-`S3SkillsRegistry` downloads skills from an Amazon S3 bucket — or any S3-compatible store such as MinIO, Ceph, or Cloudflare R2 — into a local cache, then discovers `SKILL.md` files the same way the Git registry does.
+### Pinning a version
 
-Install the optional dependency:
+`sync()` tracks a moving branch. To record which commit a run actually used:
+
+```python
+registry.sync()
+print(registry.revision())   # 'a1b2c3d...' or None if not cloned
+```
+
+To pin rather than record, use `GitCloneOptions(branch='v1.2.0')` with a tag.
+
+## S3 {#s3}
 
 ```bash
-pip install pydantic-ai-skills[s3]
+pip install "pydantic-ai-skills[s3]"
 ```
-
-All connection details (credentials, `endpoint_url`, region, TLS, path-style addressing) live on the **boto3 client** you supply via `boto3_client`. When omitted, a default `boto3.client("s3")` is built, which uses boto3's standard credential resolution chain (environment variables, `~/.aws/credentials`, IAM roles, etc.).
-
-### Constructor Parameters
-
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `bucket` | `str` | *required* | Name of the S3 bucket containing the skills. |
-| `prefix` | `str` | `""` | Key prefix inside the bucket where skill directories live. |
-| `target_dir` | `str \| Path \| None` | `None` | Local cache directory. A temp directory is used when `None`. |
-| `boto3_client` | `Any \| None` | `None` | Pre-built boto3 S3 client. A default client is created when `None`. |
-| `validate` | `bool` | `True` | Validate every discovered `SKILL.md` after syncing. |
-| `auto_install` | `bool` | `True` | Sync on construction (and on `search`/`get`). Set `False` for offline use. |
-
-### Amazon S3 (Default Client)
 
 ```python
-from pydantic_ai_skills.registries import S3SkillsRegistry
+from pydantic_ai_skills import S3SkillsRegistry
 
-# Uses the ambient AWS credential chain.
-registry = S3SkillsRegistry(bucket="my-skills", prefix="skills")
+registry = S3SkillsRegistry(
+    bucket='acme-agent-skills',
+    prefix='skills',
+    target_dir='~/.cache/agent-skills',
+)
 ```
 
-### MinIO (and Other S3-Compatible Stores)
+Each `sync()` mirrors the prefix: the cached subtree is cleared first, so a skill deleted from the
+bucket stops appearing locally.
 
-Build a boto3 client pointed at your endpoint and pass it in. MinIO requires path-style addressing:
+Connection details all live on the boto3 client, which makes any S3-compatible store work:
 
 ```python
 import boto3
 from botocore.config import Config
-from pydantic_ai_skills.registries import S3SkillsRegistry
 
 client = boto3.client(
-    "s3",
-    endpoint_url="http://localhost:9000",
-    aws_access_key_id="minioadmin",
-    aws_secret_access_key="minioadmin",
-    config=Config(s3={"addressing_style": "path"}),
+    's3',
+    endpoint_url='http://localhost:9000',
+    aws_access_key_id='minioadmin',
+    aws_secret_access_key='minioadmin',
+    config=Config(s3={'addressing_style': 'path'}),
 )
-
-registry = S3SkillsRegistry(bucket="skills", boto3_client=client)
+S3SkillsRegistry(bucket='skills', boto3_client=client)
 ```
 
-The same pattern works for Ceph RadosGW and Cloudflare R2 — only the `endpoint_url` and credentials change.
+With no client, a default `boto3.client('s3')` is built, using boto3's standard credential chain.
+`auto_install=False` works as it does for Git. `revision('pdf')` reports the newest object
+modification time for one skill.
 
-### Offline / Air-Gapped Mode
+Object keys are checked before download: a key that would write outside `target_dir` raises rather
+than escaping.
 
-Set `auto_install=False` to disable automatic syncing on construction and on `search`/`get` — the registry then reads only what already exists in `target_dir` (e.g. a pre-mirrored copy). Note that an explicit `update()` call still contacts S3.
+## Local {#local}
 
 ```python
-registry = S3SkillsRegistry(
-    bucket="skills",
-    target_dir="/opt/skills-mirror",
-    auto_install=False,
-)
+from pydantic_ai_skills.registries import LocalSkillsRegistry
+
+LocalSkillsRegistry('./skills')
 ```
 
-### Skill Metadata Enrichment
+Passing a local directory straight to `SkillsCapability(directories=...)` is simpler and does the
+same thing. Reach for this only when a local library needs **composing** — merged with a remote one,
+prefixed, or filtered — since composition operates on registries.
 
-Skills loaded from S3 receive registry-specific metadata:
+## Composition {#composition}
+
+Every registry has `filtered()`, `prefixed()` and `renamed()`, and `|` merges two. Each returns a
+view; the wrapped registry is never modified.
+
+Composition works by **staging**: the wrapper syncs what it wraps, then copies the packages it wants
+into a new directory under the names it wants. That is what makes the result a real library harness
+can read.
+
+### Filtering
+
+The predicate receives a `SkillInfo` — the skill's name, description, and directory:
 
 ```python
-skill = await registry.get('pdf')
-print(skill.metadata)
-# {
-#     'source_url': 's3://my-skills/skills/pdf',
-#     'registry': 'S3SkillsRegistry',
-#     'bucket': 'my-skills',
-#     'prefix': 'skills',
-#     'version': '2024-01-01T00:00:00+00:00',  # latest object LastModified
-# }
+pdf_only = registry.filtered(lambda info: 'pdf' in info.name)
+documents = registry.filtered(lambda info: 'document' in info.description.lower())
 ```
 
-## Registry Composition
-
-Registries support **lightweight views** — wrappers that transform skill names or visibility without modifying the underlying registry. These mirror the composition patterns from Pydantic AI's toolset system.
-
-### Filtering Skills
-
-Restrict which skills are visible:
+### Prefixing and renaming
 
 ```python
-# Only expose skills with 'pdf' in their name
-pdf_registry = registry.filtered(lambda skill: 'pdf' in skill.name.lower())
-
-# Only skills with a specific tag in metadata
-tagged = registry.filtered(
-    lambda s: 'analytics' in (s.metadata or {}).get('tags', [])
-)
+vendor = registry.prefixed('vendor-')          # 'pdf' → 'vendor-pdf'
+aliased = registry.renamed({'documents': 'pdf'})  # {new_name: original_name}
 ```
 
-### Prefixing Skill Names
+Both rewrite each staged package's frontmatter `name` as well as its directory name, because harness
+requires the two to agree. A name that would not be valid — an uppercase prefix, say — raises at
+`sync()` naming the operation that produced it, rather than surfacing later as an opaque harness
+error.
 
-Avoid name collisions when combining multiple registries:
+### Merging
 
 ```python
-# All skill names get prefixed: 'pdf' → 'anthropic-pdf'
-anthropic = registry.prefixed('anthropic-')
+from pydantic_ai_skills.registries import CombinedRegistry
 
-skill = await anthropic.get('anthropic-pdf')  # works
-skill = await anthropic.get('pdf')            # raises KeyError
+combined = CombinedRegistry(registries=[internal, public])
+combined = internal | public   # the same thing
 ```
 
-### Renaming Skills
-
-Apply explicit name mappings:
+Earlier registries win on a duplicate skill name, and the shadowed one is reported with a
+`UserWarning`. To expose both, prefix them:
 
 ```python
-# Map new names to original names
-renamed = registry.renamed({
-    'doc-tool': 'pdf',        # 'pdf' is now accessible as 'doc-tool'
-    'sheet-tool': 'xlsx',     # 'xlsx' is now accessible as 'sheet-tool'
-})
-
-skill = await renamed.get('doc-tool')   # fetches 'pdf'
-skill = await renamed.get('xlsx')       # still works (unmapped names pass through)
+combined = internal.prefixed('acme-') | public.prefixed('anthropic-')
 ```
 
-### Combining Registries
+### Chaining
 
-Aggregate multiple registries into a single source:
+Wrappers compose, each staging from the previous one's output:
 
 ```python
-from pydantic_ai_skills.registries import CombinedRegistry, GitSkillsRegistry
-
-github_registry = GitSkillsRegistry(
-    repo_url='https://github.com/anthropics/skills',
-    path='skills',
-    target_dir='./cache/anthropic',
+source = (
+    GitSkillsRegistry('https://github.com/anthropics/skills', path='skills')
+    .filtered(lambda info: info.name in {'pdf', 'xlsx', 'docx'})
+    .prefixed('office-')
 )
-
-internal_registry = GitSkillsRegistry(
-    repo_url='https://github.com/my-org/internal-skills',
-    target_dir='./cache/internal',
-)
-
-combined = CombinedRegistry(registries=[github_registry, internal_registry])
-
-# Searches fan out to all registries in parallel
-results = await combined.search('pdf')
-
-# get/install/update try each registry in order
-skill = await combined.get('pdf')
 ```
 
-When multiple registries provide a skill with the same name, **the first registry wins** (based on the order passed to `CombinedRegistry`).
+Note that order matters: `prefixed().filtered()` gives the predicate the *prefixed* names, because
+filtering runs against the staged library.
 
-### Chaining Composition
+### Where staged libraries live
 
-Wrappers can be chained for complex setups:
+By default each wrapper stages into a temporary directory that lives as long as the process. Pass
+`target_dir=` to pin it:
 
 ```python
-# Start with a Git registry
-registry = GitSkillsRegistry(
-    repo_url='https://github.com/anthropics/skills',
-    path='skills',
-    target_dir='./cached-skills',
-)
+from pydantic_ai_skills.registries import FilteredRegistry
 
-# Filter to only document-related skills, then prefix them
-doc_skills = (
-    registry
-    .filtered(lambda s: s.name in ('pdf', 'docx', 'pptx'))
-    .prefixed('docs-')
+FilteredRegistry(
+    wrapped=source,
+    predicate=lambda info: 'pdf' in info.name,
+    target_dir='./staged-skills',
 )
-
-# doc_skills now has: 'docs-pdf', 'docs-docx', 'docs-pptx'
 ```
 
-## Mixing Registries with Local Skills
+An existing `target_dir` is emptied on each sync, so a narrowed filter does not leave the previous
+run's skills behind.
 
-`SkillsToolset` supports all three skill sources simultaneously. **Priority order**: programmatic skills > directory skills > registry skills.
+## Inspecting a registry
 
 ```python
-from pydantic_ai_skills import SkillsToolset, Skill
-from pydantic_ai_skills.registries import GitSkillsRegistry
-
-# 1. Programmatic skill (highest priority)
-custom_skill = Skill(
-    name='my-tool',
-    description='Custom in-code skill',
-    content='Instructions for my-tool...',
-)
-
-# 2. Git registry (lowest priority)
-registry = GitSkillsRegistry(
-    repo_url='https://github.com/anthropics/skills',
-    path='skills',
-    target_dir='./cached-skills',
-)
-
-# All three sources combined
-toolset = SkillsToolset(
-    skills=[custom_skill],              # Programmatic skills
-    directories=['./skills'],           # Local filesystem skills
-    registries=[registry],              # Remote registry skills
-)
+registry.skill_names()   # ['pdf', 'xlsx']
+registry.skill_infos()   # [SkillInfo(name='pdf', description='...', directory=...), ...]
 ```
 
-If a skill name appears in multiple sources, the higher-priority source wins and a duplicate warning is emitted for directory-level conflicts.
+Both sync first. Useful for a CLI or a health check, without building an agent.
 
-## Creating Custom Registries
+## Writing your own
 
-Implement the `SkillRegistry` abstract base class to create your own registry backed by any source (REST API, database, cloud storage, etc.):
+One method:
 
 ```python
 from pathlib import Path
-from pydantic_ai_skills.registries import SkillRegistry
-from pydantic_ai_skills.types import Skill
 
-class MyApiRegistry(SkillRegistry):
-    """Registry backed by a custom REST API."""
+from pydantic_ai_skills import SkillRegistry
 
-    def __init__(self, api_url: str):
-        self._api_url = api_url
-        self._skills: list[Skill] = []
 
-    async def search(self, query: str, limit: int = 10) -> list[Skill]:
-        # Implement search against your API
-        ...
+class HttpArchiveRegistry(SkillRegistry):
+    """Download and unpack a tarball of skill packages."""
 
-    async def get(self, skill_name: str) -> Skill:
-        # Fetch a single skill by name
-        ...
+    def __init__(self, url: str, target_dir: Path) -> None:
+        self.url = url
+        self.target_dir = target_dir
 
-    async def install(self, skill_name: str, target_dir: str | Path) -> Path:
-        # Download and install the skill
-        ...
-
-    async def update(self, skill_name: str, target_dir: str | Path) -> Path:
-        # Update an installed skill
-        ...
-
-    def get_skills(self) -> list[Skill]:
-        # Return all available skills (synchronous, called during init)
-        return self._skills
+    def sync(self) -> Path:
+        download_and_extract(self.url, self.target_dir)
+        return self.target_dir
 ```
 
-You can also extend `WrapperRegistry` to create custom composition wrappers:
+You get `filtered()`, `prefixed()`, `renamed()`, `|`, `skill_names()` and `skill_infos()` for free.
+
+The directory you return must be a **library**: its immediate children are skill packages, and it
+must not itself contain a `SKILL.md`. harness rejects the latter with a clear error.
+
+## Lifecycle
+
+A registry that was not given a `target_dir` owns a temporary directory tied to its own lifetime.
+Keep the registry referenced for as long as you need the files:
 
 ```python
-from pydantic_ai_skills.registries import WrapperRegistry
-from pydantic_ai_skills.types import Skill
+# Fine: the capability holds the registry.
+capability = SkillsCapability(registries=[GitSkillsRegistry(url)])
 
-class LoggingRegistry(WrapperRegistry):
-    """Registry that logs all operations."""
-
-    async def search(self, query: str, limit: int = 10) -> list[Skill]:
-        print(f'Searching for: {query}')
-        results = await self.wrapped.search(query, limit)
-        print(f'Found {len(results)} results')
-        return results
+# Not fine: the registry is collected, taking its clone with it.
+library = GitSkillsRegistry(url).sync()
 ```
 
-## Registry API
+Pass `target_dir=` for a cache you control. Those directories are never cleaned up automatically.
 
-All registries implement the following interface:
+## Trust
 
-| Method | Description |
-|--------|-------------|
-| `search(query, limit)` | Search for skills by keyword (async) |
-| `get(skill_name)` | Retrieve a single skill by name (async) |
-| `install(skill_name, target_dir)` | Copy a skill to a local directory (async) |
-| `update(skill_name, target_dir)` | Update an installed skill (async) |
-| `get_skills()` | Return all available skills (sync, used by `SkillsToolset`) |
-| `filtered(predicate)` | Return a filtered view of this registry |
-| `prefixed(prefix)` | Return a view with prefixed skill names |
-| `renamed(name_map)` | Return a view with renamed skills |
-
-## Security Considerations
-
-- **Trusted sources only**: Only use registries from sources you trust. Malicious skills can execute code or invoke tools in unintended ways.
-- **Token handling**: Tokens are embedded in clone URLs but never exposed in `repr()` or logs. The `_sanitize_url()` helper redacts credentials.
-- **Path traversal**: Both source and destination paths are validated during `install()` to prevent symlink-based escapes.
-- **SSH key permissions**: A warning is emitted if SSH key files have permissions wider than `0o600`.
-- **Skill validation**: By default, all discovered skills pass through `validate_skill_metadata()` after cloning.
-
-!!! warning
-
-    Skills loaded from remote registries carry the same security implications as any third-party code. Always audit skills from untrusted sources before use. See [Security & Deployment](security.md) for detailed guidance.
-
-## See Also
-
-- [Quick Start](quick-start.md) — Get started with basic skills
-- [Core Concepts](concepts.md) — Understanding the skill system
-- [Advanced Features](advanced.md) — Decorators, templates, dependency injection
-- [API Reference — Registries](api/registries.md) — Full API documentation
-- [Security & Deployment](security.md) — Production security guidance
+Registry skills are the least-trusted source there is: their instructions steer the model and their
+scripts run wherever your executor puts them. Use a [sandbox executor](sandbox.md) for anything you
+do not control, and read [Security](security.md) before pointing an agent at a repository you do not
+own.

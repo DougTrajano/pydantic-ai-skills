@@ -6,15 +6,15 @@ This folder contains runnable examples demonstrating how to use `pydantic-ai-ski
 
 | File | Description |
 |------|-------------|
-| `basic_usage.py` | Minimal setup: one skills directory loaded via `SkillsToolset`. |
+| `basic_usage.py` | Minimal setup: one skill library exposed through `SkillsCapability`. |
 | `advanced_usage.py` | Multiple skills directories, DuckDuckGo search tool, `httpx` URL fetcher, and a filesystem sandbox. |
-| `git_registry_usage.py` | Loads skills from a remote Git repository using `GitSkillsRegistry` (clones Anthropic's public skills repo). |
-| `programatic_skills.py` | Defines a skill entirely in Python using `@skill.resource` / `@skill.script` decorators — HR Analytics Agent backed by a HuggingFace dataset. |
+| `git_registry_usage.py` | Loads skills from a remote Git repository using `GitSkillsRegistry` (clones the public Anthropic skills repo) and reports the commit it landed on. |
+| `programatic_skills.py` | Defines a skill entirely in Python using the `resource` / `script` decorators — HR Analytics Agent backed by a HuggingFace dataset. |
 | `debug_local_logging.py` | Development-focused example that runs file-based skill scripts in-process for breakpoint debugging and writes a local execution log file. |
 | `sandbox_opensandbox.py` | Agent whose skill scripts run in an [OpenSandbox](https://github.com/opensandbox-group/OpenSandbox) container, via a custom `SkillScriptExecutor` wired in through `SkillsCapability`. Needs `pip install -e ".[examples,opensandbox]"` and a reachable OpenSandbox server. |
 | `sandbox_localsandbox.py` | Agent whose skill scripts run in a [LocalSandbox](https://github.com/coplane/localsandbox) virtual filesystem (just-bash + Pyodide, no container runtime), via a custom `SkillScriptExecutor` wired in through `SkillsCapability`. Needs `pip install -e ".[examples,localsandbox]"`. |
 
-Both sandbox examples use executors that ship with the package (`pydantic_ai_skills.sandboxes`), so they stay as short as the other examples — only the `script_executor=` argument differs from `basic_usage_capability.py`.
+Both sandbox examples use executors that ship with the package (`pydantic_ai_skills.sandboxes`), so they stay as short as the other examples — only the `script_executor=` argument differs from `basic_usage.py`.
 
 Use the bundled `data-analysis` skill to exercise them. It profiles and aggregates a 96-row sales dataset — group revenue by region, sum units by category, filter by channel — using only the standard library, so it does real work with no network and no third-party packages. Every script produces byte-identical output on the host and in a sandbox, exit codes included, which is the property that makes swapping executors safe.
 
@@ -26,6 +26,10 @@ The other scripted skill, `arxiv-search`, needs the `arxiv` package plus network
 |------|--------|
 | `skills/` | `web-research`, `arxiv-search`, `pydanticai-docs`, `data-analysis` |
 | `anthropic-skills/` | Anthropic's official skill collection (algorithmic-art, canvas-design, docx, pdf, pptx, slack-gif-creator, webapp-testing, and more) |
+
+Each of these is a **library**: its immediate children are the skill packages. Pass the library, not
+a package, and note that nesting is not searched — `skills/research/arxiv-search/` would not be
+found under `skills/`.
 
 ## Prerequisites
 

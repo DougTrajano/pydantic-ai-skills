@@ -1,17 +1,17 @@
 """Prefixed registry composition.
 
-Provides :class:`PrefixedRegistry`, a wrapper that prepends a
-prefix to every skill name. Follows the same pattern as Pydantic
-AI's ``PrefixedToolset``.
+Provides :class:`PrefixedRegistry`, a wrapper that prepends a prefix to every skill name
+so libraries from different sources can coexist without colliding.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 
+from pydantic_ai_skills._parsing import read_skill_info, rewrite_skill_name, validate_skill_name
+from pydantic_ai_skills.registries._staging import copy_skill_directory, staging_directory
 from pydantic_ai_skills.registries.wrapper import WrapperRegistry
-from pydantic_ai_skills.types import Skill
 
 __all__ = ['PrefixedRegistry']
 
@@ -20,57 +20,40 @@ __all__ = ['PrefixedRegistry']
 class PrefixedRegistry(WrapperRegistry):
     """A registry that prepends a prefix to every skill name.
 
-    The prefix is added to names returned by ``search`` and ``get``,
-    and stripped before delegating ``install`` and ``update`` to the
-    wrapped registry.
+    Because harness derives a skill's name from its directory — and rejects a `SKILL.md`
+    whose frontmatter `name` disagrees with it — renaming means staging the package under
+    the new directory name *and* rewriting that key. Both happen here.
 
     Example:
         ```python
-        prefixed = registry.prefixed('anthropic-')
-        # Skill 'pdf' is now accessible as 'anthropic-pdf'
-        skill = await prefixed.get('anthropic-pdf')
+        anthropic = registry.prefixed('anthropic-')
+        # the "pdf" skill is exposed to the model as "anthropic-pdf"
         ```
     """
 
     prefix: str
 
-    def _add_prefix(self, skill: Skill) -> Skill:
-        """Return a copy of the skill with the prefix prepended to its name."""
-        return replace(skill, name=f'{self.prefix}{skill.name}')
-
-    def _strip_prefix(self, name: str) -> str:
-        """Remove the prefix from a skill name if present."""
-        if name.startswith(self.prefix):
-            return name[len(self.prefix) :]
-        return name
-
-    async def search(self, query: str, limit: int = 10) -> list[Skill]:
-        """Search the wrapped registry and prefix all result names."""
-        results = await self.wrapped.search(query, limit)
-        return [self._add_prefix(s) for s in results]
-
-    async def get(self, skill_name: str) -> Skill:
-        """Get a skill by its prefixed name.
+    def sync(self) -> Path:
+        """Stage a library whose skills are all renamed with the prefix.
 
         Raises:
-            KeyError: When the name doesn't start with the expected prefix.
+            ValueError: When the prefix yields a name harness would reject.
         """
-        if not skill_name.startswith(self.prefix):
-            raise KeyError(f"Skill '{skill_name}' not found — expected prefix '{self.prefix}'.")
-        inner_name = self._strip_prefix(skill_name)
-        skill = await self.wrapped.get(inner_name)
-        return self._add_prefix(skill)
+        source = self.wrapped.sync()
+        staged = staging_directory(self.target_dir)
 
-    async def install(self, skill_name: str, target_dir: str | Path) -> Path:
-        """Install a skill, stripping the prefix before delegating."""
-        inner_name = self._strip_prefix(skill_name)
-        return await self.wrapped.install(inner_name, target_dir)
+        for child in sorted(source.iterdir()):
+            if not child.is_dir():
+                continue
+            info = read_skill_info(child)
+            if info is None:
+                continue
 
-    async def update(self, skill_name: str, target_dir: str | Path) -> Path:
-        """Update a skill, stripping the prefix before delegating."""
-        inner_name = self._strip_prefix(skill_name)
-        return await self.wrapped.update(inner_name, target_dir)
+            new_name = validate_skill_name(
+                f'{self.prefix}{info.name}',
+                context=f'Prefixing {info.name!r} with {self.prefix!r}',
+            )
+            staged_skill = copy_skill_directory(child, staged, new_name)
+            rewrite_skill_name(staged_skill / 'SKILL.md', new_name)
 
-    def get_skills(self) -> list[Skill]:
-        """Return all skills with the prefix prepended to their names."""
-        return [self._add_prefix(s) for s in self.wrapped.get_skills()]
+        return staged

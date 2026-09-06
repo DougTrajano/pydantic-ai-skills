@@ -293,7 +293,7 @@ from dataclasses import dataclass
 
 from fastapi import Request
 from pydantic_ai import Agent
-from pydantic_ai_skills import LocalSkillScriptExecutor, SkillsDirectory, SkillsToolset
+from pydantic_ai_skills import LocalSkillScriptExecutor, SkillsCapability
 
 
 @dataclass
@@ -312,16 +312,11 @@ executor = LocalSkillScriptExecutor(
     },
 )
 
-skills_dir = SkillsDirectory(
-    path='./skills',
-    script_executor=executor,
-)
-
-skills = SkillsToolset(directories=[skills_dir])
+skills = SkillsCapability('./skills', script_executor=executor)
 
 agent = Agent(
     'openai:gpt-5.2',
-    toolsets=[skills],
+    capabilities=[skills],
     deps_type=AppDeps,
 )
 ```
@@ -644,18 +639,17 @@ To exclude more files, pass `exclude_resources` — glob patterns that **extend*
 defaults (they never replace them, so noise stays excluded):
 
 ```python
-from pydantic_ai_skills import SkillsToolset
+from pydantic_ai_skills import SkillsCapability
 
-toolset = SkillsToolset(
-    directories=["./skills"],
+capability = SkillsCapability(
+    "./skills",
     exclude_resources=["*.tmp", "drafts/*"],  # in addition to the defaults
 )
 ```
 
 A pattern matches a file when it matches the full skill-relative path (e.g. `drafts/*`)
-or any single path component (e.g. `*.tmp`, `secrets`). The same parameter is available
-on `SkillsDirectory`, `discover_skills`, `Skill.from_file`, and `SkillsCapability`. The
-default patterns are exported as `pydantic_ai_skills.directory.DEFAULT_RESOURCE_EXCLUDES`.
+or any single path component (e.g. `*.tmp`, `secrets`). The default patterns are exported as
+`pydantic_ai_skills.packages.DEFAULT_RESOURCE_EXCLUDES`.
 
 ## Organizing Multiple Skills
 
@@ -675,7 +669,8 @@ skills/
 
 ### Categorized Structure
 
-Good for large projects:
+Skills are only discovered as the **immediate children** of a library, so a categorized layout means
+passing each category as its own library rather than nesting them under one:
 
 ```markdown
 skills/
@@ -694,31 +689,28 @@ skills/
 └── SKILL.md
 ```
 
-Use both directories in your toolset:
+Pass every category:
 
 ```python
-toolset = SkillsToolset(directories=[
+capability = SkillsCapability([
     "./skills/research",
     "./skills/data-processing",
-    "./skills/communication"
+    "./skills/communication",
 ])
 ```
 
-### Loading a Single Skill
+Passing `./skills` alone would find nothing: `research/` holds no `SKILL.md`, and nesting is not
+searched. Skill names must be unique across all of them, since each becomes a capability id.
 
-When you know the exact path to a skill, use `Skill.from_file()` instead of `SkillsDirectory`:
+### Exposing one skill
+
+There is no "load a single skill" call. Point at the library and select:
 
 ```python
-from pydantic_ai_skills import Skill
-
-# Pass the directory that contains SKILL.md …
-skill = Skill.from_file("./skills/research/arxiv-search")
-
-# … or pass the SKILL.md file directly
-skill = Skill.from_file("./skills/research/arxiv-search/SKILL.md")
+capability = SkillsCapability("./skills/research", include=["arxiv-search"])
 ```
 
-`from_file()` raises `FileNotFoundError` if the `SKILL.md` is missing, or `ValueError` for structural problems (wrong filename, malformed YAML frontmatter, or absent `name` field when `validate=True`, the default).
+An `include` name that matches nothing raises at construction, so a typo fails immediately.
 
 ## Skill Metadata
 
@@ -738,26 +730,31 @@ updated: 2025-01-20
 ---
 ```
 
-Access metadata programmatically:
+Extra frontmatter keys are accepted and carried along, but nothing in the runtime reads them —
+`pydantic-ai-harness` only acts on `name` and `description`. Treat them as documentation for your
+own tooling, not as configuration.
 
-```python
-skill = toolset.get_skill("my-skill")
-print(skill.metadata.extra["version"])  # "1.0.0"
-print(skill.metadata.extra["category"])  # "data-processing"
-```
+!!! warning "Some frontmatter keys are silently inert"
+    harness accepts, but does not implement, the behavioural fields other Agent Skills clients
+    define — `allowed-tools`, `model`, `hooks`, `disable-model-invocation`, and others. It emits a
+    `UserWarning` naming them at construction. A skill relying on `allowed-tools` to restrict itself
+    is **not** restricted here.
 
 ## Testing Skills
 
 ### Manual Testing
 
 ```python
-from pydantic_ai_skills import SkillsToolset
+from pydantic_ai_skills import SkillsCapability
 
-# Load skills
-toolset = SkillsToolset(directories=["./skills"])
+capability = SkillsCapability("./skills")
 
 # Check discovery
-print(f"Found {len(toolset.skills)} skills")
+print(f"Found {len(capability.skill_names)} skills: {capability.skill_names}")
+
+# Check what each skill ships
+for name, package in capability.packages.items():
+    print(f"{name}: {sorted(package.resources_by_name)} {sorted(package.scripts_by_name)}")
 
 # Get specific skill
 skill = toolset.get_skill("my-skill")
@@ -785,15 +782,13 @@ Test with a real agent:
 ```python
 import asyncio
 from pydantic_ai import Agent
-from pydantic_ai_skills import SkillsToolset
+from pydantic_ai_skills import SkillsCapability
 
 async def test_skill():
-    toolset = SkillsToolset(directories=["./skills"])
-
     agent = Agent(
         model='openai:gpt-5.2',
         instructions="You are a test assistant.",
-        toolsets=[toolset]
+        capabilities=[SkillsCapability("./skills")],
     )
 
     result = await agent.run("Test my-skill with input: test data")
@@ -1269,4 +1264,6 @@ Create focused, single-purpose skills instead
 ## Next Steps
 
 - [Examples](https://github.com/dougtrajano/pydantic-ai-skills/tree/main/examples) - Real-world skill examples
-- [API Reference](api/toolset.md) - API documentation
+- [Core Concepts](concepts.md) - Progressive disclosure, and who does what
+- [SkillsCapability API](api/capability.md) - The entry point
+- [Packages API](api/packages.md) - How bundled resources and scripts are discovered

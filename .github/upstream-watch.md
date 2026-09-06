@@ -4,6 +4,14 @@ Tracks the last `pydantic-ai` / `pydantic-ai-harness` releases reviewed by the w
 upstream-watch routine. Newest entry first. The top entry's tags are the lower bound
 for the next run.
 
+> **Scope changed in v2.** Entries dated before 2026-09 conclude that `pydantic-ai-harness`
+> releases are "tracked but out of scope" because this package did not depend on it. That
+> was true when those entries were written. It is not true now: v2 made
+> `pydantic-ai-harness[skills]` a required runtime dependency, and `SkillsCapability` is
+> built on its public `Skills` class. Harness releases are reviewed as a first-class
+> dependency from 2026-09 onwards — see `.claude/commands/upstream-watch.md` for the
+> surface to check. Past entries are left as the record of what was known at the time.
+
 ## 2026-09-04
 
 - **pydantic/pydantic-ai**: checked through `v2.39.0` (published 2026-09-04). Reviewed

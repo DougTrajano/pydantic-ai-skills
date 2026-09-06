@@ -1,405 +1,177 @@
 # Quick Start
 
-This guide walks you through creating and using agents with skills support, from basic to advanced usage.
+Build an agent that loads a skill and runs the script that skill ships.
 
-## Video Tutorials
+## 1. Install
 
-For a visual walkthrough of the basics, check out the video tutorials:
-
-### Basic Usage
-
-Learn how to create your first skill and initialize an agent with SkillsCapability (preferred):
-
-<video controls style="max-width:100%; border-radius:8px">
-  <source src="../assets/basic_usage.mp4" type="video/mp4">
-</video>
-
-### Advanced Usage
-
-Explore advanced patterns and skill integration techniques:
-
-<video controls style="max-width:100%; border-radius:8px">
-  <source src="../assets/advanced_usage.mp4" type="video/mp4">
-</video>
-
-### Programmatic Skills
-
-Create skills dynamically using Python decorators:
-
-<video controls style="max-width:100%; border-radius:8px">
-  <source src="../assets/programmatic_skills.mp4" type="video/mp4">
-</video>
-
-## Basic Usage
-
-**View the complete example:** [basic_usage.py](https://github.com/dougtrajano/pydantic-ai-skills/blob/main/examples/basic_usage.py)
-
-### 1. Create Your First Skill
-
-Create `./skills/pydanticai-docs/SKILL.md`:
-
-````markdown
----
-name: pydanticai-docs
-description: Quick reference for Pydantic AI framework
----
-
-# Pydantic AI Docs
-
-Quick reference for building agents with Pydantic AI.
-
-## Instructions
-
-For detailed information, fetch the full docs at:
-https://ai.pydantic.dev/llms-full.txt
-
-## Quick Examples
-
-**Basic Agent:**
-
-```python
-from pydantic_ai import Agent
-
-agent = Agent('openai:gpt-5.2')
-result = agent.run_sync('Your question')
-```
-````
-
-**With Tools:**
-
-```python
-@agent.tool
-async def my_tool(ctx: RunContext[str]) -> str:
-    return ctx.deps
+```bash
+pip install pydantic-ai-skills
 ```
 
-### 2. Create an Agent with Skills
+This pulls in `pydantic-ai-harness[skills]`, which does the `SKILL.md` reading. Add
+`pip install "pydantic-ai-skills[git]"` or `[s3]` when you need remote registries.
 
-Use `SkillsCapability` as the default integration path.
+## 2. Write a skill
 
-Create `agent.py`:
+A **library** is a directory whose immediate children are skill packages:
+
+```text
+skills/
+└── arxiv-search/
+    ├── SKILL.md
+    └── scripts/
+        └── search.py
+```
+
+`skills/arxiv-search/SKILL.md`:
+
+```markdown
+---
+name: arxiv-search
+description: Search arXiv for recent papers on a topic. Use when the user asks about published research.
+---
+
+# arXiv Search
+
+To find papers, run `scripts/search.py` with a `query` argument and an optional
+`max_results` (default 5). It returns titles, authors, and abstract snippets.
+
+Summarize the results rather than pasting them verbatim.
+```
+
+The `description` is the only field the model sees before loading the skill, so write it to answer
+"should I load this?" — say what the skill does *and* when to use it.
+
+`skills/arxiv-search/scripts/search.py`:
+
+```python
+"""Search arXiv. Arguments arrive as --key value pairs."""
+
+import argparse
+import json
+import urllib.parse
+import urllib.request
+import xml.etree.ElementTree as ET
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--query', required=True)
+parser.add_argument('--max_results', type=int, default=5)
+args = parser.parse_args()
+
+url = 'http://export.arxiv.org/api/query?' + urllib.parse.urlencode(
+    {'search_query': f'all:{args.query}', 'max_results': args.max_results}
+)
+with urllib.request.urlopen(url, timeout=30) as response:
+    feed = ET.fromstring(response.read())
+
+ns = {'atom': 'http://www.w3.org/2005/Atom'}
+papers = [
+    {
+        'title': ' '.join(entry.findtext('atom:title', '', ns).split()),
+        'summary': ' '.join(entry.findtext('atom:summary', '', ns).split())[:300],
+    }
+    for entry in feed.findall('atom:entry', ns)
+]
+print(json.dumps(papers, indent=2))
+```
+
+## 3. Wire it up
 
 ```python
 from pydantic_ai import Agent
 from pydantic_ai_skills import SkillsCapability
 
-
 agent = Agent(
-    model='openai:gpt-5.2',
-    instructions='You are a helpful assistant.',
-    capabilities=[SkillsCapability(directories=['./skills'])],
+    'anthropic:claude-sonnet-4-6',
+    instructions='You are a helpful research assistant.',
+    capabilities=[SkillsCapability('./skills')],
 )
 
-result = agent.run_sync('How do I create a Pydantic AI agent with tools?')
+result = agent.run_sync('What are the last 3 papers on arXiv about mechanistic interpretability?')
 print(result.output)
 ```
 
-### Alternative: Direct SkillsToolset
+## What happens during that run
 
-Use direct `SkillsToolset` integration when your app is built around `toolsets=[...]`.
-Skill instructions are injected into the agent's context automatically.
+1. The model's prompt carries a catalog entry: `arxiv-search — Search arXiv for recent papers…`.
+   The instructions and the script are not in context.
+2. Recognizing the task, the model calls `load_capability(id='arxiv-search')`. The `SKILL.md` body
+   arrives as instructions.
+3. Following them, it calls
+   `run_skill_script(skill_name='arxiv-search', script_name='scripts/search.py', args={'query': 'mechanistic interpretability', 'max_results': 3})`.
+4. The script runs and its stdout comes back as the tool result.
+5. The model summarizes.
 
-Create `agent.py`:
+Step 2 is Pydantic AI's own [deferred capability](https://ai.pydantic.dev/capabilities/) flow via
+harness; steps 3–4 are what this package adds.
 
-```python
-import asyncio
-from pydantic_ai import Agent
-from pydantic_ai_skills import SkillsToolset
+## Adding a reference file
 
-async def main():
-    # Initialize skills
-    skills_toolset = SkillsToolset(directories=["./skills"])
+Anything readable as UTF-8 text in the skill directory is a resource, named by its path relative to
+the skill:
 
-    # Create agent
-    agent = Agent(
-        model='openai:gpt-5.2',
-        instructions="You are a helpful assistant.",
-        toolsets=[skills_toolset]
-    )
-
-    # Run the agent
-    result = await agent.run("How do I create a Pydantic AI agent with tools?")
-    print(result.output)
-
-if __name__ == "__main__":
-    asyncio.run(main())
+```text
+skills/arxiv-search/
+├── SKILL.md
+├── references/
+│   └── CATEGORIES.md      ← read_skill_resource('arxiv-search', 'references/CATEGORIES.md')
+└── scripts/
+    └── search.py          ← run_skill_script('arxiv-search', 'scripts/search.py')
 ```
 
-### 3. Set Your API Key
-
-```bash
-export OPENAI_API_KEY="your-api-key-here"
-```
-
-### 4. Run the Agent
-
-```bash
-python agent.py
-```
-
-The agent will use the pydanticai-docs skill to answer your question!
-
-## How It Works
-
-When you initialize skills support (via `SkillsCapability` or `SkillsToolset`):
-
-1. **Discovery**: Scans `./skills/` for skill directories with `SKILL.md` files
-2. **Registration**: Registers four tools (`list_skills`, `load_skill`, `read_skill_resource`, `run_skill_script`)
-3. **Instructions**: Skills overview is added automatically by both `SkillsCapability` and `SkillsToolset`.
-4. **Execution**: Agent discovers, loads, and uses skills as needed
-
-## Add a Script-Based Skill
-
-Create a skill that executes Python scripts:
+Name the file in `SKILL.md` so the model knows to reach for it:
 
 ```markdown
-./skills/
-└── calculator/
-    ├── SKILL.md
-    └── scripts/
-        └── calculate.py
+For subject-code filters, consult `references/CATEGORIES.md` before building a query.
 ```
 
-**SKILL.md**:
-
-````markdown
----
-name: calculator
-description: Perform calculations using Python
----
-
-# Calculator Skill
-
-Use the `calculate` script to perform mathematical operations.
-
-## Usage
+## Skills from a repository
 
 ```python
-run_skill_script(
-    skill_name="calculator",
-    script_name="calculate",
-    args=["2 + 2"]
-)
-```
-````
+from pydantic_ai_skills import GitSkillsRegistry, SkillsCapability
 
-**scripts/calculate.py**:
-
-```python
-import sys
-
-if len(sys.argv) < 2:
-    print("Usage: calculate.py <expression>")
-    sys.exit(1)
-
-expression = sys.argv[1]
-try:
-    result = eval(expression)
-    print(f"Result: {result}")
-except Exception as e:
-    print(f"Error: {e}")
-```
-
-## Advanced Examples
-
-### Programmatic Skills
-
-Create skills directly in Python code for dynamic capabilities:
-
-```python
-from pydantic_ai import Agent, RunContext
-from pydantic_ai_skills import Skill, SkillsToolset
-
-# Create a programmatic skill
-my_skill = Skill(
-    name='data-processor',
-    description='Process and analyze data',
-    content='Use this skill for data analysis tasks.'
-)
-
-# Add dynamic resources and scripts
-@my_skill.resource
-def get_schema() -> str:
-    """Get current data schema."""
-    return "Available fields: id, name, value, timestamp"
-
-@my_skill.script
-async def process_data(ctx: RunContext[MyDeps], query: str) -> str:
-    """Process data based on query."""
-    results = await ctx.deps.process(query)
-    return f"Processed {len(results)} records"
-
-# Use with toolset
-skills_toolset = SkillsToolset(skills=[my_skill])
-```
-
-Learn more in the [Programmatic Skills](programmatic-skills.md) guide.
-
-### Multiple Skill Directories
-
-Load skills from multiple locations:
-
-```python
-from pydantic_ai_skills import SkillsToolset
-
-skills_toolset = SkillsToolset(
-    directories=[
-        "./skills/research",    # Domain-specific skills
-        "./skills/data",        # Data processing skills
-        "./shared-skills",      # Shared across projects
+agent = Agent(
+    'anthropic:claude-sonnet-4-6',
+    capabilities=[
+        SkillsCapability(
+            './skills',  # your own
+            registries=[
+                GitSkillsRegistry(
+                    'https://github.com/anthropics/skills',
+                    path='skills',
+                    target_dir='~/.cache/agent-skills',
+                ),
+            ],
+        ),
     ],
-    validate=True,
 )
-
-print(f"Loaded {len(skills_toolset.skills)} skills")
-for name, skill in skills_toolset.skills.items():
-    print(f"- {name}: {skill.metadata.description}")
 ```
 
-### Research Assistant
+Requires the `git` extra. See [Registries](registries.md) for authentication, shallow clones, and
+composing several sources.
 
-An agent specialized for searching academic papers:
+## Choosing which skills to expose
 
 ```python
-import asyncio
-from pydantic_ai import Agent
-from pydantic_ai_skills import SkillsToolset
-
-async def main():
-    skills_toolset = SkillsToolset(directories=["./examples/skills"])
-
-    agent = Agent(
-        model='openai:gpt-5.2',
-        instructions="You are a research assistant specializing in academic papers.",
-        toolsets=[skills_toolset]
-    )
-
-    result = await agent.run(
-        "Find the 5 most recent papers on transformer architectures"
-    )
-    print(result.output)
-
-if __name__ == "__main__":
-    asyncio.run(main())
+SkillsCapability('./skills', include=['arxiv-search'])   # only these
+SkillsCapability('./skills', exclude=['experimental'])   # everything but these
 ```
 
-### Dynamic Skill Refresh
+The two cannot be combined. Unknown names raise at construction, so a typo fails immediately rather
+than silently exposing the wrong catalog.
 
-Reload skills after filesystem changes:
+## Turning off the file tools
 
 ```python
-import asyncio
-from pydantic_ai import Agent
-from pydantic_ai_skills import SkillsToolset
-
-async def main():
-    toolset = SkillsToolset(directories=["./skills"])
-    agent = Agent(
-        model='openai:gpt-5.2',
-        instructions="You are a helpful assistant.",
-        toolsets=[toolset]
-    )
-
-    # Use agent
-    result = await agent.run("What skills are available?")
-    print(result.output)
-
-    # ... User adds new skill to ./skills/ ...
-
-    # To pick up new skills, recreate the toolset and agent
-    toolset = SkillsToolset(directories=["./skills"])
-    agent = Agent(
-        model='openai:gpt-5.2',
-        instructions="You are a helpful assistant.",
-        toolsets=[toolset]
-    )
-
-    print(f"\nReloaded. Now have {len(toolset.skills)} skills")
-
-    result = await agent.run("What skills are available now?")
-    print(result.output)
-
-if __name__ == "__main__":
-    asyncio.run(main())
+SkillsCapability('./skills', scripts=False)   # no run_skill_script
+SkillsCapability('./skills', resources=False) # no read_skill_resource
 ```
 
-> **Note:** To pick up new skills after modifying the filesystem, you'll need to recreate the `SkillsToolset` instance or restart your application.
+With both off, this behaves like harness `Skills` on its own. To keep scripts but move them off the
+host, use a [sandbox executor](sandbox.md) instead of disabling them.
 
-### Programmatic Skill Access
+## Next
 
-Access skills directly without an agent:
-
-```python
-from pydantic_ai_skills import SkillsToolset
-
-toolset = SkillsToolset(directories=["./skills"])
-
-# Get a specific skill
-skill = toolset.get_skill("arxiv-search")
-
-print(f"Skill: {skill.name}")
-print(f"Description: {skill.metadata.description}")
-print(f"Content: {len(skill.content)} characters")
-
-# List scripts
-if skill.scripts:
-    print("\nScripts:")
-    for script in skill.scripts:
-        print(f"  - {script.name} ({script.path})")
-
-# List resources
-if skill.resources:
-    print("\nResources:")
-    for resource in skill.resources:
-        print(f"  - {resource.name}")
-```
-
-### Custom Discovery
-
-Use the discovery function directly:
-
-```python
-from pydantic_ai_skills import discover_skills
-
-# Discover skills without creating a toolset
-skills = discover_skills(
-    directories=["./skills", "./more-skills"],
-    validate=True
-)
-
-# Filter by category
-research_skills = [
-    s for s in skills
-    if s.metadata.extra.get("category") == "research"
-]
-
-print(f"Found {len(research_skills)} research skills")
-```
-
-## Example Skills
-
-The repository includes several example skills in `examples/skills/`:
-
-### ArXiv Search
-
-- **Type**: Script-based skill
-- **Features**: Search academic papers using Python script
-- **Location**: `examples/skills/arxiv-search/`
-
-### Web Research
-
-- **Type**: Instruction-only skill
-- **Features**: Structured research methodology
-- **Location**: `examples/skills/web-research/`
-
-### Pydantic AI Docs
-
-- **Type**: Documentation reference skill
-- **Features**: Quick access to Pydantic AI documentation
-- **Location**: `examples/skills/pydanticai-docs/`
-
-## Next Steps
-
-- [Core Concepts](concepts.md) - Understand the architecture
-- [Creating Skills](creating-skills.md) - Build your own skills
-- [API Reference](api/toolset.md) - Detailed API documentation
+- [Core Concepts](concepts.md) — how the pieces fit and what runs when.
+- [Creating Skills](creating-skills.md) — the full `SKILL.md` format and discovery rules.
+- [Security](security.md) — what running a skill's scripts actually means.

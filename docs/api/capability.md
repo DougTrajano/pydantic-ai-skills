@@ -1,88 +1,75 @@
 # SkillsCapability API Reference
 
-`SkillsCapability` integrates pydantic-ai-skills with Pydantic AI's capabilities API.
+`SkillsCapability` is the entry point. Pass it to an agent's `capabilities=[...]`.
 
-This is the preferred integration path. Use it when your agent uses `capabilities=[...]`.
+It is a composite over
+[`pydantic-ai-harness`](https://github.com/pydantic/pydantic-ai-harness)'s `Skills`: harness
+discovers and validates the skill packages and renders their instructions, while this capability
+syncs remote registries, indexes bundled files, resolves `${SKILL_DIR}`, and adds Python-defined
+skills. See [Core Concepts](../concepts.md#who-does-what) for the division of labour.
 
-::: pydantic_ai_skills.capability.SkillsCapability
+::: pydantic_ai_skills.SkillsCapability
     options:
       show_source: true
       heading_level: 2
       members:
         - __init__
+        - skill_names
+        - packages
+        - apply
+        - visit_and_replace
+        - get_toolset
         - from_spec
         - get_serialization_name
-        - get_toolset
-        - get_instructions
-        - get_description
-        - toolset
 
-## Constructor Parameters
-
-`SkillsCapability.__init__()` accepts the same skill loading options as `SkillsToolset`:
+## Constructor parameters
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `skills` | `list[Skill] \| None` | `None` | Pre-loaded `Skill` objects. |
-| `directories` | `list[str \| Path \| SkillsDirectory] \| None` | `None` | Local skill sources. |
-| `registries` | `list[SkillRegistry] \| None` | `None` | Remote skill sources. |
-| `validate` | `bool` | `True` | Validate discovered skills. |
-| `max_depth` | `int \| None` | `3` | Directory discovery depth. |
-| `id` | `str \| None` | `None` | Optional toolset id. |
-| `instruction_template` | `str \| None` | `None` | Optional custom instruction template. |
-| `exclude_tools` | `set[str] \| list[str] \| None` | `None` | Exclude one or more registered tools. |
-| `auto_reload` | `bool` | `False` | Re-scan local directories before each run. |
+| `directories` | `str \| Path \| Sequence[str \| Path]` | `()` | Skill-library paths. A library is the *parent* of the skill packages. |
+| `registries` | `Sequence[SkillRegistry]` | `()` | Remote sources, synced to local libraries at construction. |
+| `skills` | `Sequence[Skill \| SkillWrapper]` | `()` | Skills defined in Python. |
+| `include` | `Collection[str] \| None` | `None` | Exact names to expose. Cannot be combined with `exclude`. |
+| `exclude` | `Collection[str] \| None` | `None` | Exact names to omit. Cannot be combined with `include`. |
+| `script_executor` | `SkillScriptExecutor \| None` | `None` | Where bundled scripts run. Defaults to local subprocesses. |
+| `exclude_resources` | `Sequence[str] \| None` | `None` | Extra glob patterns excluded from resource discovery. |
+| `resources` | `bool` | `True` | Register `read_skill_resource`. |
+| `scripts` | `bool` | `True` | Register `run_skill_script`. |
+| `require_loaded` | `bool` | `True` | Refuse bundled-file calls for a skill the model has not loaded. |
+| `resolve_skill_dir` | `bool` | `True` | Substitute `${SKILL_DIR}` / `${CLAUDE_SKILL_DIR}` in instructions. |
+| `id` | `str \| None` | `None` | Stable identifier for the capability carrying the file tools. |
 
-## Behavior Notes
+At least one of `directories`, `registries` or `skills` must be given.
 
-- Internally wraps a `SkillsToolset` for behavior parity.
-- `get_toolset()` and `.toolset` expose the wrapped `SkillsToolset` instance.
-- Bundles skill tools and skills instructions through the Capability API.
-- Avoids manual `@agent.instructions` wiring for `get_instructions(ctx)`.
-- Raises `RuntimeError` at instantiation time if capabilities API is unavailable.
+## Tools
 
-## Example
+`SkillsCapability` registers two tools. The catalog and instruction loading are Pydantic AI's own
+`load_capability`, not something this package provides.
 
-```python
-from pydantic_ai import Agent
-from pydantic_ai_skills import SkillsCapability
+| Tool | Signature | Purpose |
+|------|-----------|---------|
+| `read_skill_resource` | `(skill_name, resource_name, args=None)` | Read a bundled text file, or invoke a callable resource. |
+| `run_skill_script` | `(skill_name, script_name, args=None)` | Execute a bundled script through the configured executor. |
 
-agent = Agent(
-    model='openai:gpt-5.2',
-    capabilities=[
-        SkillsCapability(
-            directories=['./skills'],
-            auto_reload=True,
-        )
-    ],
-)
-```
+Both are omitted entirely when no skill ships files of the matching kind.
 
 ## Agent specs
 
-`SkillsCapability` can be used in declarative agent specs loaded with `Agent.from_spec`
-or `Agent.from_file`. Register the class via `custom_capability_types` so the spec loader
-can resolve the `SkillsCapability` key:
+`SkillsCapability` works with Pydantic AI's
+[YAML and JSON agent specs](https://ai.pydantic.dev/core-concepts/agent-spec/):
 
 ```yaml
-# agent.yaml
-model: openai:gpt-5.2
+model: anthropic:claude-sonnet-4-6
 capabilities:
   - SkillsCapability:
       directories: ['./skills']
-      id: skills
-      defer_loading: true
+      include: ['pdf-processing']
+      scripts: false
 ```
 
 ```python
-from pydantic_ai import Agent
-from pydantic_ai_skills import SkillsCapability
-
 agent = Agent.from_file('agent.yaml', custom_capability_types=[SkillsCapability])
 ```
 
-Only serializable arguments are spec-expressible: `directories` (as path strings),
-`validate`, `max_depth`, `id`, `instruction_template`, `exclude_tools`, `auto_reload`,
-`description`, and `defer_loading`. Programmatic `skills`, `registries`, and
-`SkillsDirectory` instances are not representable in a spec — construct the capability in
-Python for those. See [`from_spec`][pydantic_ai_skills.capability.SkillsCapability.from_spec].
+Registries, programmatic skills and custom executors cannot be expressed in a spec — construct the
+capability in Python for those.

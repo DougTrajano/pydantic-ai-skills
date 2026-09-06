@@ -1,7 +1,8 @@
 """Git-backed skill registry using GitPython.
 
-Provides :class:`GitSkillsRegistry` and :class:`GitCloneOptions` for cloning
-a remote Git repository and exposing its skills to :class:`~pydantic_ai_skills.SkillsToolset`.
+Provides :class:`GitSkillsRegistry` and :class:`GitCloneOptions` for cloning a remote Git
+repository and handing its skill library to
+:class:`~pydantic_ai_skills.SkillsCapability`.
 """
 
 from __future__ import annotations
@@ -16,11 +17,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse, urlunparse
 
-from pydantic_ai_skills.directory import discover_skills
-from pydantic_ai_skills.executors import SkillScriptExecutor
 from pydantic_ai_skills.registries._base import SkillRegistry
-from pydantic_ai_skills.registries._copy import copy_skill_directory
-from pydantic_ai_skills.types import Skill
 
 __all__ = ['GitCloneOptions', 'GitSkillsRegistry']
 
@@ -123,42 +120,20 @@ def _sanitize_error_message(exc: Exception, clone_url: str, clean_url: str) -> s
     return str(exc).replace(clone_url, clean_url)
 
 
-def _build_source_url(repo_url: str, path: str, skill_name: str, branch: str | None) -> str:
-    """Construct a browsable URL to the skill directory.
-
-    For GitHub/GitLab, builds a ``/tree/<ref>/`` URL. Falls back to the repo URL.
-
-    Args:
-        repo_url: Repository URL (no token).
-        path: Sub-path inside the repo.
-        skill_name: Skill directory name.
-        branch: Branch/commit ref.
-
-    Returns:
-        Human-readable URL for the skill directory.
-    """
-    ref = branch or 'main'
-    skill_path = f'{path}/{skill_name}'.strip('/')
-    clean_url = repo_url.rstrip('/')
-    if clean_url.endswith('.git'):
-        clean_url = clean_url[:-4]
-    return f'{clean_url}/tree/{ref}/{skill_path}'
-
-
 class GitSkillsRegistry(SkillRegistry):
     """Skills registry backed by a Git repository cloned with GitPython.
 
-    Clones the target repository on the first call to ``install`` or
-    ``search``/``get``, then performs a ``git pull`` on subsequent calls
-    (or a full re-clone if the local copy is corrupted/missing).
+    :meth:`sync` clones the repository on first call and performs a ``git pull`` on
+    subsequent ones (or a full re-clone if the local copy is corrupted or missing), then
+    returns the directory holding the skill packages.
 
     The registry only reads the filesystem after cloning — it never calls any
     hosting platform's REST/GraphQL API — so it works with any git host
     accessible over HTTPS or SSH (GitHub, GitLab, Bitbucket, self-hosted, etc.).
 
-    ``search()`` and ``get()`` return :class:`~pydantic_ai_skills.Skill` objects
-    parsed from ``SKILL.md`` frontmatter + body. Registry-specific metadata
-    (``source_url``, ``version``, ``repo``) is stored in ``skill.metadata``.
+    It does not parse ``SKILL.md``: the directory it produces is handed to
+    :class:`~pydantic_ai_skills.SkillsCapability`, and validating and rendering the
+    packages inside it is `pydantic-ai-harness`'s job.
 
     Args:
         repo_url: Full URL of the Git repository to clone (e.g.
@@ -166,9 +141,9 @@ class GitSkillsRegistry(SkillRegistry):
             accessible over HTTPS or SSH (GitHub, GitLab, Bitbucket,
             self-hosted, etc.).
         target_dir: Local directory where the repository is cloned. Defaults to
-            a temporary directory scoped to the registry instance. The cloned
-            tree persists across ``install`` / ``update`` calls but is **not**
-            cleaned up automatically — callers own the lifecycle.
+            a temporary directory scoped to the registry instance. A directory you
+            pass persists across :meth:`sync` calls and is **not** cleaned up
+            automatically — callers own the lifecycle.
         path: Sub-path inside the repository that contains the skill directories.
             Defaults to the repository root (``""``). For example, pass
             ``"skills"`` when skills live at ``owner/name/skills/<skill>/``.
@@ -183,27 +158,17 @@ class GitSkillsRegistry(SkillRegistry):
             :class:`GitCloneOptions` for the full list of knobs. Any value set
             here is forwarded verbatim to ``git.Repo.clone_from`` /
             ``repo.remotes.origin.pull``.
-        validate: Whether to run ``validate_skill_metadata()`` on every
-            discovered ``SKILL.md`` after installation. Mirrors the homonymous
-            flag on :class:`~pydantic_ai_skills.SkillsDirectory`. Defaults to ``True``.
-        auto_install: When ``True`` (default), ``search`` and ``get`` trigger a
-            clone/pull automatically so the local copy is always up to date.
-            Set to ``False`` to require explicit ``install`` / ``update`` calls,
-            which is preferable in offline or air-gapped environments.
-        script_executor: Executor used for file-based scripts in the discovered
-            skills. Registry skills are the least-trusted source there is, so
-            pass a sandboxing executor here to keep them off the host. When
-            None, scripts run as local subprocesses via
-            :class:`~pydantic_ai_skills.LocalSkillScriptExecutor`.
+        auto_install: When ``True`` (default), :meth:`sync` clones or pulls so the local
+            copy is up to date. Set to ``False`` to read only what is already on disk,
+            which is what offline or air-gapped environments want.
 
     Examples:
-        Basic usage — clone and register all skills:
+        Basic usage — clone a repository and expose all its skills:
 
         ```python
-        from pydantic_ai_skills import SkillsToolset
-        from pydantic_ai_skills.registries.git import GitSkillsRegistry
+        from pydantic_ai_skills import GitSkillsRegistry, SkillsCapability
 
-        toolset = SkillsToolset(
+        capability = SkillsCapability(
             registries=[
                 GitSkillsRegistry(
                     repo_url="https://github.com/anthropics/skills",
@@ -235,7 +200,7 @@ class GitSkillsRegistry(SkillRegistry):
         Filter to only PDF-related skills:
 
         ```python
-        pdf_registry = registry.filtered(lambda skill: "pdf" in skill.name.lower())
+        pdf_registry = registry.filtered(lambda info: "pdf" in info.name)
         ```
 
         Prefix all skill names from this registry:
@@ -254,7 +219,8 @@ class GitSkillsRegistry(SkillRegistry):
         )
         ```
 
-        Offline / air-gapped — pre-clone manually, disable auto-install:
+        Offline / air-gapped — pre-clone manually, disable auto-install so
+        :meth:`sync` never reaches the network:
 
         ```python
         registry = GitSkillsRegistry(
@@ -274,9 +240,7 @@ class GitSkillsRegistry(SkillRegistry):
         token: str | None = None,
         ssh_key_file: str | Path | None = None,
         clone_options: GitCloneOptions | None = None,
-        validate: bool = True,
         auto_install: bool = True,
-        script_executor: SkillScriptExecutor | None = None,
     ) -> None:
         try:
             import git as _git  # noqa: F401
@@ -287,9 +251,7 @@ class GitSkillsRegistry(SkillRegistry):
 
         self._repo_url = repo_url
         self._path = path.strip('/')
-        self._validate = validate
         self._auto_install = auto_install
-        self._script_executor = script_executor
         self._clone_options = clone_options or GitCloneOptions()
         self._tmp_dir: tempfile.TemporaryDirectory[str] | None = None
 
@@ -330,14 +292,8 @@ class GitSkillsRegistry(SkillRegistry):
             # allowing non-interactive first-time connections.
             self._clone_options.env['GIT_SSH_COMMAND'] = f'ssh -i {key_path} -o StrictHostKeyChecking=accept-new'
 
-        # Clean repo URL (no credentials) for display and metadata
+        # Clean repo URL (no credentials) for display and errors
         self._clean_repo_url = _sanitize_url(repo_url)
-
-        # Eagerly clone/pull and cache discovered skills
-        self._cached_skills: list[Skill] = []
-        if self._auto_install:
-            self._ensure_cloned()
-            self._cached_skills = [self._enrich_metadata(s) for s in self._load_skills()]
 
     # ------------------------------------------------------------------
     # repr — never expose the token
@@ -441,7 +397,7 @@ class GitSkillsRegistry(SkillRegistry):
         else:
             self._clone()
 
-    def _get_commit_sha(self) -> str | None:
+    def _revision(self) -> str | None:
         """Return the current HEAD commit SHA, or None on failure."""
         import git
 
@@ -451,170 +407,45 @@ class GitSkillsRegistry(SkillRegistry):
         except (OSError, ValueError, git.exc.InvalidGitRepositoryError, git.exc.GitCommandError):
             return None
 
-    def _load_skills(self) -> list[Skill]:
-        """Discover all skills from the cloned repository path."""
-        skills_root = self._skills_root()
-        if not skills_root.exists():
-            return []
-        return discover_skills(
-            path=skills_root,
-            validate=self._validate,
-            max_depth=2,
-            script_executor=self._script_executor,
-        )
-
-    def _enrich_metadata(self, skill: Skill, *, version: str | None = None) -> Skill:
-        """Inject registry-specific keys into ``skill.metadata``."""
-        from dataclasses import replace
-
-        extra: dict[str, Any] = {
-            'source_url': _build_source_url(
-                self._clean_repo_url,
-                self._path,
-                skill.name,
-                self._clone_options.branch,
-            ),
-            'registry': type(self).__name__,
-            'repo': self._clean_repo_url,
-            'version': version or self._get_commit_sha(),
-        }
-        existing = dict(skill.metadata) if skill.metadata else {}
-        existing.update(extra)
-        return replace(skill, metadata=existing)
-
-    def _refresh(self) -> None:
-        """Pull latest changes and rebuild the skills cache."""
-        self._ensure_cloned()
-        self._cached_skills = [self._enrich_metadata(s) for s in self._load_skills()]
-
-    def _ensure_skills_loaded(self) -> None:
-        """Populate the skills cache if empty, respecting ``auto_install``."""
-        if self._cached_skills:
-            return
-        if self._auto_install:
-            self._ensure_cloned()
-        self._cached_skills = [self._enrich_metadata(s) for s in self._load_skills()]
-
-    # ------------------------------------------------------------------
-    # Synchronous skill access for SkillsToolset integration
-    # ------------------------------------------------------------------
-
-    def get_skills(self) -> list[Skill]:
-        """Return all skills discovered from the cloned repository.
-
-        If ``auto_install=True`` (default), the repository was cloned during
-        ``__init__`` and skills are returned from cache. Otherwise, loads
-        from whatever exists on disk without triggering a clone/pull.
-
-        Returns:
-            List of enriched :class:`~pydantic_ai_skills.Skill` objects.
-        """
-        self._ensure_skills_loaded()
-        return list(self._cached_skills)
-
     # ------------------------------------------------------------------
     # SkillRegistry interface
     # ------------------------------------------------------------------
 
-    async def search(self, query: str, limit: int = 10) -> list[Skill]:
-        """Search available skills by keyword.
+    def sync(self) -> Path:
+        """Clone or pull the repository and return its skill-library directory.
 
-        Matches ``query`` (case-insensitively) against each skill's ``name`` and
-        ``description``. Uses the cached skill list populated during ``__init__``.
-
-        Args:
-            query: Keyword to search for.
-            limit: Maximum number of results.
+        The returned path is ``target_dir`` joined with ``path``, whose immediate children
+        are the skill packages. With ``auto_install=False`` nothing is fetched and
+        whatever is already on disk is returned, which is what an air-gapped deployment
+        wants.
 
         Returns:
-            List of :class:`~pydantic_ai_skills.Skill` objects. Each skill's
-            ``metadata`` dict contains ``"source_url"`` for traceability.
-        """
-        q = query.lower()
-        results: list[Skill] = []
-        for skill in self.get_skills():
-            if q in skill.name.lower() or q in (skill.description or '').lower():
-                results.append(skill)
-                if len(results) >= limit:
-                    break
-        return results
-
-    async def get(self, skill_name: str) -> Skill:
-        """Return the full skill by name.
-
-        Args:
-            skill_name: Exact skill name (with optional prefix).
-
-        Returns:
-            A fully-parsed :class:`~pydantic_ai_skills.Skill` with ``metadata``
-            containing ``"source_url"``.
+            Path to the local skill-library directory.
 
         Raises:
-            KeyError: When no skill with ``skill_name`` exists.
-        """
-        for skill in self.get_skills():
-            if skill.name == skill_name:
-                return skill
-        raise KeyError(f"Skill '{skill_name}' not found in registry {self._clean_repo_url!r}.")
-
-    async def install(self, skill_name: str, target_dir: str | Path) -> Path:
-        """Copy a skill from the cloned repository into ``target_dir``.
-
-        Clones the repository first if the local cache doesn't exist. Validation
-        is handled by ``discover_skills()`` during cache population, so skills
-        in the cache are already validated.
-
-        Args:
-            skill_name: Name of the skill to install.
-            target_dir: Destination directory; a ``skill_name`` subdirectory
-                is created inside it.
-
-        Returns:
-            Path to the installed skill directory (``target_dir/skill_name``).
-
-        Raises:
-            KeyError: When ``skill_name`` is not found in the registry.
-            ValueError: When the destination or source path escapes its expected
-                directory (path traversal protection).
-            RuntimeError: On git or filesystem errors.
-        """
-        # Ensure we have skills loaded (already parsed and validated by discover_skills)
-        self._ensure_skills_loaded()
-
-        # Find skill in cache — its uri points to the source directory
-        src_skill_dir: Path | None = None
-        for skill in self._cached_skills:
-            if skill.name == skill_name and skill.uri:
-                src_skill_dir = Path(skill.uri)
-                break
-
-        if src_skill_dir is None:
-            raise KeyError(f"Skill '{skill_name}' not found in repository {self._clean_repo_url!r}.")
-
-        return copy_skill_directory(src_skill_dir, target_dir, skill_name)
-
-    async def update(self, skill_name: str, target_dir: str | Path) -> Path:
-        """Pull the latest changes and re-copy the skill to ``target_dir``.
-
-        Performs a ``git pull`` on the cached clone before re-installing.
-        Falls back to a fresh ``install`` if the skill is not yet installed.
-
-        Args:
-            skill_name: Name of the skill to update.
-            target_dir: Directory where the skill was previously installed.
-
-        Returns:
-            Path to the updated skill directory.
-
-        Raises:
-            KeyError: When ``skill_name`` is not found after the pull.
             RuntimeError: On git or network errors.
+            ValueError: When the configured ``path`` does not exist in the clone -- the
+                usual cause is a ``path`` that does not match the repository's layout.
         """
-        dest = Path(target_dir).expanduser().resolve() / skill_name
-        if not dest.exists():
-            return await self.install(skill_name, target_dir)
+        if self._auto_install:
+            self._ensure_cloned()
 
-        # Pull latest and refresh cache before reinstalling
-        self._ensure_cloned()
-        self._cached_skills = [self._enrich_metadata(s) for s in self._load_skills()]
-        return await self.install(skill_name, target_dir)
+        skills_root = self._skills_root()
+        if not skills_root.is_dir():
+            # Distinguish the two causes: a clone that never happened, versus a clone that
+            # did but has no such sub-path. Reporting the first for both would send a
+            # caller with a mistyped `path` looking for a network problem.
+            if not self._target_dir.is_dir():
+                detail = 'the repository has not been cloned yet and auto_install is disabled'
+            else:
+                detail = f'path={self._path!r} does not exist in the repository'
+            raise ValueError(f'No skill library at {skills_root} for {self._clean_repo_url!r}: {detail}.')
+        return skills_root
+
+    def revision(self) -> str | None:
+        """Return the commit SHA the local clone is on, or None if it is not cloned.
+
+        Useful for recording exactly which version of a remote skill library an agent ran
+        with, since :meth:`sync` otherwise tracks a moving branch.
+        """
+        return self._revision()

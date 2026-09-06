@@ -1,527 +1,218 @@
 # Advanced Features
 
-Advanced patterns and features for sophisticated skill systems.
+## Selecting which skills to expose
 
-**View the complete example:** [advanced_usage.py](https://github.com/dougtrajano/pydantic-ai-skills/blob/main/examples/advanced_usage.py)
-
-## Video Tutorial
-
-Watch the Advanced Usage Tutorial for in-depth demonstrations of advanced skill integration patterns and decorator techniques:
-
-<video controls style="max-width:100%; border-radius:8px">
-  <source src="../assets/advanced_usage.mp4" type="video/mp4">
-</video>
-
-## Selecting Which Skills to Expose
-
-One skill library often serves several agents. `include` and `exclude` scope the catalog per agent
-without duplicating the library on disk.
+A skill directory grows. Not every agent should see everything in it.
 
 ```python
 from pydantic_ai_skills import SkillsCapability
 
-research = SkillsCapability(directories=['./skills'], include=['arxiv-search', 'web-research'])
-support = SkillsCapability(directories=['./skills'], exclude=['arxiv-search'])
+# Only these
+SkillsCapability('./skills', include=['pdf-processing', 'data-analysis'])
+
+# Everything except these
+SkillsCapability('./skills', exclude=['experimental', 'internal-debug'])
+
+# Nothing
+SkillsCapability('./skills', include=[])
 ```
 
 | Configuration | Skills in the catalog |
-| --- | --- |
-| Neither option | All discovered skills |
+|---|---|
+| Neither | All discovered skills |
 | `include=['a', 'b']` | Only `a` and `b` |
 | `include=[]` | No skills |
 | `exclude=['a', 'b']` | All except `a` and `b` |
-| `exclude=[]` | All discovered skills |
 
-Behavior:
+The two cannot be combined, and a name matching nothing raises at construction — so a typo fails
+where you can see it, rather than silently narrowing the catalog.
 
-- `include` and `exclude` cannot be combined; doing so raises `ValueError`.
-- A name matching no discovered skill raises `ValueError` at construction, so typos surface early.
-- Selection applies to every source — programmatic skills, directories, and registries.
-- `reload()` and `auto_reload` re-apply the selection.
-- A bare string (`include='arxiv-search'`) raises `TypeError` rather than matching per character.
+Selection covers every source: `include=['my-python-skill']` works for a skill passed via `skills=`
+just as it does for one on disk.
 
-Both options work on `SkillsToolset` as well:
+!!! warning "This is catalog exposure, not access control"
+    `exclude` keeps a skill out of the prompt. It is not a filesystem permission and not a security
+    boundary — the files are still on disk and still readable by anything else in the process. See
+    [Security](security.md).
+
+### Selection by source
+
+To give different agents different subsets of the *same* registry, filter the registry rather than
+the capability:
 
 ```python
-from pydantic_ai_skills import SkillsToolset
+from pydantic_ai_skills import GitSkillsRegistry, SkillsCapability
 
-toolset = SkillsToolset(directories=['./skills'], exclude=['web-research'])
+source = GitSkillsRegistry('https://github.com/anthropics/skills', path='skills')
+
+docs_agent = SkillsCapability(registries=[source.filtered(lambda info: 'doc' in info.description)])
+data_agent = SkillsCapability(registries=[source.filtered(lambda info: 'data' in info.name)])
 ```
 
-And in declarative agent specs:
+See [Registries](registries.md#composition) for the full composition story.
 
-```yaml
-capabilities:
-  - SkillsCapability:
-      directories: ['./skills']
-      include:
-        - arxiv-search
-```
+## Picking up changes to skills
 
-> Selection controls what the model sees in the catalog. It is not a filesystem permission or an
-> access-control boundary — see [Security](security.md). To restrict what loaded skills can *do*,
-> use `exclude_tools` (for example `exclude_tools=['run_skill_script']`).
+Discovery is a snapshot taken at construction. There is no `reload()`, and no `auto_reload` — v1 had
+both, and neither was coherent: an agent's instructions and tools are fixed for a run.
 
-## Hot-Reload (Runtime Skill Discovery)
-
-`SkillsCapability` is the preferred integration path. This section focuses on `SkillsToolset` because hot-reload controls (`reload()`, `auto_reload`) are configured on the underlying toolset.
-
-Long-lived server processes (FastAPI, Starlette, etc.) may need to pick up skill edits — made by the agent itself, a git-sync job, or a human — without restarting. `SkillsToolset` supports this via `reload()` and the `auto_reload` parameter.
-
-> **Note:** `reload()` always preserves programmatic skills registered via `skills=[]` or `@toolset.skill`. Only filesystem/registry skills are re-discovered.
-
-### Auto-reload (recommended for most cases)
-
-Pass `auto_reload=True` to re-scan directories automatically before every agent run:
+Rebuild instead:
 
 ```python
 from pydantic_ai import Agent
-from pydantic_ai_skills import SkillsToolset
+from pydantic_ai_skills import SkillsCapability
 
-skills_toolset = SkillsToolset(
-    directories=["./workspace/skills"],
-    auto_reload=True,
-)
 
-agent = Agent(
-    model="openai:gpt-4o",
-    toolsets=[skills_toolset],
-)
-# Every agent.run() call sees the current state of ./workspace/skills/
+def build_agent() -> Agent:
+    return Agent('anthropic:claude-sonnet-4-6', capabilities=[SkillsCapability('./skills')])
+
+
+agent = build_agent()
 ```
 
-### Manual reload (for fine-grained control)
-
-Call `toolset.reload()` yourself — e.g. after a git-sync in a lifespan handler:
+For a long-lived server, rebuild on a redeploy, or on a schedule, and swap the reference:
 
 ```python
+import asyncio
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
-from pydantic_ai_skills import SkillsToolset
 
-skills_toolset = SkillsToolset(directories=["./workspace/skills"])
+from fastapi import FastAPI
+
+state: dict[str, Agent] = {}
+
+
+async def refresh_hourly() -> None:
+    while True:
+        await asyncio.sleep(3600)
+        state['agent'] = build_agent()  # registries re-sync here
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await git_sync()         # sync skills from remote repo
-    skills_toolset.reload()  # pick up the freshly synced files
+    state['agent'] = build_agent()
+    task = asyncio.create_task(refresh_hourly())
     yield
+    task.cancel()
+
 
 app = FastAPI(lifespan=lifespan)
 ```
 
-### Reloading registry skills
+Rebuilding also re-syncs every registry, which is how you pick up new skills published upstream.
+Note that a registry's `sync()` does real work — a `git pull`, an S3 listing — so rebuild on a
+schedule you would be happy to see in your egress logs.
 
-By default, `reload()` preserves already-loaded registry skills from the initial cache without making any network or git calls. To re-fetch fresh skills from registries, pass `include_registries=True`:
+## Skills defined in Python
 
-```python
-skills_toolset.reload(include_registries=True)
-```
-
-### Priority after reload
-
-The priority order is identical to the initial load:
-
-1. **Programmatic skills** (`skills=[]` param, `@toolset.skill` decorator) — always highest
-2. **Directory skills** — fresh filesystem scan
-3. **Registry skills** — always re-applied from cache; pass `include_registries=True` to refresh that cache from registries
-
----
-
-## Skill Decorator Pattern
-
-### @toolset.skill() Decorator
-
-The `@toolset.skill()` decorator enables defining skills directly on a `SkillsToolset` instance. This approach is ideal when:
-
-- Skills are tightly coupled with your agent initialization
-- You want to define skills inline without separate files
-- Skills depend on runtime dependencies available in your agent
-
-### Basic Example
+The `@skill` decorator builds a skill from a function returning its instructions:
 
 ```python
 from pydantic_ai import Agent, RunContext
-from pydantic_ai_skills import SkillsToolset
+from pydantic_ai_skills import SkillsCapability, skill
 
-skills = SkillsToolset()
 
-@skills.skill()
-def data_analyzer() -> str:
-    """Analyze data from various sources."""
+@skill(metadata={'version': '1.0.0'}, license='MIT')
+def analytics() -> str:
+    """Analyze application data and generate reports."""
     return """
-# Data Analysis Skill
+    Use this skill for questions about usage and revenue.
+    Read the `schema` resource before writing a query, then run `report`.
+    """
 
-Use this skill to analyze datasets, generate statistical insights, and create visualizations.
 
-## Instructions
+@analytics.resource
+async def schema(ctx: RunContext[AppDeps]) -> str:
+    """The current warehouse schema."""
+    return await ctx.deps.database.get_schema()
 
-1. Load the skill with `load_skill`
-2. Access available resources with `read_skill_resource`
-3. Execute analysis scripts with `run_skill_script`
 
-## Key Capabilities
+@analytics.script
+async def report(ctx: RunContext[AppDeps], period: str = 'week') -> str:
+    """Generate a usage report for a period."""
+    return await ctx.deps.database.generate_report(period)
 
-- Statistical summaries and distributions
-- Correlation and trend analysis
-- Data transformation and aggregation
-- Report generation
-"""
-
-agent = Agent(
-    model='openai:gpt-4o',
-    toolsets=[skills]
-)
-
-result = agent.run_sync('Analyze the quarterly sales data')
-```
-
-### Decorator Parameters
-
-```python
-@toolset.skill(
-    name='custom-name',           # Override function name (default: normalize_skill_name(func_name))
-    description='...',             # Override docstring-based description
-    license='Apache-2.0',          # License information
-    compatibility='Python 3.10+',  # Environment requirements
-    metadata={'version': '1.0'},   # Custom metadata fields
-    resources=[...],               # Initial resources
-    scripts=[...]                  # Initial scripts
-)
-def my_skill() -> str:
-    return "..."
-```
-
-#### Parameters Explained
-
-| Parameter | Type | Required | Notes |
-|-----------|------|----------|-------|
-| `name` | `str` | No | Defaults to function name with underscores converted to hyphens. Must match pattern `^[a-z0-9]+(-[a-z0-9]+)*$` and be ≤64 chars. |
-| `description` | `str` | No | Extracted from function docstring if not provided. Max 1024 characters. |
-| `license` | `str` | No | License identifier (e.g., "Apache-2.0", "MIT"). Included in skill metadata. |
-| `compatibility` | `str` | No | Environment/dependency requirements (e.g., "Requires git, docker, internet access"). Max 500 chars. |
-| `metadata` | `dict` | No | Custom key-value pairs preserved in skill metadata. Useful for versioning or custom properties. |
-| `resources` | `list[SkillResource]` | No | Initial resources attached to the skill. Can be extended with `@skill.resource`. |
-| `scripts` | `list[SkillScript]` | No | Initial scripts attached to the skill. Can be extended with `@skill.script`. |
-
-### Adding Resources and Scripts
-
-The decorator returns a `SkillWrapper` that allows further decorating resources and scripts:
-
-```python
-@skills.skill()
-def data_analyzer() -> str:
-    return "Analyze data from various sources..."
-
-# Add dynamic resources
-@data_analyzer.resource
-def get_schema() -> str:
-    """Get the data schema."""
-    return "## Schema\n\nColumns: id, name, value, timestamp"
-
-@data_analyzer.resource
-async def get_available_tables(ctx: RunContext[MyDeps]) -> str:
-    """Get available database tables (with runtime context)."""
-    tables = await ctx.deps.database.list_tables()
-    return f"Available tables:\n" + "\n".join(tables)
-
-# Add executable scripts
-@data_analyzer.script
-async def analyze_query(ctx: RunContext[MyDeps], query: str) -> str:
-    """Execute an analysis query."""
-    result = await ctx.deps.database.execute(query)
-    return str(result)
-```
-
-### How Skill Names Are Derived
-
-The decorator automatically converts function names to valid skill names:
-
-```python
-@skills.skill()
-def my_data_tool() -> str:
-    # Skill name: "my-data-tool"
-    return "..."
-
-@skills.skill()
-def MySkill() -> str:
-    # Skill name: "myskill" (lowercased, hyphens added between camelCase)
-    return "..."
-
-@skills.skill(name='custom-name')
-def function_with_explicit_name() -> str:
-    # Skill name: "custom-name" (uses provided name)
-    return "..."
-```
-
-## Custom Instruction Templates
-
-### Customizing Agent Instructions
-
-By default, `SkillsToolset` injects a standard instruction template that explains the progressive disclosure pattern. You can customize this for your specific use case:
-
-```python
-from pydantic_ai import Agent
-from pydantic_ai_skills import SkillsToolset
-
-custom_template = """\
-You have access to specialized skills for domain-specific knowledge.
-
-## How to Use Skills
-
-Each skill contains:
-- **Instructions**: Guidelines on when and how to use the skill
-- **Resources**: Reference documentation and data
-- **Scripts**: Executable functions for specific tasks
-
-Always follow this workflow:
-1. Call `list_skills` to see available skills
-2. Call `load_skill` to understand the skill's capabilities
-3. Use `read_skill_resource` for specific reference material
-4. Execute scripts with `run_skill_script` when needed
-
-## Available Skills
-
-{skills_list}
-
-## Tips
-
-- Load skills only when relevant to the user's request
-- Consult resources before calling scripts
-- Check skill descriptions to understand their scope
-"""
-
-toolset = SkillsToolset(
-    directories=['./skills'],
-    instruction_template=custom_template
-)
 
 agent = Agent(
-    model='openai:gpt-4o',
-    toolsets=[toolset]
+    'openai:gpt-5.2',
+    deps_type=AppDeps,
+    capabilities=[SkillsCapability(skills=[analytics])],
 )
 ```
 
-### Template Variables
+The name comes from the function (`analytics`), the description from its docstring. Both can be
+overridden with `name=` and `description=`.
 
-Your custom template **must include** the `{skills_list}` placeholder, which is automatically replaced with formatted skill information:
+Because these are ordinary Python functions, they get dependency injection, type checking, and
+direct unit testing — see [Programmatic Skills](programmatic-skills.md).
 
-```
-{skills_list}  # Replaced with XML-formatted list of available skills
-```
+## Dependency injection via `RunContext`
 
-The skills list includes:
-- Skill name, description, and URI
-- List of available resources
-- List of available scripts
-- Full skill instructions
-
-### Default Template
-
-If you don't provide a custom template, the default is used:
+Any resource or script on a programmatic skill can take `RunContext` as its first parameter and
+reach the agent's dependencies:
 
 ```python
-DEFAULT_INSTRUCTION_TEMPLATE = """\
-Here is a list of skills that contain domain specific knowledge on a variety of topics.
-Each skill comes with a description of the topic and instructions on how to use it.
-When a user asks you to perform a task that falls within the domain of a skill, use the `load_skill` tool to acquire the full instructions.
+from dataclasses import dataclass
 
-<available_skills>
-{skills_list}
-</available_skills>
+from pydantic_ai import Agent, RunContext
+from pydantic_ai_skills import Skill, SkillsCapability
 
-Use progressive disclosure: load only what you need, when you need it:
 
-- First, use `load_skill` tool to read the full skill instructions
-- To read additional resources within a skill, use `read_skill_resource` tool
-- To execute skill scripts, use `run_skill_script` tool
-"""
-```
+@dataclass
+class AppDeps:
+    database: DatabaseConn
+    tenant_id: str
 
-## Dependency Injection via RunContext
 
-### Using RunContext in Resources and Scripts
+tenant_data = Skill(
+    name='tenant-data',
+    description='Query the current tenant\'s records.',
+    content='Read `summary` first, then run `query` with a SQL string.',
+)
 
-Both `@skill.resource` and `@skill.script` decorated functions can optionally accept a `RunContext[DepsType]` parameter to access dependencies. The toolset automatically detects this by inspecting the function signature.
 
-### Example: Database Access
+@tenant_data.resource
+async def summary(ctx: RunContext[AppDeps]) -> str:
+    """A summary of the tenant's data."""
+    return await ctx.deps.database.summarize(ctx.deps.tenant_id)
 
-```python
-from typing import TypedDict
-from pydantic_ai import RunContext
-from pydantic_ai_skills import SkillsToolset
 
-class MyDeps(TypedDict):
-    """Dependencies available in RunContext."""
-    database: Database
-    cache: Cache
-    logger: Logger
+@tenant_data.script
+async def query(ctx: RunContext[AppDeps], sql: str) -> str:
+    """Run a read-only query scoped to the tenant."""
+    return str(await ctx.deps.database.execute(sql, tenant=ctx.deps.tenant_id))
 
-skills = SkillsToolset()
-
-@skills.skill()
-def database_skill() -> str:
-    return "Query and analyze database content"
-
-# Resource with context - accesses the database dependency
-@database_skill.resource
-async def get_current_schema(ctx: RunContext[MyDeps]) -> str:
-    """Fetch current schema from the database."""
-    schema = await ctx.deps.database.get_schema()
-    return f"## Current Schema\n{schema}"
-
-# Script with context - executes queries with database access
-@database_skill.script
-async def execute_query(
-    ctx: RunContext[MyDeps],
-    query: str,
-    limit: int = 100
-) -> str:
-    """Execute a SQL query against the database."""
-    result = await ctx.deps.database.query(query, limit=limit)
-
-    # Log the execution
-    await ctx.deps.logger.info(f"Executed query: {query[:50]}...")
-
-    # Cache the result
-    cache_key = f"query:{query}"
-    await ctx.deps.cache.set(cache_key, result, ttl=3600)
-
-    return str(result)
-```
-
-### Type-Safe Dependency Access
-
-The `RunContext` is generic over your dependency type, enabling type-safe access:
-
-```python
-# When passing dependencies to your agent
-from pydantic_ai import Agent
 
 agent = Agent(
-    model='openai:gpt-4o',
-    deps=MyDeps(
-        database=my_database,
-        cache=my_cache,
-        logger=my_logger
-    ),
-    toolsets=[skills]
+    'openai:gpt-5.2',
+    deps_type=AppDeps,
+    capabilities=[SkillsCapability(skills=[tenant_data])],
 )
-
-result = agent.run_sync('Query the user database', deps=agent.deps)
+result = await agent.run('How many records do we have?', deps=AppDeps(db, tenant_id='acme'))
 ```
 
-### Signature Detection
+Scoping by `ctx.deps` is the right way to keep one tenant's data away from another's — far better
+than hoping the model respects an instruction saying so.
 
-The decorator automatically determines if a function takes context:
+File-based scripts do not receive `RunContext`; they run as subprocesses. To pass request-scoped
+values to them, see [environment variables](creating-skills.md#script-environment-variables).
 
-```python
-# ✓ Automatically detected as needing context
-@skill.resource
-async def needs_context(ctx: RunContext[MyDeps]) -> str:
-    return str(ctx.deps)
+## Custom script executors
 
-# ✓ Correctly detected as not needing context
-@skill.resource
-def static_resource() -> str:
-    return "Static content"
-
-# ✓ Works with sync functions too
-@skill.script
-def sync_script(ctx: RunContext[MyDeps]) -> str:
-    return str(ctx.deps)
-```
-
-## Custom Script Executors
-
-### Debugging File-Based Scripts Locally
-
-File-based scripts discovered from skill directories run in a subprocess by default (`LocalSkillScriptExecutor`). For local development and debugging, you can switch to an in-process executor that uses `runpy.run_path` to execute script files directly in the same process. This allows you to set breakpoints and inspect variables with your IDE's debugger.
-
-```bash
-python -m examples.debug_local_logging
-```
-
-The example above:
-
-1. Creates a demo skill under `examples/tmp/debug-logging-skill`
-2. Uses `CallableSkillScriptExecutor` to run script files in-process with `runpy.run_path`
-3. Captures stdout/stderr and writes execution traces to `examples/tmp/debug-local-executor.log`
-
-Minimal pattern:
-
-```python
-from pydantic_ai_skills import CallableSkillScriptExecutor, SkillsDirectory
-
-async def in_process_executor(*, script, args=None):
-    # Development-only path for breakpoint debugging.
-    ...
-
-executor = CallableSkillScriptExecutor(func=in_process_executor)
-skills_dir = SkillsDirectory(path='./skills', script_executor=executor)
-```
-
-Important caveats:
-
-- **Not for production**: Running untrusted scripts in-process can be dangerous. Use this pattern only for local development with trusted code.
-- **Limited isolation**: In-process execution means scripts have access to the same memory and environment as your agent. Be cautious of side effects and security implications.
-- **Performance**: In-process execution may be faster for small scripts, but can lead to memory leaks or instability if the script misbehaves. Always test thoroughly when using custom executors.
-
-### Creating Custom Executors
-
-For advanced use cases, you can provide custom script executors that handle script execution differently than the built-in local executor. This enables:
-
-- Remote execution (cloud functions, etc.)
-- Sandboxing or containerized execution
-- Custom security policies
-- Integration with external systems
-
-### Executor Interface
-
-Custom executors implement the `SkillScriptExecutor` protocol:
-
-```python
-from typing import Any, Protocol, runtime_checkable
-
-from pydantic_ai_skills import SkillScript
-
-
-@runtime_checkable
-class SkillScriptExecutor(Protocol):
-    async def run(
-        self,
-        script: SkillScript,
-        args: dict[str, Any] | None = None,
-        ctx: Any | None = None,
-    ) -> Any:
-        ...
-```
-
-The protocol is **structural**: any object exposing a matching `run` coroutine satisfies it, so you never need to subclass or import anything. `isinstance(obj, SkillScriptExecutor)` works at runtime if you want to assert conformance.
-
-Three things to know about `run`:
-
-- `script.uri` holds the path to the script file. `script.name` is relative to the skill folder (for example `scripts/run.py`).
-- `args` is a plain dict. The built-in marshalling rules — `True` emits a bare `--flag`, `False`/`None` omit it, lists repeat the flag — live in `LocalSkillScriptExecutor._build_args`; reuse it rather than reimplementing it.
-- `ctx` is the agent's `RunContext`, or `None`. It is optional; accept it and ignore it if you have no use for it.
-
-Executors used with the `run_skill_script` tool should return a string.
-
-### Example: Remote Execution
+`run_skill_script` routes every file-based script through a
+[`SkillScriptExecutor`][pydantic_ai_skills.SkillScriptExecutor]. The protocol is structural — one
+`async def run(script, args=None, ctx=None)` — so anything matching it works:
 
 ```python
 from typing import Any
 
-import httpx
-
-from pydantic_ai_skills import SkillScript, SkillsDirectory
+from pydantic_ai_skills import SkillScript, SkillsCapability
 
 
 class RemoteExecutor:
-    """Execute scripts on a remote server."""
+    """Run scripts on a worker instead of the agent host."""
 
-    def __init__(self, server_url: str):
-        self.server_url = server_url
+    def __init__(self, endpoint: str) -> None:
+        self.endpoint = endpoint
 
     async def run(
         self,
@@ -531,145 +222,166 @@ class RemoteExecutor:
     ) -> str:
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                f"{self.server_url}/execute",
-                json={"script_name": script.name, "args": args or {}},
+                self.endpoint,
+                json={'uri': script.uri, 'args': args or {}},
+                timeout=60,
             )
             return response.text
 
 
-# Executors are attached to a skill source, not to individual scripts.
-directory = SkillsDirectory(
-    path="./skills",
-    script_executor=RemoteExecutor("https://api.example.com"),
+capability = SkillsCapability('./skills', script_executor=RemoteExecutor('https://worker/run'))
+```
+
+One executor covers every skill the capability exposes, wherever it came from. In v1 the executor
+lived on each source, which made it easy to add a registry and quietly fall back to host execution.
+
+Two executors ship with the package for keeping untrusted scripts off the host — see
+[Sandboxing](sandbox.md). `CallableSkillScriptExecutor` wraps a plain callable, which is useful for
+tests:
+
+```python
+from pydantic_ai_skills import CallableSkillScriptExecutor
+
+recorded = []
+
+
+def fake_run(script, args=None, ctx=None):
+    recorded.append((script.name, args))
+    return 'stubbed output'
+
+
+capability = SkillsCapability('./skills', script_executor=CallableSkillScriptExecutor(fake_run))
+```
+
+## Turning off the file tools
+
+```python
+SkillsCapability('./skills', scripts=False)                     # no run_skill_script
+SkillsCapability('./skills', resources=False)                   # no read_skill_resource
+SkillsCapability('./skills', resources=False, scripts=False)    # neither
+```
+
+With both off this behaves like harness `Skills` on its own — at which point, use harness directly.
+
+Prefer a [sandbox executor](sandbox.md) over `scripts=False` when the problem is trust rather than
+capability: a skill whose instructions describe running a script it cannot run tends to make the
+model improvise.
+
+Both tools are also omitted automatically when no skill ships files of that kind, so a capability
+over instructions-only skills adds nothing to the model's tool list.
+
+## Gating file access on the loaded skill
+
+By default the file tools refuse a skill the model has not loaded:
+
+```text
+Skill 'pdf-processing' is not loaded. Call load_capability with id='pdf-processing' first,
+then read its files.
+```
+
+That keeps bundled files behind the same boundary as the skill's instructions. Turn it off when a
+skill's files should be reachable regardless:
+
+```python
+SkillsCapability('./skills', require_loaded=False)
+```
+
+This reads `RunContext.active_capability_ids`, which is refreshed from message history before each
+request — so a skill loaded in an earlier step is visible, and only a call issued in the *same* step
+as the load is refused, with a retry the model can act on.
+
+## Listing a skill's bundled files
+
+The file tools key on skill-relative paths (`scripts/aggregate.py`), while a `SKILL.md` names its
+own files however its author wrote the prose. `SkillsCapability` appends the real names to the
+skill's instructions so the model reads them instead of guessing:
+
+```python
+SkillsCapability('./skills')                              # inventory appended (the default)
+SkillsCapability('./skills', list_bundled_files=False)    # instructions as harness rendered them
+```
+
+The listing rides on the instructions, so it stays behind `load_capability` and costs nothing for
+skills the model never loads. Only kinds whose tool is registered are listed — `scripts=False`
+drops the script block — and each kind is truncated after 50 entries.
+
+Independently of the listing, both tools accept an unambiguous shorthand: `aggregate` and
+`aggregate.py` both reach `scripts/aggregate.py`. When two files share a name, neither is chosen;
+the retry names both and asks for the full path. See
+[Bundled-file inventory](concepts.md#bundled-file-inventory).
+
+## Resolving `${SKILL_DIR}`
+
+Published skill packages often write paths as `${SKILL_DIR}/scripts/run.py` or
+`${CLAUDE_SKILL_DIR}/...`. harness passes the placeholder through untouched. `SkillsCapability`
+substitutes the skill's real directory:
+
+```python
+SkillsCapability('./skills')                            # resolved (the default)
+SkillsCapability('./skills', resolve_skill_dir=False)   # exactly what harness rendered
+```
+
+Turn it off when you want byte-identical instructions to a plain `Skills` setup, or when the literal
+placeholder means something to your own tooling.
+
+## Skill metadata
+
+Extra `SKILL.md` frontmatter keys are accepted, but nothing in the runtime reads them — harness acts
+only on `name` and `description`.
+
+```yaml
+---
+name: pdf-processing
+description: Fill and extract PDF forms.
+version: 2.1.0
+owner: platform-team
+---
+```
+
+Treat those as documentation for your own tooling. In particular, the behavioural fields other Agent
+Skills clients define — `allowed-tools`, `model`, `hooks`, `disable-model-invocation` and friends —
+are accepted and **inert**; harness warns about them at construction. A skill relying on
+`allowed-tools` to restrict itself is not restricted here.
+
+For metadata the runtime *does* act on, use [programmatic skills](programmatic-skills.md), where
+`metadata=` is yours to read back.
+
+## Mixed sources
+
+Local directories, registries, and Python-defined skills all land in one catalog:
+
+```python
+from pydantic_ai_skills import GitSkillsRegistry, S3SkillsRegistry, SkillsCapability, skill
+
+
+@skill
+def runtime_config() -> str:
+    """Read the deployment's runtime configuration."""
+    return 'Consult the deployment config before answering environment questions.'
+
+
+capability = SkillsCapability(
+    './skills',                                    # committed alongside the app
+    registries=[
+        GitSkillsRegistry(                         # published upstream
+            'https://github.com/anthropics/skills',
+            path='skills',
+        ).prefixed('anthropic-'),
+        S3SkillsRegistry(bucket='acme-skills'),    # distributed internally
+    ],
+    skills=[runtime_config],                       # defined in Python
 )
 ```
 
-### Example: Sandboxed Execution
+Names must be unique across all of them, since each becomes a capability id. A programmatic skill
+shadowing a directory-backed one wins with a warning; two registries colliding are resolved by
+`CombinedRegistry` or by prefixing, as above.
 
-For running untrusted skill scripts in an isolated environment, see [Sandboxing](sandbox.md), which walks through working executors built on OpenSandbox and LocalSandbox.
+## See also
 
-## Metadata Management
-
-### Custom Metadata Fields
-
-You can attach arbitrary metadata to skills for custom use cases:
-
-```python
-@skills.skill(
-    metadata={
-        'version': '1.0.0',
-        'author': 'data-team',
-        'tags': ['analytics', 'database', 'reporting'],
-        'supported_formats': ['csv', 'json', 'parquet'],
-        'min_pydantic_ai_version': '0.1.0'
-    }
-)
-def advanced_analytics() -> str:
-    return "Advanced analytics skill..."
-```
-
-### Accessing Metadata
-
-Metadata is preserved in the `Skill` object and accessible via:
-
-```python
-skill = toolset.get_skill('advanced-analytics')
-
-# Access via skill attributes
-if hasattr(skill, 'metadata') and skill.metadata:
-    version = skill.metadata.get('version', '0.0.0')
-    tags = skill.metadata.get('tags', [])
-```
-
-### Recommended Metadata Fields
-
-Common metadata patterns:
-
-| Field | Type | Purpose |
-|-------|------|---------|
-| `version` | `str` | Semantic version for the skill |
-| `author` | `str` | Team or person who maintains the skill |
-| `tags` | `list[str]` | Categorization tags for discovery |
-| `requires` | `dict[str, str]` | External dependencies and versions |
-| `deprecated` | `bool` | Mark skills as deprecated |
-| `deprecation_message` | `str` | Explanation and alternative if deprecated |
-| `breaking_changes` | `str` | Document breaking changes in versions |
-| `supported_models` | `list[str]` | Models this skill works best with |
-
-## Mixed Skill Scenarios
-
-### Combining Programmatic and File-Based Skills
-
-The real power comes when combining both approaches:
-
-```python
-from pydantic_ai import Agent
-from pydantic_ai_skills import SkillsToolset, Skill
-
-# Create programmatic skills
-skills = SkillsToolset(
-    directories=['./skills', './custom-skills'],  # File-based skills
-    max_depth=3  # Limit discovery depth
-)
-
-# Add decorator-defined skills to the same toolset
-@skills.skill()
-def runtime_analyzer() -> str:
-    return "Analyze runtime metrics and performance data"
-
-@runtime_analyzer.resource
-async def get_metrics(ctx: RunContext[MyDeps]) -> str:
-    metrics = await ctx.deps.monitoring.get_current()
-    return f"Current metrics:\n{metrics}"
-
-# Now agent has access to both:
-# - File-based skills from ./skills and ./custom-skills
-# - Programmatically defined runtime_analyzer skill
-agent = Agent(
-    model='openai:gpt-4o',
-    toolsets=[skills]
-)
-```
-
-### Skill Precedence and Conflicts
-
-When multiple skills have the same name:
-
-1. **Programmatic skills** (defined via `@decorator`) take precedence
-2. **File-based skills** are loaded in directory order
-3. **Duplicate detection**: If a duplicate is detected, a warning is issued and the new skill is registered
-
-```python
-# This will warn if a skill named 'data-analyzer' exists in ./skills
-@skills.skill(name='data-analyzer')
-def conflicting_skill() -> str:
-    return "..."
-```
-
-### Dynamic Skill Registration
-
-You can programmatically register skills after toolset creation (though typically skills are defined at initialization):
-
-```python
-from pydantic_ai_skills import Skill
-
-# Create toolset
-toolset = SkillsToolset()
-
-# Register a new programmatic skill
-new_skill = Skill(
-    name='dynamically-added',
-    description='Added after initialization',
-    content='This skill was registered dynamically'
-)
-toolset._register_skill(new_skill)  # Internal method, use with caution
-```
-
-> **Note**: Direct manipulation of internal `_register_skill()` is not recommended for production code. Define skills at initialization time for better clarity and maintainability.
-
-## See Also
-
-- [Programmatic Skills](./programmatic-skills.md) - Detailed guide to programmatic skill creation
-- [Skill Registries](./registries.md) - Load skills from Git repositories and remote sources
-- [API Reference - SkillsToolset](./api/toolset.md) - Complete API documentation
-- [Implementation Patterns](./patterns.md) - Common design patterns and best practices
+- [Core Concepts](concepts.md) — what runs when, and who does what
+- [Registries](registries.md) — remote sources and composition
+- [Sandboxing](sandbox.md) — keeping untrusted scripts off the host
+- [Hooks](hooks.md) — intercepting skill loads and file access
+- [Security](security.md) — the trust model
+- [Migrating from v1](migration-v2.md) — hot-reload, instruction templates, and what replaced them
