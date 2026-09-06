@@ -230,6 +230,65 @@ def test_a_toolset_can_register_neither_tool() -> None:
 
 
 # ---------------------------------------------------------------------------
+# name resolution -- models name a script the way the instructions' prose does
+# ---------------------------------------------------------------------------
+
+
+def test_an_exact_name_resolves(toolset: SkillFilesToolset) -> None:
+    """The indexed path is always the primary key."""
+    scripts = toolset.packages['demo-skill'].scripts_by_name
+    resolved = toolset._resolve_file('Script', 'scripts/hello.py', scripts, 'demo-skill')
+
+    assert resolved.name == 'scripts/hello.py'
+
+
+@pytest.mark.parametrize('requested', ['hello', 'hello.py'])
+def test_a_unique_shorthand_resolves(toolset: SkillFilesToolset, requested: str) -> None:
+    """`scripts/hello.py` is reachable as `hello`, so a first guess is not wasted."""
+    scripts = toolset.packages['demo-skill'].scripts_by_name
+    resolved = toolset._resolve_file('Script', requested, scripts, 'demo-skill')
+
+    assert resolved.name == 'scripts/hello.py'
+
+
+def test_a_resource_shorthand_resolves(toolset: SkillFilesToolset) -> None:
+    """Resources take the same shorthand as scripts."""
+    resources = toolset.packages['demo-skill'].resources_by_name
+    resolved = toolset._resolve_file('Resource', 'NOTES.md', resources, 'demo-skill')
+
+    assert resolved.name == 'references/NOTES.md'
+
+
+def test_an_ambiguous_shorthand_names_the_candidates(tmp_path: Path) -> None:
+    """Two files sharing a name must not resolve to whichever sorted first."""
+    skill = write_skill(tmp_path)
+    (skill / 'references').mkdir()
+    (skill / 'references' / 'NOTES.md').write_text('nested')
+    (skill / 'NOTES.md').write_text('top level')
+    toolset = SkillFilesToolset(index_libraries([tmp_path]))
+    resources = toolset.packages['demo-skill'].resources_by_name
+
+    with pytest.raises(ModelRetry, match=r"'NOTES' is ambiguous.*NOTES\.md.*references/NOTES\.md"):
+        toolset._resolve_file('Resource', 'NOTES', resources, 'demo-skill')
+
+
+def test_an_unmatched_name_lists_what_is_available(toolset: SkillFilesToolset) -> None:
+    """Shorthand matching must not swallow the retry that lists the real names."""
+    scripts = toolset.packages['demo-skill'].scripts_by_name
+
+    with pytest.raises(ModelRetry, match=r"Script 'deploy' not found.*scripts/hello\.py"):
+        toolset._resolve_file('Script', 'deploy', scripts, 'demo-skill')
+
+
+def test_a_shorthand_never_escapes_the_index(toolset: SkillFilesToolset) -> None:
+    """Resolution is a comparison against indexed names, never a path built from input."""
+    scripts = toolset.packages['demo-skill'].scripts_by_name
+
+    with pytest.raises(ModelRetry, match='not found'):
+        toolset._resolve_file('Script', '../../etc/passwd', scripts, 'demo-skill')
+
+
+# ---------------------------------------------------------------------------
 # args coercion -- models routinely send a JSON string instead of an object
 # ---------------------------------------------------------------------------
 

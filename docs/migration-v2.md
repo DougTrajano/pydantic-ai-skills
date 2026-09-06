@@ -71,6 +71,7 @@ harness sets a `pydantic-ai-slim>=2.37` floor of its own; this package needs 2.3
 | `S3SkillsRegistry.revision(name)` | The newest object modification time for a skill |
 | `require_loaded=` | Refuse file reads for a skill the model has not loaded |
 | `resolve_skill_dir=` | Substitute `${SKILL_DIR}` / `${CLAUDE_SKILL_DIR}` in instructions |
+| `list_bundled_files=` | Append the names of a skill's resources and scripts to its instructions |
 | `SkillRegistry.__or__` | `a \| b` builds a `CombinedRegistry` |
 
 ## Walking through the changes
@@ -216,7 +217,8 @@ capabilities:
 ```
 
 `max_depth`, `validate`, `instruction_template`, `exclude_tools`, `auto_reload` and `defer_loading`
-are no longer accepted. `resources`, `scripts`, `require_loaded` and `resolve_skill_dir` are.
+are no longer accepted. `resources`, `scripts`, `require_loaded`, `resolve_skill_dir` and
+`list_bundled_files` are.
 
 ## If you were only using level 1 and 2
 

@@ -290,6 +290,26 @@ This reads `RunContext.active_capability_ids`, which is refreshed from message h
 request — so a skill loaded in an earlier step is visible, and only a call issued in the *same* step
 as the load is refused, with a retry the model can act on.
 
+## Listing a skill's bundled files
+
+The file tools key on skill-relative paths (`scripts/aggregate.py`), while a `SKILL.md` names its
+own files however its author wrote the prose. `SkillsCapability` appends the real names to the
+skill's instructions so the model reads them instead of guessing:
+
+```python
+SkillsCapability('./skills')                              # inventory appended (the default)
+SkillsCapability('./skills', list_bundled_files=False)    # instructions as harness rendered them
+```
+
+The listing rides on the instructions, so it stays behind `load_capability` and costs nothing for
+skills the model never loads. Only kinds whose tool is registered are listed — `scripts=False`
+drops the script block — and each kind is truncated after 50 entries.
+
+Independently of the listing, both tools accept an unambiguous shorthand: `aggregate` and
+`aggregate.py` both reach `scripts/aggregate.py`. When two files share a name, neither is chosen;
+the retry names both and asks for the full path. See
+[Bundled-file inventory](concepts.md#bundled-file-inventory).
+
 ## Resolving `${SKILL_DIR}`
 
 Published skill packages often write paths as `${SKILL_DIR}/scripts/run.py` or

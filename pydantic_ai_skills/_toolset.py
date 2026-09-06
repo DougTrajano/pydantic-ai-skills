@@ -14,15 +14,20 @@ names as soon as the model loaded two skills at once.
 from __future__ import annotations
 
 import json
-from typing import Annotated, Any
+from collections.abc import Iterable
+from pathlib import PurePosixPath
+from typing import Annotated, Any, TypeVar
 
 from pydantic import BeforeValidator
 from pydantic_ai import ModelRetry, RunContext
 from pydantic_ai.toolsets import FunctionToolset
 
 from pydantic_ai_skills.packages import SkillPackage
+from pydantic_ai_skills.types import SkillResource, SkillScript
 
 __all__ = ['SkillFilesToolset']
+
+_FileT = TypeVar('_FileT', SkillResource, SkillScript)
 
 
 def _coerce_to_dict(v: Any) -> Any:
@@ -39,6 +44,24 @@ def _coerce_to_dict(v: Any) -> Any:
             raise ValueError(f'args must be a JSON object, got {type(parsed).__name__}')
         return parsed
     return v
+
+
+def _shorthand_matches(requested: str, names: Iterable[str]) -> list[str]:
+    """Return the indexed names a shorthand could mean, sorted.
+
+    Bundled files are indexed by their skill-relative posix path (`scripts/aggregate.py`),
+    but a skill's instructions often name a script the way a human would — "the aggregate
+    script". A name matches when its own file name, or that file name without its
+    extension, equals the requested one, so both `aggregate` and `aggregate.py` find
+    `scripts/aggregate.py`.
+
+    This only ever compares against names already in the index; nothing here builds a path
+    from model input.
+    """
+    wanted = PurePosixPath(requested.strip()).name
+    if not wanted:
+        return []
+    return sorted(name for name in names if PurePosixPath(name).name == wanted or PurePosixPath(name).stem == wanted)
 
 
 class SkillFilesToolset(FunctionToolset[Any]):
@@ -115,6 +138,37 @@ class SkillFilesToolset(FunctionToolset[Any]):
 
         return package
 
+    @staticmethod
+    def _resolve_file(kind: str, requested: str, entries: dict[str, _FileT], skill_name: str) -> _FileT:
+        """Return the indexed file `requested` names, or raise `ModelRetry` explaining why not.
+
+        An exact index name wins. Failing that, an unambiguous shorthand — a file name with
+        or without its extension — resolves to the one name it matches, so a model that
+        asks for `aggregate` still reaches `scripts/aggregate.py` instead of spending a
+        retry.
+
+        Raises:
+            ModelRetry: When the shorthand matches several indexed names, or none.
+        """
+        entry = entries.get(requested)
+        if entry is not None:
+            return entry
+
+        matches = _shorthand_matches(requested, entries)
+        if len(matches) == 1:
+            return entries[matches[0]]
+
+        if matches:
+            raise ModelRetry(
+                f"{kind} '{requested}' is ambiguous in skill '{skill_name}': {matches}. "
+                'Use the full path relative to the skill directory.'
+            )
+
+        raise ModelRetry(
+            f"{kind} '{requested}' not found in skill '{skill_name}'. "
+            f'Available: {sorted(entries)}. Use the exact name from the skill instructions.'
+        )
+
     def _register_read_skill_resource(self) -> None:
         """Register the read_skill_resource tool."""
 
@@ -139,9 +193,10 @@ class SkillFilesToolset(FunctionToolset[Any]):
             Args:
                 skill_name: Name of the skill containing the resource, exactly as it
                     appears in the capability catalog.
-                resource_name: Path of the resource relative to the skill directory.
+                resource_name: Path of the resource relative to the skill directory, as
+                    listed under "Bundled files" in the loaded skill's instructions.
                     Examples: "FORMS.md", "references/REFERENCE.md", "get_schema"
-                    Must match exactly - do not infer or guess.
+                    A file name on its own works when only one resource has it.
                 args: Arguments for callable resources (optional for static files).
                     Keys must match the parameter names in the resource's schema.
 
@@ -150,18 +205,11 @@ class SkillFilesToolset(FunctionToolset[Any]):
 
             Important:
             - Load the skill with `load_capability` first; its instructions list the files
-            - Use exact resource names - do not modify or guess
+            - Prefer the full path the instructions give over a bare file name
             - Static files don't need args; callable resources may require them
             """
             package = self._resolve_package(ctx, skill_name)
-
-            resource = package.resources_by_name.get(resource_name)
-            if resource is None:
-                available = sorted(package.resources_by_name)
-                raise ModelRetry(
-                    f"Resource '{resource_name}' not found in skill '{skill_name}'. "
-                    f'Available resources: {available}. Use the exact name from the skill instructions.'
-                )
+            resource = self._resolve_file('Resource', resource_name, package.resources_by_name, skill_name)
 
             return await resource.load(ctx=ctx, args=args)
 
@@ -189,9 +237,12 @@ class SkillFilesToolset(FunctionToolset[Any]):
             Args:
                 skill_name: Name of the skill containing the script, exactly as it appears
                     in the capability catalog.
-                script_name: Path of the script relative to the skill directory.
-                    Examples: "analyze.py", "scripts/analyze.py", "scripts/deploy.sh"
-                    Must match exactly - do not infer or guess.
+                script_name: Path of the script relative to the skill directory, as listed
+                    under "Bundled files" in the loaded skill's instructions. Scripts
+                    usually live in `scripts/`, so the name normally carries that prefix
+                    and the file extension.
+                    Examples: "scripts/analyze.py", "scripts/deploy.sh", "analyze.py"
+                    A file name on its own works when only one script has it.
                 args: Arguments required by the script.
                     Keys must match the parameter names in the script's schema.
 
@@ -200,19 +251,12 @@ class SkillFilesToolset(FunctionToolset[Any]):
 
             Important:
             - Load the skill with `load_capability` first; its instructions list the scripts
-            - Use exact script names - do not modify or guess
+            - Prefer the full path the instructions give over a bare file name
             - Review the skill's instructions before running its scripts
             - Scripts may modify external state (files, databases, APIs)
             - Execution errors are included in the output
             """
             package = self._resolve_package(ctx, skill_name)
-
-            script = package.scripts_by_name.get(script_name)
-            if script is None:
-                available = sorted(package.scripts_by_name)
-                raise ModelRetry(
-                    f"Script '{script_name}' not found in skill '{skill_name}'. "
-                    f'Available scripts: {available}. Use the exact name from the skill instructions.'
-                )
+            script = self._resolve_file('Script', script_name, package.scripts_by_name, skill_name)
 
             return await script.run(ctx=ctx, args=args)

@@ -369,4 +369,7 @@ def test_a_decorated_skill_reaches_the_capability() -> None:
     capability.apply(leaves.append)
     leaf = next(leaf for leaf in leaves if leaf.id == 'analytics')
     assert leaf.get_description() == 'Analyze application data.'
-    assert leaf.get_instructions() == ['# Skill: analytics\n\nQuery the warehouse first.']
+    instructions = leaf.get_instructions()
+    assert isinstance(instructions, list)
+    assert instructions[0].startswith('# Skill: analytics\n\nQuery the warehouse first.')
+    assert '- `schema`' in instructions[0]

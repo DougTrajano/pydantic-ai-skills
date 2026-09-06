@@ -41,6 +41,11 @@ __all__ = ['SkillsCapability']
 #: `${SKILL_DIR}` is the portable one. harness leaves both untouched by design.
 _SKILL_DIR_PLACEHOLDERS = ('${SKILL_DIR}', '${CLAUDE_SKILL_DIR}')
 
+#: Most entries of one kind listed in a skill's bundled-file inventory. A package shipping
+#: more than this gets a count instead of a wall of names; the file tools' not-found retry
+#: still reports the full list.
+_MAX_LISTED_FILES = 50
+
 
 def _normalize(name: str) -> str:
     """NFKC-normalize a skill name, matching how harness compares them."""
@@ -77,6 +82,52 @@ def _resolve_placeholders(text: str, directory: Path | None) -> str:
     for placeholder in _SKILL_DIR_PLACEHOLDERS:
         text = text.replace(placeholder, str(directory))
     return text
+
+
+def _format_file_list(names: Sequence[str]) -> str:
+    """Render indexed file names as a bullet list, truncated past `_MAX_LISTED_FILES`."""
+    listed = [f'- `{name}`' for name in names[:_MAX_LISTED_FILES]]
+    remaining = len(names) - len(listed)
+    if remaining > 0:
+        listed.append(f'- ...and {remaining} more')
+    return '\n'.join(listed)
+
+
+def _bundled_files_section(package: SkillPackage, *, resources: bool, scripts: bool) -> str | None:
+    """Render the inventory of a skill's bundled files, or None when there is nothing to list.
+
+    The names the file tools resolve against are skill-relative paths, but a `SKILL.md`
+    usually refers to its own files in prose ("run the aggregate script"). Without this the
+    model has to guess a path on its first call. Appending the inventory to the skill's
+    *instructions* keeps it behind `load_capability` — the model pays for it only once it
+    has loaded the skill, not in the always-on catalog.
+
+    Args:
+        package: The indexed package whose files to list.
+        resources: The `read_skill_resource` tool is registered, so list resources.
+        scripts: The `run_skill_script` tool is registered, so list scripts.
+
+    Returns:
+        A Markdown section, or None when neither kind has anything to list.
+    """
+    blocks: list[str] = []
+
+    if resources and package.resources:
+        names = sorted(resource.name for resource in package.resources)
+        blocks.append(
+            f'Read with `read_skill_resource`, using these exact `resource_name` values:\n\n{_format_file_list(names)}'
+        )
+
+    if scripts and package.scripts:
+        names = sorted(script.name for script in package.scripts)
+        blocks.append(
+            f'Run with `run_skill_script`, using these exact `script_name` values:\n\n{_format_file_list(names)}'
+        )
+
+    if not blocks:
+        return None
+
+    return '## Bundled files\n\n' + '\n\n'.join(blocks)
 
 
 @dataclass(init=False, repr=False)
@@ -129,6 +180,8 @@ class SkillsCapability(AbstractCapability[AgentDepsT]):
     _packages: dict[str, SkillPackage] = field(init=False, repr=False, compare=False)
     _leaves: tuple[AbstractCapability[AgentDepsT], ...] = field(init=False, repr=False, compare=False)
     _files_toolset: SkillFilesToolset | None = field(init=False, repr=False, compare=False)
+    _list_resources: bool = field(init=False, repr=False, compare=False)
+    _list_scripts: bool = field(init=False, repr=False, compare=False)
 
     def __init__(
         self,
@@ -144,6 +197,7 @@ class SkillsCapability(AbstractCapability[AgentDepsT]):
         scripts: bool = True,
         require_loaded: bool = True,
         resolve_skill_dir: bool = True,
+        list_bundled_files: bool = True,
         id: str | None = None,
     ) -> None:
         """Build the deferred catalog from libraries, registries and Python-defined skills.
@@ -170,6 +224,10 @@ class SkillsCapability(AbstractCapability[AgentDepsT]):
             resolve_skill_dir: Substitute `${SKILL_DIR}` and `${CLAUDE_SKILL_DIR}` in a
                 skill's instructions with its real directory, so instructions that name
                 those placeholders resolve to paths the script tool can actually use.
+            list_bundled_files: Append a "Bundled files" section naming a skill's
+                resources and scripts to its instructions, so the model reads the names
+                the file tools expect instead of inferring them from prose. Turn off for
+                skills whose `SKILL.md` already lists its files.
             id: Stable identifier for the capability that carries the bundled-file tools.
 
         Raises:
@@ -184,6 +242,10 @@ class SkillsCapability(AbstractCapability[AgentDepsT]):
         self.registries = tuple(registries)
         self.include = _normalize_selection('include', include) if include is not None else None
         self.exclude = _normalize_selection('exclude', exclude) if exclude is not None else frozenset()
+        # Only list what the model can actually reach: a kind whose tool is not registered
+        # has no name worth advertising.
+        self._list_resources = resources and list_bundled_files
+        self._list_scripts = scripts and list_bundled_files
 
         programmatic = [entry.to_skill() if isinstance(entry, SkillWrapper) else entry for entry in skills]
 
@@ -231,16 +293,23 @@ class SkillsCapability(AbstractCapability[AgentDepsT]):
                     UserWarning,
                     stacklevel=2,
                 )
-            self._packages[name] = SkillPackage(
+            package = SkillPackage(
                 name=name,
                 resources=tuple(skill.resources),
                 scripts=tuple(skill.scripts),
             )
+            self._packages[name] = package
+
+            instructions = f'# Skill: {name}\n\n{skill.content}' if skill.content else f'# Skill: {name}'
+            inventory = _bundled_files_section(package, resources=self._list_resources, scripts=self._list_scripts)
+            if inventory is not None:
+                instructions = f'{instructions}\n\n{inventory}'
+
             leaves.append(
                 Capability[AgentDepsT](
                     id=name,
                     description=skill.description,
-                    instructions=f'# Skill: {name}\n\n{skill.content}' if skill.content else f'# Skill: {name}',
+                    instructions=instructions,
                     defer_loading=True,
                 )
             )
@@ -339,20 +408,27 @@ class SkillsCapability(AbstractCapability[AgentDepsT]):
         leaf: AbstractCapability[AgentDepsT],
         resolve_skill_dir: bool,
     ) -> AbstractCapability[AgentDepsT]:
-        """Return `leaf` with skill-directory placeholders resolved in its instructions.
+        """Return `leaf` with placeholders resolved and its bundled files listed.
 
-        harness emits plain-string instructions, so when there is nothing to substitute
-        the original leaf is handed back untouched rather than rebuilt.
+        harness emits plain-string instructions, so when there is nothing to substitute and
+        nothing to list the original leaf is handed back untouched rather than rebuilt.
         """
         package = self._packages.get(leaf.id) if leaf.id else None
-        if not resolve_skill_dir or package is None or package.directory is None:
+        if package is None:
             return leaf
 
         instructions = leaf.get_instructions()
         if not isinstance(instructions, list) or not all(isinstance(part, str) for part in instructions):
             return leaf
 
-        resolved = [_resolve_placeholders(part, package.directory) for part in instructions]
+        resolved = list(instructions)
+        if resolve_skill_dir and package.directory is not None:
+            resolved = [_resolve_placeholders(part, package.directory) for part in resolved]
+
+        inventory = _bundled_files_section(package, resources=self._list_resources, scripts=self._list_scripts)
+        if inventory is not None:
+            resolved.append(inventory)
+
         if resolved == instructions:
             return leaf
 
@@ -471,6 +547,7 @@ class SkillsCapability(AbstractCapability[AgentDepsT]):
         scripts: bool = True,
         require_loaded: bool = True,
         resolve_skill_dir: bool = True,
+        list_bundled_files: bool = True,
         id: str | None = None,
     ) -> AbstractCapability[Any]:
         """Create from a YAML/JSON agent spec.
@@ -489,6 +566,8 @@ class SkillsCapability(AbstractCapability[AgentDepsT]):
             require_loaded: Refuse bundled-file calls for a skill that is not loaded.
             resolve_skill_dir: Substitute `${SKILL_DIR}` / `${CLAUDE_SKILL_DIR}` in
                 instructions with the skill's directory.
+            list_bundled_files: Append a "Bundled files" section naming a skill's
+                resources and scripts to its instructions.
             id: Stable identifier for the capability carrying the bundled-file tools.
         """
         return cls(
@@ -500,5 +579,6 @@ class SkillsCapability(AbstractCapability[AgentDepsT]):
             scripts=scripts,
             require_loaded=require_loaded,
             resolve_skill_dir=resolve_skill_dir,
+            list_bundled_files=list_bundled_files,
             id=id,
         )

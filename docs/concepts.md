@@ -39,7 +39,8 @@ needed.
 3. **Bundled files are indexed.** The same directories are scanned for each skill's resources and
    scripts, keyed by the skill's name — the same name harness gave the capability.
 4. **The catalog is re-emitted.** Each capability harness produced is passed through, with
-   `${SKILL_DIR}` resolved in its instructions when the skill has a directory.
+   `${SKILL_DIR}` resolved in its instructions when the skill has a directory, and its
+   [bundled files listed](#bundled-file-inventory) at the end of them.
 
 Everything happens at construction time. See [Snapshots](#snapshots) below.
 
@@ -81,6 +82,37 @@ then read its files.
 
 Set `require_loaded=False` when a skill's files should be reachable without loading its
 instructions first.
+
+### Bundled-file inventory
+
+Both tools resolve names against the index, whose keys are skill-relative paths
+(`scripts/aggregate.py`). A `SKILL.md`, though, usually names its own files in prose — "run the
+aggregate script" — so a model calling `run_skill_script` has nothing exact to copy and guesses.
+
+`SkillsCapability` closes that gap by appending the package's real names to the skill's
+instructions:
+
+```text
+## Bundled files
+
+Read with `read_skill_resource`, using these exact `resource_name` values:
+
+- `references/NOTES.md`
+
+Run with `run_skill_script`, using these exact `script_name` values:
+
+- `scripts/aggregate.py`
+```
+
+Because it rides on the *instructions*, it stays behind `load_capability`: the model pays for the
+listing only once it has loaded that skill, never in the always-on catalog. Long packages are
+truncated after 50 entries per kind.
+
+Pass `list_bundled_files=False` for skills whose `SKILL.md` already lists its files.
+
+As a fallback, both tools also accept an unambiguous shorthand: `aggregate` or `aggregate.py`
+resolves to `scripts/aggregate.py` when exactly one indexed name matches. Two files sharing a name
+resolve to neither — the `ModelRetry` names both candidates and asks for the full path.
 
 ### `${SKILL_DIR}`
 

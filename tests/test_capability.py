@@ -297,15 +297,82 @@ def test_skill_dir_placeholder_is_left_alone_when_disabled(tmp_path: Path) -> No
     assert '${SKILL_DIR}' in instructions[0]
 
 
-def test_a_leaf_with_no_placeholder_is_passed_through_untouched(library: Path) -> None:
-    """No placeholder means no rebuild, so harness's own object reaches the agent."""
+def test_a_leaf_with_nothing_to_add_is_passed_through_untouched(library: Path) -> None:
+    """No placeholder and no inventory means no rebuild, so harness's own object reaches the agent."""
     from pydantic_ai_harness import Skills
 
     harness_leaves: list[AbstractCapability[Any]] = []
     Skills(library).apply(harness_leaves.append)
-    ours = next(leaf for leaf in leaves_of(SkillsCapability(library)) if leaf.id == 'demo-skill')
+    capability = SkillsCapability(library, list_bundled_files=False)
+    ours = next(leaf for leaf in leaves_of(capability) if leaf.id == 'demo-skill')
 
     assert ours.get_instructions() == harness_leaves[0].get_instructions()
+
+
+# ---------------------------------------------------------------------------
+# Bundled-file inventory -- the names the file tools expect, at load time
+# ---------------------------------------------------------------------------
+
+
+def test_bundled_files_are_listed_in_the_instructions(library: Path) -> None:
+    """A SKILL.md names its files in prose; the tools need the indexed paths."""
+    leaf = next(leaf for leaf in leaves_of(SkillsCapability(library)) if leaf.id == 'demo-skill')
+    instructions = leaf.get_instructions()
+
+    assert isinstance(instructions, list)
+    inventory = instructions[-1]
+    assert '## Bundled files' in inventory
+    assert '- `references/NOTES.md`' in inventory
+    assert '- `scripts/hello.py`' in inventory
+
+
+def test_the_inventory_can_be_turned_off(library: Path) -> None:
+    """A skill whose own instructions list its files does not need ours."""
+    capability = SkillsCapability(library, list_bundled_files=False)
+    leaf = next(leaf for leaf in leaves_of(capability) if leaf.id == 'demo-skill')
+    instructions = leaf.get_instructions()
+
+    assert isinstance(instructions, list)
+    assert not any('Bundled files' in part for part in instructions)
+
+
+def test_the_inventory_omits_a_kind_whose_tool_is_not_registered(library: Path) -> None:
+    """Advertising names the model has no tool to use would be noise."""
+    capability = SkillsCapability(library, scripts=False)
+    leaf = next(leaf for leaf in leaves_of(capability) if leaf.id == 'demo-skill')
+    instructions = leaf.get_instructions()
+
+    assert isinstance(instructions, list)
+    inventory = instructions[-1]
+    assert '- `references/NOTES.md`' in inventory
+    assert 'scripts/hello.py' not in inventory
+
+
+def test_a_skill_with_no_bundled_files_gets_no_inventory(tmp_path: Path) -> None:
+    """Instructions-only skills are the case harness alone already covers."""
+    lib = tmp_path / 'skills'
+    write_skill(lib, 'plain-skill', body='Just instructions.')
+
+    leaf = next(leaf for leaf in leaves_of(SkillsCapability(lib)) if leaf.id == 'plain-skill')
+    instructions = leaf.get_instructions()
+
+    assert isinstance(instructions, list)
+    assert not any('Bundled files' in part for part in instructions)
+
+
+def test_a_long_inventory_is_truncated(tmp_path: Path) -> None:
+    """A package shipping hundreds of files must not flood the loaded instructions."""
+    lib = tmp_path / 'skills'
+    skill = write_skill(lib, 'big-skill', body='Body.')
+    (skill / 'references').mkdir()
+    for index in range(60):
+        (skill / 'references' / f'note-{index:03d}.md').write_text('note')
+
+    leaf = next(leaf for leaf in leaves_of(SkillsCapability(lib)) if leaf.id == 'big-skill')
+    instructions = leaf.get_instructions()
+
+    assert isinstance(instructions, list)
+    assert '- ...and 10 more' in instructions[-1]
 
 
 # ---------------------------------------------------------------------------
