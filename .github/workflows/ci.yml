@@ -28,13 +28,16 @@ jobs:
       - uses: pre-commit/action@v3.0.1
 
   test:
-    name: Test (Python ${{ matrix.python-version }}, pydantic-ai ${{ matrix.pydantic-ai-version }})
+    name: Test (Python ${{ matrix.python-version }}, deps ${{ matrix.deps }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
-        pydantic-ai-version: ["1.105.0", "2.0.0", "latest"]
+        # `floor` pins pydantic-ai-harness and pydantic-ai-slim to the oldest pair this
+        # package declares support for; the two move together because harness sets its
+        # own pydantic-ai-slim floor. `latest` tracks whatever is on PyPI today.
+        deps: ["floor", "latest"]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -49,20 +52,21 @@ jobs:
       - name: Install dependencies
         run: uv pip install --system -e ".[test,git]"
 
-      - name: Select pydantic-ai-slim version
+      - name: Select pydantic-ai / harness versions
         run: |
-          if [ "${{ matrix.pydantic-ai-version }}" = "latest" ]; then
-            uv pip install --system --upgrade pydantic-ai-slim
+          if [ "${{ matrix.deps }}" = "latest" ]; then
+            uv pip install --system --upgrade "pydantic-ai-harness[skills]" pydantic-ai-slim
           else
-            uv pip install --system "pydantic-ai-slim==${{ matrix.pydantic-ai-version }}"
+            uv pip install --system "pydantic-ai-harness[skills]==0.28.1" "pydantic-ai-slim==2.38.0"
           fi
+          uv pip show pydantic-ai-harness | grep -i '^version'
           uv pip show pydantic-ai-slim | grep -i '^version'
 
       - name: Run pytest with coverage
         run: pytest --cov-report=xml
 
       - name: Upload coverage artifact
-        if: matrix.python-version == '3.12' && matrix.pydantic-ai-version == '2.0.0'
+        if: matrix.python-version == '3.12' && matrix.deps == 'latest'
         uses: actions/upload-artifact@v7
         with:
           name: coverage-${{ github.run_id }}
@@ -70,7 +74,7 @@ jobs:
           retention-days: 7
 
       - name: Save PR metadata
-        if: matrix.python-version == '3.12' && matrix.pydantic-ai-version == '2.0.0'
+        if: matrix.python-version == '3.12' && matrix.deps == 'latest'
         run: |
           echo "PR_NUMBER=${{ github.event.pull_request.number }}" > pr-metadata.env
           echo "PR_HEAD_SHA=${{ github.event.pull_request.head.sha }}" >> pr-metadata.env
@@ -78,7 +82,7 @@ jobs:
           echo "PR_HEAD_REF=${{ github.event.pull_request.head.ref }}" >> pr-metadata.env
 
       - name: Upload PR metadata artifact
-        if: matrix.python-version == '3.12' && matrix.pydantic-ai-version == '2.0.0'
+        if: matrix.python-version == '3.12' && matrix.deps == 'latest'
         uses: actions/upload-artifact@v7
         with:
           name: pr-metadata-${{ github.run_id }}
@@ -87,8 +91,8 @@ jobs:
 
   test-lowest-versions:
     # Resolves every direct dependency to its declared floor (anyio>=4.0.0,
-    # pydantic-ai-slim>=1.105, pyyaml>=6.0) so a floor we no longer actually
-    # support fails here instead of in a user's environment.
+    # pydantic-ai-harness>=0.28, pydantic-ai-slim>=2.38, pyyaml>=6.0.1) so a floor we no
+    # longer actually support fails here instead of in a user's environment.
     name: Test lowest direct versions (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:

@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from pydantic_ai_skills import CallableSkillScriptExecutor, SkillsDirectory
+from pydantic_ai_skills import CallableSkillScriptExecutor, SkillsCapability
 
 EXAMPLES_DIR = Path(__file__).parent
 TMP_DIR = EXAMPLES_DIR / 'tmp'
@@ -158,10 +158,9 @@ async def main() -> None:
         LOG_FILE.unlink()
 
     executor = CallableSkillScriptExecutor(func=_in_process_executor)
-    skills_dir = SkillsDirectory(path=TMP_DIR, script_executor=executor, validate=True)
+    skills = SkillsCapability(TMP_DIR, script_executor=executor)
 
-    skill = skills_dir.load_skill(str(SKILL_DIR.resolve()))
-    script = next(s for s in skill.scripts if s.name.endswith('echo_args.py'))
+    script = skills.packages['debug-logging-skill'].scripts_by_name['scripts/echo_args.py']
 
     output = await script.run(None, args={'query': 'debug', 'limit': 3})
 

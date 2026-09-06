@@ -20,7 +20,7 @@ import uvicorn
 from dotenv import load_dotenv
 from pydantic_ai import Agent
 
-from pydantic_ai_skills import LocalSandboxScriptExecutor, SkillsCapability, SkillsDirectory
+from pydantic_ai_skills import LocalSandboxScriptExecutor, SkillsCapability
 
 load_dotenv()
 
@@ -32,7 +32,8 @@ skills_dir = Path(__file__).parent / 'skills'
 
 # Initialize Skills Capability with skill scripts sandboxed via LocalSandbox
 skills_capability = SkillsCapability(
-    directories=[SkillsDirectory(path=skills_dir, script_executor=LocalSandboxScriptExecutor())],
+    skills_dir,
+    script_executor=LocalSandboxScriptExecutor(),
 )
 
 # Create agent with skills capability

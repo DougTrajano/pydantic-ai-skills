@@ -10,10 +10,11 @@ copyright: © Douglas Trajano 2025 to present. Licensed under the MIT License.
 
 nav:
   - Home: index.md
-  - Why pydantic-ai-skills: comparison.md
+  - How this relates to harness: comparison.md
   - Getting Started:
       - Installation: installation.md
       - Quick Start: quick-start.md
+      - Migrating from v1: migration-v2.md
   - User Guide:
       - Core Concepts: concepts.md
       - Creating Skills: creating-skills.md
@@ -25,10 +26,10 @@ nav:
       - Implementation Patterns: patterns.md
   - Security & Deployment: security.md
   - API Reference:
-      - api/toolset.md
       - api/capability.md
-      - api/types.md
       - api/registries.md
+      - api/packages.md
+      - api/types.md
       - api/executors.md
   - Contributing: contributing.md
 

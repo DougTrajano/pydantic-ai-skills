@@ -1,230 +1,184 @@
 # Core Concepts
 
-Understanding the key concepts behind pydantic-ai-skills will help you build better agent systems.
+## Progressive disclosure
 
-## Skill Structure
+An [Agent Skill](https://agentskills.io/specification) is a directory of instructions and
+supporting files. The point of the format is that an agent should not carry all of it in context
+all of the time. Skills load in three levels:
 
-Skills are modular packages that extend agent capabilities. You can create them in two ways:
+| Level | What the model gets | When | Provided by |
+| --- | --- | --- | --- |
+| 1. Metadata | Each skill's name and description | Always in the prompt | harness `Skills` |
+| 2. Instructions | The `SKILL.md` body | When the model calls `load_capability` | harness `Skills` |
+| 3. Bundled files | `references/`, `assets/`, `scripts/` | When the model calls `read_skill_resource` or `run_skill_script` | this package |
 
-### File-Based Skills
+Level 1 costs a line or two per skill, so a hundred skills stay affordable. Level 2 costs a page,
+and only for the skills a task actually touches. Level 3 costs nothing until a specific file is
+needed.
 
-A directory containing:
+## Who does what
 
-- `SKILL.md` - Metadata (YAML frontmatter) and instructions (required)
-- `scripts/` - Optional executable Python scripts
-- `resources/` - Optional additional documentation or data
+`SkillsCapability` is a composite. It owns the parts of the pipeline harness does not:
 
-```markdown
-my-skill/
-├── SKILL.md # Required: Instructions and metadata
-├── scripts/ # Optional: Executable scripts
-│ └── my_script.py
-└── resources/ # Optional: Additional files
-├── reference.md
-└── data.json
+```text
+  registries ──sync()──► local directories ─┐
+                                            ├──► harness Skills ──► one deferred
+  directories ──────────────────────────────┘                       Capability per skill
+                                                                          │
+  index the same directories ──► bundled files ──► read_skill_resource ◄──┘
+                                                   run_skill_script
 ```
 
-### Programmatic Skills
+1. **Registries are synced.** Each [`SkillRegistry`](registries.md) materializes its skills into a
+   local directory. A Git registry clones, an S3 registry downloads, a composed registry stages a
+   new directory from its children's output.
+2. **harness discovers and validates.** The synced directories and any local ones are handed to
+   `pydantic_ai_harness.Skills`, which scans each library's immediate children, validates the
+   `SKILL.md` frontmatter, applies `include`/`exclude`, and produces one deferred
+   `Capability` per skill.
+3. **Bundled files are indexed.** The same directories are scanned for each skill's resources and
+   scripts, keyed by the skill's name — the same name harness gave the capability.
+4. **The catalog is re-emitted.** Each capability harness produced is passed through, with
+   `${SKILL_DIR}` resolved in its instructions when the skill has a directory, and its
+   [bundled files listed](#bundled-file-inventory) at the end of them.
 
-Alternatively, define skills directly in Python using the `Skill` class with decorators for dynamic resources and scripts. This enables dependency injection and runtime configuration. See [Programmatic Skills](programmatic-skills.md) for details.
+Everything happens at construction time. See [Snapshots](#snapshots) below.
 
-### Registry Skills
+## Deferred capabilities, not a `load_skill` tool
 
-Skills can also be loaded from remote sources via **skill registries**. For example, `GitSkillsRegistry` clones a Git repository and exposes its skills. Registries support composition (filtering, prefixing, renaming, combining). See [Skill Registries](registries.md) for details.
+Every skill is a *deferred capability*: the model sees its id and description in a catalog, and
+loads it by calling Pydantic AI's built-in `load_capability` tool. v1 of this package shipped its
+own `list_skills` and `load_skill` tools; both are gone, because the framework now does it.
 
-## Integration Modes
+That matters beyond tidiness. Because a skill is a real capability, its instructions participate in
+Pydantic AI's instruction ordering, message history records what was loaded, and
+`RunContext.active_capability_ids` knows which skills are live — which is what the
+[`require_loaded`](#require_loaded) gate reads.
 
-You can integrate skills in two ways:
+## The two tools this package adds
 
-1. `SkillsToolset` (uses the `toolsets=[...]` API)
-2. `SkillsCapability` (uses the `capabilities=[...]` API)
+Both take the skill's name as their first argument, so one pair of tools serves every skill:
 
-`SkillsCapability` is the preferred integration path. It wraps an internal `SkillsToolset` so behavior is consistent across both approaches, and it bundles instruction injection through the Capability API.
+- **`read_skill_resource(skill_name, resource_name, args=None)`** — reads a bundled text file, named
+  by its path relative to the skill directory (`references/FORMS.md`). For a
+  [programmatic skill](programmatic-skills.md) it can also invoke a callable resource.
+- **`run_skill_script(skill_name, script_name, args=None)`** — runs a bundled script
+  (`scripts/fill_form.py`) through the configured
+  [script executor](sandbox.md), and returns its output.
 
-### SkillsToolset mode
+They are always visible, while each skill stays deferred. Per-skill toolsets were the obvious
+alternative and do not work: two loaded skills would contribute two tools with the same name.
 
-Use this mode when your app is built around `toolsets=[...]`. Skills instructions are injected into the agent's context automatically.
+### `require_loaded`
 
-### SkillsCapability mode
+Because the tools are always visible, something has to stop the model reading a skill's files
+without loading the skill. `require_loaded=True` (the default) checks
+`RunContext.active_capability_ids` and refuses with a `ModelRetry` that names the capability to load:
 
-Use this mode when your app is built around `capabilities=[...]`. Skills tools and skills instructions are bundled in one capability.
+```text
+Skill 'pdf-processing' is not loaded. Call load_capability with id='pdf-processing' first,
+then read its files.
+```
+
+Set `require_loaded=False` when a skill's files should be reachable without loading its
+instructions first.
+
+### Bundled-file inventory
+
+Both tools resolve names against the index, whose keys are skill-relative paths
+(`scripts/aggregate.py`). A `SKILL.md`, though, usually names its own files in prose — "run the
+aggregate script" — so a model calling `run_skill_script` has nothing exact to copy and guesses.
+
+`SkillsCapability` closes that gap by appending the package's real names to the skill's
+instructions:
+
+```text
+## Bundled files
+
+Read with `read_skill_resource`, using these exact `resource_name` values:
+
+- `references/NOTES.md`
+
+Run with `run_skill_script`, using these exact `script_name` values:
+
+- `scripts/aggregate.py`
+```
+
+Because it rides on the *instructions*, it stays behind `load_capability`: the model pays for the
+listing only once it has loaded that skill, never in the always-on catalog. Long packages are
+truncated after 50 entries per kind.
+
+Pass `list_bundled_files=False` for skills whose `SKILL.md` already lists its files.
+
+As a fallback, both tools also accept an unambiguous shorthand: `aggregate` or `aggregate.py`
+resolves to `scripts/aggregate.py` when exactly one indexed name matches. Two files sharing a name
+resolve to neither — the `ModelRetry` names both candidates and asks for the full path.
+
+### `${SKILL_DIR}`
+
+Published skills often write paths as `${SKILL_DIR}/scripts/run.py` or `${CLAUDE_SKILL_DIR}/...`.
+harness passes those through untouched, which leaves the model holding a literal placeholder.
+`SkillsCapability` substitutes the skill's real directory when it re-emits the instructions:
 
 ```python
-from pydantic_ai import Agent
-from pydantic_ai_skills import SkillsCapability
-
-agent = Agent(
-    model='openai:gpt-5.2',
-    capabilities=[SkillsCapability(directories=['./skills'])],
-)
+SkillsCapability('.agents/skills', resolve_skill_dir=True)  # the default
 ```
 
-#### Deferred loading
+Pass `resolve_skill_dir=False` to get exactly what harness rendered.
 
-Pydantic AI v2 lets a capability stay hidden until the model explicitly loads it via the
-agent's built-in `load_capability` tool. Set `defer_loading=True` and give the capability a
-stable `id`:
+## Skill packages
+
+A skill is an **immediate child** of a library directory containing a `SKILL.md`:
+
+```text
+.agents/skills/            ← the library (what you pass)
+├── pdf-processing/        ← a skill package
+│   ├── SKILL.md
+│   ├── FORMS.md
+│   ├── references/
+│   │   └── LAYOUT.md
+│   └── scripts/
+│       └── fill_form.py
+└── data-analysis/
+    └── SKILL.md
+```
+
+Pass the **library**, not a skill package. Nesting is not searched: `pdf-processing/vendor/SKILL.md`
+does not become a second skill. This mirrors harness exactly, so the indexed files and the catalog
+can never disagree about what a skill is.
+
+See [Creating Skills](creating-skills.md) for the `SKILL.md` format and how resources and scripts
+are discovered.
+
+## Snapshots
+
+Discovery runs once, when `SkillsCapability` is constructed — registries sync, harness scans,
+files are indexed. Nothing re-reads the filesystem during a run.
+
+v1 had `reload()` and `auto_reload`; both are gone. To pick up changes, build a new capability and a
+new agent:
 
 ```python
-agent = Agent(
-    model='openai:gpt-5.2',
-    capabilities=[
-        SkillsCapability(id='skills', directories=['./skills'], defer_loading=True),
-    ],
-)
+def build_agent() -> Agent:
+    return Agent('anthropic:claude-sonnet-4-6', capabilities=[SkillsCapability('./skills')])
+
+
+# On a redeploy, or on a schedule:
+agent = build_agent()
 ```
 
-When deferred, the skills tools and instructions are collapsed to a one-line catalog entry
-(derived from the skill names, or set `description=...` to override) and only activate after
-the model loads the capability. This complements the toolset's own progressive disclosure
-(`list_skills` → `load_skill`): `defer_loading` gates the *entire skills system* behind one
-catalog entry, which is useful when an agent bundles many capabilities and most turns need
-none of the skills.
+This is harness's model too, and it is the honest one: an agent's tools and instructions are fixed
+for the run, so a mid-run reload was never coherent.
 
-## SKILL.md Format
+## Where skills come from
 
-Each `SKILL.md` file has **YAML frontmatter** (metadata) followed by **Markdown** (instructions).
+| Source | Use | Docs |
+| --- | --- | --- |
+| A local directory | Skills committed alongside your application | [Creating Skills](creating-skills.md) |
+| `GitSkillsRegistry` | Skills published in a repository | [Registries](registries.md#git) |
+| `S3SkillsRegistry` | Skills distributed through object storage | [Registries](registries.md#s3) |
+| `LocalSkillsRegistry` | A local directory that needs composing | [Registries](registries.md#local) |
+| `skills=[...]` | Skills defined in Python | [Programmatic Skills](programmatic-skills.md) |
 
-**Minimal example:**
-
-```yaml
----
-name: my-skill
-description: A brief description of what this skill does
----
-```
-
-**Required fields:**
-- `name` - Unique identifier (lowercase, hyphens, ≤64 chars)
-- `description` - Brief summary (≤1024 chars, appears in listings)
-
-**Optional fields:**
-```yaml
----
-name: arxiv-search
-description: Search arXiv for research papers
-version: 1.0.0
-author: Your Name
-category: research
----
-```
-
-## Progressive Disclosure
-
-The toolset implements **progressive disclosure** - exposing information only when needed:
-
-1. **Initial**: Skill names and descriptions are added to agent instructions via `get_instructions(ctx)` (called automatically by the framework on newer pydantic-ai versions)
-2. **Loading**: Agent calls `load_skill(name)` to get full instructions when needed
-3. **Resources**: Agent calls `read_skill_resource()` for additional documentation
-4. **Execution**: Agent calls `run_skill_script()` to execute scripts
-
-This approach:
-
-Skills use **progressive disclosure** to minimize context:
-
-1. **Discovery**: Skill names/descriptions are added to instructions via `get_instructions()`
-2. **Loading**: Agent calls `load_skill(name)` for full instructions when needed
-3. **Resources**: Agent calls `read_skill_resource()` for additional files
-4. **Execution**: Agent calls `run_skill_script()` to execute code
-
-This reduces token usage, enables dynamic capability discovery, and scales to many skills.
-**Returns**: Formatted markdown with skill names and descriptions
-
-**When to use**: Optional - skills are already listed in the agent's instructions via `get_instructions(ctx)` injection. Use only if the agent needs to re-check available skills dynamically.
-
-### 2. load_skill(name)
-
-Lo# The Four Tools
-
-| Tool | Purpose |
-|------|---------|
-| `list_skills()` | List all available skills (usually redundant with `get_instructions()`) |
-| `load_skill(name)` | Load complete instructions for a skill |
-| `read_skill_resource(skill_name, resource_name)` | Read additional files (e.g., forms, reference docs) |
-| `run_skill_script(skill_name, script_name, args)` | Execute Python scripts defined in the skill |covery
-    id="skills"              # Unique identifier
-)
-```
-
-### Key Methods
-
-- `get_instructions(ctx)` - Get instructions text (automatically injected into agent)
-- `get_skill(name)` - Get a specific skill object
-- `refresh()` - Re-scan directories for skills (if using SkillsDirectory instances)
-
-### Properties
-
-- `skills` - Dictionary of loaded skills (`dict[str, Skill]`)
-
-## Skill Discovery
-
-Skills are discovered by scanning directories for `SKILL.md` files using the `SkillsDirectory` class:
-
-```python
-from pydantic_ai_skills import SkillsDirectory
-
-skill_dir = SkillsDirectory(path="./skills", validate=True)
-all_skills = skill_dir.get_skills()
-
-for name, skill in all_skills.items():
-    print(f"{name}: {skill.description}")
-```
-
-## Type Safety
-
-The package provides type-safe dataclasses for working with skills:
-
-### Skill
-
-```python
-from pydantic_ai_skills import Skill
-
-skill = Skill(
-    name="my-skill",
-    description="My skill description",
-    content="# Instructions...",
-    resources=[...],
-    scripts=[...],
-    metadata={"version": "1.0.0", "author": "Me"},
-)
-```
-
-### SkillResource
-
-```python
-from pydantic_ai_skills import SkillResource
-
-resource = SkillResource(
-    name="reference.md",
-    description="Reference material",
-    content="# Schema definitions...",  # or pass a file `uri` / callable `function`
-)
-```
-
-### SkillScript
-
-```python
-from pydantic_ai_skills import SkillScript
-
-script = SkillScript(
-    name="my_script",
-    description="Runs an analysis",
-    uri="scripts/my_script.py",  # file-based; or pass a callable `function`
-    skill_name="my-skill",
-)
-```
-
-## Security
-
-The toolset implements security measures:
-
-- **Path Validation**: Scripts and resources must be within the skill directory
-- **No Path Traversal**: Attempts to access files outside the skill directory are blocked
-- **Script Timeout**: Scripts are killed after the configured timeout
-- **Safe Execution**: Scripts run in a subprocess with limited privileges
-
-## Next Steps
-
-- [Creating Skills](creating-skills.md) - Learn how to build skills
-- [Implementation Patterns](patterns.md) - Common patterns and best practices
-- [API Reference](api/toolset.md) - Detailed API documentation
+They all land in one catalog. Names must be unique across every source, since each becomes a
+capability id; [`prefixed()`](registries.md#prefixing-and-renaming) resolves collisions.

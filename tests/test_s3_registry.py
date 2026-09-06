@@ -1,4 +1,9 @@
-"""Tests for S3SkillsRegistry."""
+"""Tests for S3SkillsRegistry.
+
+A registry's job in v2 is to put an S3 prefix on the local filesystem as a skill library
+harness can read; it does not parse SKILL.md or build Skill objects. These tests drive
+that contract against an in-memory stand-in for boto3.
+"""
 
 from __future__ import annotations
 
@@ -8,7 +13,9 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
+from pydantic_ai_harness import Skills
 
+from pydantic_ai_skills import SkillsCapability
 from pydantic_ai_skills.registries.s3 import S3SkillsRegistry
 
 # ---------------------------------------------------------------------------
@@ -42,6 +49,18 @@ class FakeS3Client:
 
     def download_file(self, Bucket: str, Key: str, Filename: str) -> None:
         Path(Filename).write_bytes(self.store[Key])
+
+
+def library_names(library: Path) -> list[str]:
+    """Names of the skill packages in a library, sorted."""
+    return sorted(child.name for child in library.iterdir() if (child / 'SKILL.md').is_file())
+
+
+def harness_names(library: Path) -> list[str]:
+    """What harness would actually call the skills in `library`."""
+    leaves: list[Any] = []
+    Skills(library).apply(leaves.append)
+    return sorted(leaf.id for leaf in leaves)
 
 
 # ---------------------------------------------------------------------------
@@ -94,196 +113,159 @@ def test_injected_client_skips_boto3_import(client: FakeS3Client) -> None:
     """A supplied client works even when boto3 cannot be imported."""
     with patch.dict('sys.modules', {'boto3': None}):
         registry = _make_registry(client)
-    assert {s.name for s in registry.get_skills()} == {'pdf', 'xlsx'}
+    assert library_names(registry.sync()) == ['pdf', 'xlsx']
+
+
+def test_construction_does_not_contact_s3(client: FakeS3Client) -> None:
+    """Fetching is `sync`'s job, so building a registry never does network I/O."""
+    calls: list[str] = []
+    client.on_list = calls.append  # type: ignore[attr-defined]
+
+    _make_registry(client)
+
+    assert calls == []
 
 
 # ---------------------------------------------------------------------------
-# get_skills / search / get
+# sync
 # ---------------------------------------------------------------------------
 
 
-def test_get_skills_returns_all(client: FakeS3Client) -> None:
-    """get_skills returns every skill synced from the bucket."""
+def test_sync_downloads_the_prefix(client: FakeS3Client) -> None:
+    """Every object under the prefix is mirrored into the local library."""
+    # Held, not inlined: the default cache is a TemporaryDirectory owned by the registry,
+    # so a throwaway registry takes its downloads with it.
     registry = _make_registry(client)
-    assert {s.name for s in registry.get_skills()} == {'pdf', 'xlsx'}
+    library = registry.sync()
+
+    assert library_names(library) == ['pdf', 'xlsx']
+    assert 'PDF manipulation skill.' in (library / 'pdf' / 'SKILL.md').read_text()
 
 
-async def test_search_returns_matching_skills(client: FakeS3Client) -> None:
-    """Search returns skills whose name matches the query."""
-    registry = _make_registry(client)
-    results = await registry.search('pdf')
-    assert [s.name for s in results] == ['pdf']
+def test_sync_returns_a_library_harness_accepts(client: FakeS3Client) -> None:
+    """The whole contract: the returned path is something `Skills` can read."""
+    assert harness_names(_make_registry(client).sync()) == ['pdf', 'xlsx']
 
 
-async def test_search_is_case_insensitive(client: FakeS3Client) -> None:
-    """Search matching ignores case for both name and description."""
-    registry = _make_registry(client)
-    results = await registry.search('EXCEL')
-    assert [s.name for s in results] == ['xlsx']
+def test_sync_reaches_the_capability(client: FakeS3Client) -> None:
+    """The skills a bucket holds end up in the agent's deferred catalog."""
+    assert SkillsCapability(registries=[_make_registry(client)]).skill_names == ['pdf', 'xlsx']
 
 
-async def test_search_respects_limit(client: FakeS3Client) -> None:
-    """Search returns at most *limit* results."""
-    registry = _make_registry(client)
-    results = await registry.search('skill', limit=1)
-    assert len(results) == 1
+def test_empty_prefix_lists_the_bucket_root(client: FakeS3Client) -> None:
+    """A registry without a prefix mirrors the whole bucket."""
+    client.store = {'pdf/SKILL.md': _skill_md('pdf', 'PDF manipulation skill.')}
+    registry = S3SkillsRegistry(bucket='my-bucket', boto3_client=client)
+
+    assert library_names(registry.sync()) == ['pdf']
 
 
-async def test_get_returns_skill_by_name(client: FakeS3Client) -> None:
-    """Get returns the skill matching the exact name."""
-    registry = _make_registry(client)
-    skill = await registry.get('pdf')
-    assert skill.name == 'pdf'
+def test_resync_mirrors_a_removed_skill(client: FakeS3Client, tmp_path: Path) -> None:
+    """A skill deleted from the bucket must not linger in the local cache."""
+    registry = _make_registry(client, target_dir=tmp_path / 'cache')
+    assert library_names(registry.sync()) == ['pdf', 'xlsx']
 
-
-async def test_get_raises_for_unknown_skill(client: FakeS3Client) -> None:
-    """Get raises KeyError when the skill name is not present."""
-    registry = _make_registry(client)
-    with pytest.raises(KeyError):
-        await registry.get('nonexistent')
-
-
-# ---------------------------------------------------------------------------
-# Metadata
-# ---------------------------------------------------------------------------
-
-
-async def test_metadata_contains_registry_keys(client: FakeS3Client) -> None:
-    """Enriched skills carry registry, bucket, prefix, source_url, and version metadata."""
-    registry = _make_registry(client)
-    skill = await registry.get('pdf')
-    assert skill.metadata is not None
-    assert skill.metadata['registry'] == 'S3SkillsRegistry'
-    assert skill.metadata['bucket'] == 'my-bucket'
-    assert skill.metadata['prefix'] == 'skills'
-    assert skill.metadata['source_url'] == 's3://my-bucket/skills/pdf'
-    assert skill.metadata['version'] == '2024-01-01T00:00:00+00:00'
-
-
-# ---------------------------------------------------------------------------
-# Prefix scoping
-# ---------------------------------------------------------------------------
-
-
-def test_empty_prefix_lists_root() -> None:
-    """An empty prefix discovers skills at the bucket root."""
-    client = FakeS3Client({'pdf/SKILL.md': _skill_md('pdf', 'PDF skill.')})
-    registry = S3SkillsRegistry(bucket='my-bucket', prefix='', boto3_client=client)
-    assert {s.name for s in registry.get_skills()} == {'pdf'}
-
-
-# ---------------------------------------------------------------------------
-# install / update
-# ---------------------------------------------------------------------------
-
-
-async def test_install_copies_skill_directory(client: FakeS3Client, tmp_path: Path) -> None:
-    """Install copies a skill's files into a named subdirectory of the target."""
-    registry = _make_registry(client)
-    dest = await registry.install('pdf', tmp_path / 'installed')
-    assert dest == (tmp_path / 'installed' / 'pdf').resolve()
-    assert (dest / 'SKILL.md').exists()
-
-
-async def test_install_raises_for_unknown_skill(client: FakeS3Client, tmp_path: Path) -> None:
-    """Install raises KeyError for a skill that is not in the registry."""
-    registry = _make_registry(client)
-    with pytest.raises(KeyError):
-        await registry.install('nonexistent', tmp_path)
-
-
-async def test_update_installs_when_not_present(client: FakeS3Client, tmp_path: Path) -> None:
-    """Update falls back to a plain install when the skill is not yet installed."""
-    registry = _make_registry(client)
-    dest = await registry.update('pdf', tmp_path / 'installed')
-    assert (dest / 'SKILL.md').exists()
-
-
-async def test_update_resyncs_and_reinstalls(client: FakeS3Client, tmp_path: Path) -> None:
-    """Update re-syncs from S3 and re-copies an already-installed skill."""
-    registry = _make_registry(client)
-    target = tmp_path / 'installed'
-    await registry.install('pdf', target)
-    dest = await registry.update('pdf', target)
-    assert (dest / 'SKILL.md').exists()
-
-
-async def test_update_mirrors_removed_skill(client: FakeS3Client, tmp_path: Path) -> None:
-    """A skill deleted from the bucket disappears locally after the next sync."""
-    registry = _make_registry(client)
-    assert {s.name for s in registry.get_skills()} == {'pdf', 'xlsx'}
-
-    target = tmp_path / 'installed'
-    await registry.install('pdf', target)
-
-    # Remove xlsx from the bucket, then trigger a re-sync via update.
     del client.store['skills/xlsx/SKILL.md']
-    await registry.update('pdf', target)
 
-    assert {s.name for s in registry.get_skills()} == {'pdf'}
+    assert library_names(registry.sync()) == ['pdf']
+
+
+def test_sync_ignores_directory_markers(client: FakeS3Client) -> None:
+    """S3 consoles create zero-byte keys ending in `/`; there is nothing to download."""
+    client.store['skills/'] = b''
+    client.store['skills/pdf/'] = b''
+
+    assert library_names(_make_registry(client).sync()) == ['pdf', 'xlsx']
+
+
+def test_revision_reports_the_newest_object_time(client: FakeS3Client) -> None:
+    """Lets a caller record which version of a moving prefix a run used."""
+    registry = _make_registry(client)
+    registry.sync()
+
+    assert registry.revision('pdf') == client.modified.isoformat()
+
+
+def test_revision_is_none_before_a_sync(client: FakeS3Client) -> None:
+    """Nothing has been listed yet, so there is no modification time to report."""
+    assert _make_registry(client).revision('pdf') is None
 
 
 # ---------------------------------------------------------------------------
-# Error handling
+# Errors
 # ---------------------------------------------------------------------------
 
 
 def test_list_failure_wrapped_in_runtime_error(tmp_path: Path) -> None:
-    """A client error during listing is wrapped in RuntimeError with context."""
+    """A boto3 listing error is re-raised with the bucket and prefix named."""
 
-    class FailingListClient(FakeS3Client):
+    class BrokenClient(FakeS3Client):
         def get_paginator(self, name: str) -> Any:
-            raise RuntimeError('boom: access denied')
+            raise RuntimeError('boom')
 
-    with pytest.raises(RuntimeError, match="Failed to list objects in bucket 'my-bucket'"):
-        S3SkillsRegistry(bucket='my-bucket', prefix='skills', boto3_client=FailingListClient())
+    registry = _make_registry(BrokenClient(), target_dir=tmp_path)
+
+    with pytest.raises(RuntimeError, match=r"Failed to list objects in bucket 'my-bucket'"):
+        registry.sync()
 
 
 def test_download_failure_wrapped_in_runtime_error(client: FakeS3Client) -> None:
-    """A client error during download is wrapped in RuntimeError with context."""
+    """A boto3 download error is re-raised with the failing key named."""
 
-    class FailingDownloadClient(FakeS3Client):
-        def download_file(self, Bucket: str, Key: str, Filename: str) -> None:
-            raise RuntimeError('boom: timeout')
+    def broken_download(Bucket: str, Key: str, Filename: str) -> None:
+        raise RuntimeError('boom')
 
-    failing = FailingDownloadClient(client.store)
-    with pytest.raises(RuntimeError, match="Failed to download .* from bucket 'my-bucket'"):
-        S3SkillsRegistry(bucket='my-bucket', prefix='skills', boto3_client=failing)
+    client.download_file = broken_download  # type: ignore[method-assign]
 
+    registry = _make_registry(client)
 
-# ---------------------------------------------------------------------------
-# auto_install
-# ---------------------------------------------------------------------------
-
-
-def test_auto_install_false_does_not_sync(client: FakeS3Client, tmp_path: Path) -> None:
-    """With auto_install disabled, no sync happens and an empty cache yields no skills."""
-    registry = S3SkillsRegistry(
-        bucket='my-bucket',
-        prefix='skills',
-        target_dir=tmp_path / 'cache',
-        boto3_client=client,
-        auto_install=False,
-    )
-    # Nothing on disk yet → no skills.
-    assert registry.get_skills() == []
-
-
-# ---------------------------------------------------------------------------
-# Path traversal protection
-# ---------------------------------------------------------------------------
+    with pytest.raises(RuntimeError, match=r"Failed to download 'skills/"):
+        registry.sync()
 
 
 def test_sync_rejects_path_traversal_key(tmp_path: Path) -> None:
-    """A malicious object key that escapes the target directory raises ValueError."""
-    client = FakeS3Client({'../evil/SKILL.md': _skill_md('evil', 'escape attempt')})
+    """A malicious key must not write outside the cache directory."""
+    client = FakeS3Client({'skills/../../escaped.txt': b'nope'})
+    registry = _make_registry(client, target_dir=tmp_path / 'cache')
+
     with pytest.raises(ValueError, match='escapes target directory'):
-        S3SkillsRegistry(
-            bucket='my-bucket',
-            prefix='',
-            target_dir=tmp_path / 'cache',
-            boto3_client=client,
-        )
+        registry.sync()
+
+
+def test_auto_install_false_does_not_contact_s3(client: FakeS3Client, tmp_path: Path) -> None:
+    """Air-gapped deployments read only what is already on disk."""
+    cache = tmp_path / 'cache'
+    (cache / 'skills' / 'preexisting').mkdir(parents=True)
+    (cache / 'skills' / 'preexisting' / 'SKILL.md').write_bytes(_skill_md('preexisting', 'Already downloaded.'))
+
+    def fail(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError('sync must not contact S3 when auto_install is False')
+
+    client.get_paginator = fail  # type: ignore[method-assign]
+    registry = _make_registry(client, target_dir=cache, auto_install=False)
+
+    assert library_names(registry.sync()) == ['preexisting']
+
+
+def test_auto_install_false_reports_an_empty_cache(client: FakeS3Client, tmp_path: Path) -> None:
+    """Silently returning nothing would look like a bucket with no skills."""
+    registry = _make_registry(client, target_dir=tmp_path / 'empty', auto_install=False)
+
+    with pytest.raises(ValueError, match='auto_install is disabled'):
+        registry.sync()
+
+
+def test_a_prefix_matching_nothing_is_reported(client: FakeS3Client, tmp_path: Path) -> None:
+    """The usual cause is a prefix that does not match the bucket's layout."""
+    registry = S3SkillsRegistry(
+        bucket='my-bucket',
+        prefix='wrong-prefix',
+        boto3_client=client,
+        target_dir=tmp_path / 'cache',
+    )
+
+    with pytest.raises(ValueError, match='matched no objects'):
+        registry.sync()
 
 
 # ---------------------------------------------------------------------------
@@ -292,14 +274,14 @@ def test_sync_rejects_path_traversal_key(tmp_path: Path) -> None:
 
 
 def test_top_level_import() -> None:
-    """S3SkillsRegistry is exported from the top-level package."""
-    from pydantic_ai_skills import S3SkillsRegistry as TopLevel
+    """S3SkillsRegistry is exported from the package root."""
+    from pydantic_ai_skills import S3SkillsRegistry as Exported
 
-    assert TopLevel is S3SkillsRegistry
+    assert Exported is S3SkillsRegistry
 
 
 def test_registries_module_import() -> None:
-    """S3SkillsRegistry is exported from the registries module."""
-    from pydantic_ai_skills.registries import S3SkillsRegistry as FromRegistries
+    """S3SkillsRegistry is exported from the registries subpackage."""
+    from pydantic_ai_skills.registries import S3SkillsRegistry as Exported
 
-    assert FromRegistries is S3SkillsRegistry
+    assert Exported is S3SkillsRegistry

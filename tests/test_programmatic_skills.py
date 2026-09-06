@@ -1,11 +1,12 @@
 """Tests for programmatic skills functionality."""
 
 from dataclasses import dataclass
+from typing import Any
 
 import pytest
 from pydantic_ai import RunContext
 
-from pydantic_ai_skills import Skill, SkillResource, SkillScript, SkillsToolset
+from pydantic_ai_skills import Skill, SkillResource, SkillsCapability, SkillScript, skill
 
 
 @dataclass
@@ -164,21 +165,18 @@ def test_skill_script_run_with_function() -> None:
     assert script.function is not None
 
 
-def test_toolset_with_programmatic_skills() -> None:
-    """Test toolset initialization with programmatic skills."""
+def test_capability_with_programmatic_skills() -> None:
+    """Python-defined skills join the same deferred catalog as file-based ones."""
     skill1 = Skill(name='skill-one', description='First skill', content='Content 1')
     skill2 = Skill(name='skill-two', description='Second skill', content='Content 2')
 
-    toolset = SkillsToolset(skills=[skill1, skill2])
+    capability = SkillsCapability(skills=[skill1, skill2])
 
-    assert len(toolset.skills) == 2
-    assert 'skill-one' in toolset.skills
-    assert 'skill-two' in toolset.skills
+    assert capability.skill_names == ['skill-one', 'skill-two']
 
 
-def test_toolset_with_mixed_skills(tmp_path) -> None:
-    """Test toolset with both file-based and programmatic skills."""
-    # Create file-based skill
+def test_capability_with_mixed_skills(tmp_path) -> None:
+    """A capability can hold both file-based and programmatic skills."""
     skill_dir = tmp_path / 'file-skill'
     skill_dir.mkdir()
     (skill_dir / 'SKILL.md').write_text("""---
@@ -189,43 +187,31 @@ description: File-based skill
 Content here
 """)
 
-    # Create programmatic skill
     prog_skill = Skill(name='prog-skill', description='Programmatic skill', content='Prog content')
 
-    toolset = SkillsToolset(directories=[tmp_path], skills=[prog_skill])
+    capability = SkillsCapability(directories=[tmp_path], skills=[prog_skill])
 
-    assert len(toolset.skills) == 2
-    assert 'file-skill' in toolset.skills
-    assert 'prog-skill' in toolset.skills
+    assert capability.skill_names == ['file-skill', 'prog-skill']
 
 
-def test_toolset_duplicate_skill_warning() -> None:
-    """Test warning when duplicate skills are provided."""
+def test_capability_duplicate_skill_warning() -> None:
+    """Two skills under one name would collide as deferred capability ids."""
     skill1 = Skill(name='duplicate', description='First', content='Content 1')
     skill2 = Skill(name='duplicate', description='Second', content='Content 2')
 
     with pytest.warns(UserWarning, match="Duplicate skill 'duplicate' found"):
-        toolset = SkillsToolset(skills=[skill1, skill2])
+        capability = SkillsCapability(skills=[skill1, skill2])
 
-    # Last one wins
-    assert toolset.skills['duplicate'].description == 'Second'
+    leaves: list[Any] = []
+    capability.apply(leaves.append)
+    assert [leaf.id for leaf in leaves] == ['duplicate']
+    assert leaves[0].get_description() == 'Second', 'the last definition wins'
 
 
-def test_toolset_no_skills_or_directories_warning(tmp_path) -> None:
-    """Test warning when default skills directory doesn't exist."""
-    import os
-
-    original_dir = os.getcwd()
-    try:
-        # Change to tmp directory where ./skills doesn't exist
-        os.chdir(tmp_path)
-
-        with pytest.warns(UserWarning, match='Default skills directory'):
-            toolset = SkillsToolset()
-
-        assert len(toolset.skills) == 0
-    finally:
-        os.chdir(original_dir)
+def test_capability_requires_a_source() -> None:
+    """v1 silently defaulted to ./skills; v2 asks for a source instead of guessing."""
+    with pytest.raises(ValueError, match='at least one source'):
+        SkillsCapability()
 
 
 def test_skill_metadata_property() -> None:
@@ -288,3 +274,102 @@ async def test_skill_script_run_error_no_function() -> None:
 
     with pytest.raises(ValueError, match='has no function'):
         await script.run(None)
+
+
+# ---------------------------------------------------------------------------
+# The @skill decorator
+# ---------------------------------------------------------------------------
+
+
+def test_skill_decorator_derives_name_and_description() -> None:
+    """The function's name and docstring carry the catalog entry."""
+
+    @skill
+    def data_analyzer() -> str:
+        """Analyze application data."""
+        return 'Query the warehouse first.'
+
+    assert data_analyzer.name == 'data-analyzer'
+    assert data_analyzer.description == 'Analyze application data.'
+
+
+def test_skill_decorator_accepts_an_explicit_name() -> None:
+    """An explicit name overrides the one derived from the function."""
+
+    @skill(name='analytics')
+    def data_analyzer() -> str:
+        """Analyze application data."""
+        return 'Body.'
+
+    assert data_analyzer.name == 'analytics'
+
+
+def test_skill_decorator_rejects_an_invalid_explicit_name() -> None:
+    """The name must be one harness would accept, since it becomes a capability id."""
+    with pytest.raises(ValueError, match='invalid skill name'):
+
+        @skill(name='Not_Valid')
+        def analytics() -> str:
+            """Analyze application data."""
+            return 'Body.'
+
+
+def test_skill_decorator_rejects_an_underivable_function_name() -> None:
+    """`My_Analyzer` normalizes to `my-analyzer`, but `_leading` does not survive."""
+    with pytest.raises(ValueError, match='invalid skill name'):
+
+        @skill
+        def _leading() -> str:
+            """Analyze application data."""
+            return 'Body.'
+
+
+def test_skill_decorator_attaches_resources_and_scripts() -> None:
+    """Resources and scripts hang off the returned wrapper."""
+
+    @skill
+    def analytics() -> str:
+        """Analyze application data."""
+        return 'Body.'
+
+    @analytics.resource
+    def schema() -> str:
+        """The warehouse schema."""
+        return 'id INT'
+
+    @analytics.script
+    async def run_query(ctx: RunContext[None], query: str) -> str:
+        """Run a read-only query."""
+        return f'ran {query}'
+
+    built = analytics.to_skill()
+    assert [resource.name for resource in built.resources] == ['schema']
+    assert [script.name for script in built.scripts] == ['run_query']
+
+
+def test_a_decorated_skill_reaches_the_capability() -> None:
+    """The whole point: it joins the same deferred catalog as a file-based skill."""
+
+    @skill
+    def analytics() -> str:
+        """Analyze application data."""
+        return 'Query the warehouse first.'
+
+    @analytics.resource
+    def schema() -> str:
+        """The warehouse schema."""
+        return 'id INT'
+
+    capability = SkillsCapability(skills=[analytics])
+
+    assert capability.skill_names == ['analytics']
+    assert sorted(capability.packages['analytics'].resources_by_name) == ['schema']
+
+    leaves: list[Any] = []
+    capability.apply(leaves.append)
+    leaf = next(leaf for leaf in leaves if leaf.id == 'analytics')
+    assert leaf.get_description() == 'Analyze application data.'
+    instructions = leaf.get_instructions()
+    assert isinstance(instructions, list)
+    assert instructions[0].startswith('# Skill: analytics\n\nQuery the warehouse first.')
+    assert '- `schema`' in instructions[0]

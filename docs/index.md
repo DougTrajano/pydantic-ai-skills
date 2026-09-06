@@ -1,137 +1,88 @@
-# Pydantic AI Skills
+# pydantic-ai-skills
 
-A standardized, composable framework for building and managing Agent Skills within the Pydantic AI ecosystem.
+Remote skill registries and bundled-file execution for [Pydantic AI](https://ai.pydantic.dev/)
+Agent Skills.
 
-## What are Agent Skills?
+[`pydantic-ai-harness`](https://github.com/pydantic/pydantic-ai-harness) ships a `Skills`
+capability that reads [Agent Skill](https://agentskills.io/specification) packages from local
+directories and turns each `SKILL.md` into a deferred Pydantic AI capability. It stops there, by
+design — its README is explicit:
 
-Agent Skills are **modular collections of instructions, scripts, and resources** that extend AI agents with specialized capabilities. Instead of hardcoding features, skills are discovered and loaded on-demand, keeping your agent's context lean and focused.
+> `Skills` does not enumerate, read, or execute those files. Relative paths and placeholders such
+> as `${CLAUDE_SKILL_DIR}` remain unchanged in the loaded instructions.
 
-## Key Features
+This package is the companion that fills the gaps. It hands discovery, validation and instruction
+rendering to harness — so a skill behaves identically either way — and adds the parts harness
+leaves out.
 
-- **Progressive Discovery**: Load skills only when needed, reducing token usage
-- **Modular Design**: Self-contained skill directories with instructions and resources
-- **Skill Registries**: Discover and install skills from Git repositories and other remote sources
-- **Script Execution**: Include Python scripts that agents can execute
-- **Resource Management**: Support for documentation and data files
-- **Skill Selection**: Expose a per-agent subset of a shared library with `include` / `exclude`
-- **Type-Safe**: Built on Pydantic AI's type-safe foundation
-- **Simple Integration**: Drop-in toolset for Pydantic AI agents
-- **Capabilities Integration**: Preferred via `SkillsCapability` and `capabilities=[...]`
+## What this adds
 
-Comparing options? See [Why pydantic-ai-skills](comparison.md).
+| | harness `Skills` | with `pydantic-ai-skills` |
+| --- | --- | --- |
+| Reads `SKILL.md` packages | ✅ | ✅ *(harness does it)* |
+| Skill catalog and on-demand instructions | ✅ | ✅ *(harness does it)* |
+| `include` / `exclude` selection | ✅ | ✅ *(harness does it)* |
+| Skills from a Git repository | ❌ | ✅ [`GitSkillsRegistry`](registries.md#git) |
+| Skills from an S3 bucket | ❌ | ✅ [`S3SkillsRegistry`](registries.md#s3) |
+| Composing sources (filter, prefix, rename, merge) | ❌ | ✅ [registry composition](registries.md#composition) |
+| Reading bundled `references/` and `assets/` | ❌ | ✅ `read_skill_resource` |
+| Running bundled `scripts/` | ❌ | ✅ `run_skill_script` |
+| Sandboxed script execution | ❌ | ✅ [sandbox executors](sandbox.md) |
+| `${SKILL_DIR}` resolved in instructions | ❌ | ✅ [`resolve_skill_dir`](concepts.md#skill_dir) |
+| Skills defined in Python | ❌ | ✅ [programmatic skills](programmatic-skills.md) |
 
-## Quick Example
+## Install
+
+```bash
+pip install pydantic-ai-skills          # core, including harness
+pip install "pydantic-ai-skills[git]"   # + Git registries
+pip install "pydantic-ai-skills[s3]"    # + S3 registries
+```
+
+See [Installation](installation.md) for the full list of extras.
+
+## Use it
 
 ```python
 from pydantic_ai import Agent
-from pydantic_ai_skills import SkillsCapability
+from pydantic_ai_skills import GitSkillsRegistry, SkillsCapability
 
-# Create agent with skills
 agent = Agent(
-    model='openai:gpt-5.2',
-    instructions="You are a helpful research assistant.",
-    capabilities=[SkillsCapability(directories=['./skills'])],
+    'anthropic:claude-sonnet-4-6',
+    capabilities=[
+        SkillsCapability(
+            '.agents/skills',
+            registries=[
+                GitSkillsRegistry(
+                    'https://github.com/anthropics/skills',
+                    path='skills',
+                ),
+            ],
+        ),
+    ],
 )
 
-# Use agent - skills tools are automatically available
-result = await agent.run(
-    "What are the last 3 papers on arXiv about machine learning?"
-)
+result = agent.run_sync('Fill in the tax form in ./forms and summarize what you entered.')
 print(result.output)
 ```
 
-## Capabilities API Example
+The model sees each skill's name and description up front, loads the ones it needs with
+Pydantic AI's own `load_capability` tool, then reaches that skill's bundled files with
+`read_skill_resource` and `run_skill_script`.
 
-`SkillsCapability` is the preferred integration path.
+## Where to go next
 
-It bundles `SkillsToolset` behavior and instruction injection through Pydantic AI's Capability API.
-If you use `SkillsToolset` directly, instructions are injected automatically.
+- **[Quick Start](quick-start.md)** — a working agent in a few minutes.
+- **[Core Concepts](concepts.md)** — progressive disclosure, and who does what.
+- **[Creating Skills](creating-skills.md)** — writing a skill package.
+- **[Skill Registries](registries.md)** — Git, S3, and composing sources.
+- **[Programmatic Skills](programmatic-skills.md)** — skills defined in Python.
+- **[Sandboxing](sandbox.md)** — keeping untrusted scripts off the host.
+- **[Security](security.md)** — the trust model, and what it does not cover.
+- **[Migrating from v1](migration-v2.md)** — what changed in 2.0 and why.
 
-```python
-from pydantic_ai import Agent
-from pydantic_ai_skills import SkillsCapability
+## Upgrading from v1
 
-agent = Agent(
-    model='openai:gpt-5.2',
-    capabilities=[
-        SkillsCapability(directories=['./skills'])
-    ],
-)
-```
-
-## Direct SkillsToolset Example
-
-You can also use `SkillsToolset` directly when you need explicit control.
-
-```python
-from pydantic_ai import Agent
-from pydantic_ai_skills import SkillsToolset
-
-skills_toolset = SkillsToolset(directories=['./skills'])
-
-agent = Agent(
-    model='openai:gpt-5.2',
-    instructions='You are a helpful research assistant.',
-    toolsets=[skills_toolset],
-)
-```
-
-## How It Works
-
-1. **Discovery**: The toolset scans specified directories for skills (folders with `SKILL.md` files)
-2. **Registration**: Skills are registered as tools on your agent
-3. **Progressive Loading**: Agents can:
-   - List all available skills with `list_skills()`
-   - Load detailed instructions with `load_skill(name)`
-   - Read additional resources with `read_skill_resource(skill_name, resource_name)`
-   - Execute scripts with `run_skill_script(skill_name, script_name, args)`
-
-## Benefits
-
-- **Cleaner Prompts**: Keep agent instructions focused instead of concatenating every possible feature
-- **Scalability**: Add new capabilities by creating new skill folders
-- **Maintainability**: Update skills independently without touching agent code
-- **Reusability**: Share skills across multiple agents and projects
-- **Efficiency**: Reduce token usage by loading skills only when needed
-- **Testability**: Test and debug skills in isolation
-
-## Security considerations
-
-We strongly recommend that you use Skills only from trusted sources: those you created yourself or obtained from trusted sources. Skills provide AI Agents with new capabilities through instructions and code, and while this makes them powerful, it also means a malicious Skill can direct agents to invoke tools or execute code in ways that don't match the Skill's stated purpose.
-
-!!! warning
-
-    If you must use a Skill from an untrusted or unknown source, exercise extreme caution and thoroughly audit it before use. Depending on what access agents have when executing the Skill, malicious Skills could lead to data exfiltration, unauthorized system access, or other security risks.
-
-## llms.txt
-
-The Pydantic AI Skills documentation is available in the [llms.txt](https://llmstxt.org/) format. This format is defined in Markdown and is suited for LLMs, AI coding assistants, and agents.
-
-Two formats are available:
-
-<!-- These two files are generated at the site root by the mkdocs-llmstxt plugin, so they are
-     not part of the mkdocs file registry and a Markdown link to them fails `--strict`
-     validation. Raw anchors keep the relative (version-correct under mike) URL. -->
-
-- <a href="llms.txt"><code>llms.txt</code></a>: a file containing a brief description of the project, along with links to the different sections of the documentation. The structure of this file is described in detail [here](https://llmstxt.org/#format).
-- <a href="llms-full.txt"><code>llms-full.txt</code></a>: Similar to `llms.txt`, but with the linked documentation content included inline. This file may be too large for some LLMs.
-
-As of today, these files are not automatically leveraged by most IDEs or coding agents, but they can use them if you provide a link or the full text.
-
-## Next Steps
-
-- [Quick Start](quick-start.md) - Build your first skill-enabled agent
-- [Creating Skills](creating-skills.md) - Learn how to create custom skills
-- [Programmatic Skills](programmatic-skills.md) - Create skills in Python code
-- [Skill Registries](registries.md) - Load skills from Git repositories and remote sources
-- [API Reference](api/toolset.md) - Detailed API documentation
-
-## References
-
-This package is inspired by:
-
-- [Agent Skills Specification](https://agentskills.io/specification)
-- [Using skills with Deep Agents](https://blog.langchain.com/using-skills-with-deep-agents/)
-Note
-
-⚠️ **Only use skills from trusted sources.** Since skills provide agents with new capabilities through instructions and executable code, malicious skills could direct agents to invoke tools unexpectedly or access sensitive data. Always audit skills before use. See [Security & Deployment](security.md) for detailed guidance
+v2 is a clean break. `SkillsToolset`, `SkillsDirectory`, `discover_skills`, `reload()` and the
+`list_skills` / `load_skill` tools are gone — harness or Pydantic AI now provide each of them.
+[Migrating from v1](migration-v2.md) maps every removed symbol to its replacement.

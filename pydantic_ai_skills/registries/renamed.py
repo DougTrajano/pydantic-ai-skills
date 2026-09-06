@@ -1,76 +1,74 @@
 """Renamed registry composition.
 
-Provides :class:`RenamedRegistry`, a wrapper that renames skills
-using an explicit mapping. Follows the same pattern as Pydantic
-AI's ``RenamedToolset``.
+Provides :class:`RenamedRegistry`, a wrapper that exposes selected skills under different
+names.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field
 from pathlib import Path
 
+from pydantic_ai_skills._parsing import read_skill_info, rewrite_skill_name, validate_skill_name
+from pydantic_ai_skills.registries._staging import copy_skill_directory, staging_directory
 from pydantic_ai_skills.registries.wrapper import WrapperRegistry
-from pydantic_ai_skills.types import Skill
 
 __all__ = ['RenamedRegistry']
 
 
 @dataclass
 class RenamedRegistry(WrapperRegistry):
-    """A registry that renames skills using a name map.
+    """A registry that exposes skills under names from a mapping.
 
-    ``name_map`` maps **new names to original names**:
-    ``{'new-name': 'original-name'}``.  Skills not present in the
-    map keep their original names.
+    Skills the map does not mention keep their original name. As with
+    :class:`~pydantic_ai_skills.registries.prefixed.PrefixedRegistry`, renaming stages the
+    package under its new directory name and rewrites the frontmatter `name` so harness
+    finds the two in agreement.
+
+    Attributes:
+        name_map: Mapping of ``{new_name: original_name}``.
 
     Example:
         ```python
-        renamed = registry.renamed({'doc-tool': 'pdf', 'sheet-tool': 'xlsx'})
-        skill = await renamed.get('doc-tool')    # fetches 'pdf'
-        skill = await renamed.get('xlsx')         # still works (unmapped)
+        registry.renamed({'anthropic-pdf': 'pdf'})
         ```
     """
 
-    name_map: dict[str, str]
+    name_map: dict[str, str] = field(default_factory=dict)
 
-    @property
-    def _reverse_map(self) -> dict[str, str]:
-        """Map from original name → new name."""
-        return {v: k for k, v in self.name_map.items()}
+    def sync(self) -> Path:
+        """Stage a library with the mapped skills renamed.
 
-    def _to_new_name(self, skill: Skill) -> Skill:
-        """Apply the rename mapping to a skill, if applicable."""
-        new_name = self._reverse_map.get(skill.name)
-        if new_name:
-            return replace(skill, name=new_name)
-        return skill
+        Raises:
+            ValueError: When a new name is one harness would reject, when the map names an
+                original skill this registry does not hold, or when two skills would end
+                up sharing a name.
+        """
+        source = self.wrapped.sync()
+        staged = staging_directory(self.target_dir)
 
-    def _to_original_name(self, name: str) -> str:
-        """Resolve a possibly-renamed name back to the original."""
-        return self.name_map.get(name, name)
+        renames = {original: new for new, original in self.name_map.items()}
+        available = {
+            info.name: info for child in sorted(source.iterdir()) if child.is_dir() if (info := read_skill_info(child))
+        }
 
-    async def search(self, query: str, limit: int = 10) -> list[Skill]:
-        """Search the wrapped registry and apply renames to results."""
-        results = await self.wrapped.search(query, limit)
-        return [self._to_new_name(s) for s in results]
+        unknown = sorted(set(renames) - set(available))
+        if unknown:
+            noun = 'skill' if len(unknown) == 1 else 'skills'
+            available_text = ', '.join(sorted(available)) or '(none)'
+            raise ValueError(f'Unknown {noun} in name_map: {", ".join(unknown)}. Available skills: {available_text}.')
 
-    async def get(self, skill_name: str) -> Skill:
-        """Get a skill by its (possibly renamed) name."""
-        original_name = self._to_original_name(skill_name)
-        skill = await self.wrapped.get(original_name)
-        return self._to_new_name(skill)
+        staged_names: dict[str, str] = {}
+        for original, info in available.items():
+            new_name = renames.get(original, original)
+            if new_name != original:
+                new_name = validate_skill_name(new_name, context=f'Renaming {original!r}')
+            if previous := staged_names.get(new_name):
+                raise ValueError(f'Renaming would give {previous!r} and {original!r} the same name {new_name!r}.')
+            staged_names[new_name] = original
 
-    async def install(self, skill_name: str, target_dir: str | Path) -> Path:
-        """Install a skill, resolving the renamed name first."""
-        original_name = self._to_original_name(skill_name)
-        return await self.wrapped.install(original_name, target_dir)
+            staged_skill = copy_skill_directory(info.directory, staged, new_name)
+            if new_name != original:
+                rewrite_skill_name(staged_skill / 'SKILL.md', new_name)
 
-    async def update(self, skill_name: str, target_dir: str | Path) -> Path:
-        """Update a skill, resolving the renamed name first."""
-        original_name = self._to_original_name(skill_name)
-        return await self.wrapped.update(original_name, target_dir)
-
-    def get_skills(self) -> list[Skill]:
-        """Return all skills with renamed names applied."""
-        return [self._to_new_name(s) for s in self.wrapped.get_skills()]
+        return staged

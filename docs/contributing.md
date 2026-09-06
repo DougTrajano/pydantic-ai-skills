@@ -65,7 +65,7 @@ pytest
 pytest --cov=pydantic_ai_skills
 
 # Run specific test
-pytest tests/test_toolset.py::test_discover_skills
+pytest tests/test_capability.py::test_each_skill_becomes_one_deferred_capability
 ```
 
 ### 4. Check Code Quality
@@ -98,34 +98,23 @@ mypy pydantic_ai_skills
 ### Example Docstring
 
 ```python
-def discover_skills(
-    directories: list[str | Path],
-    validate: bool = True,
-) -> list[Skill]:
-    """Discover skills from filesystem directories.
+def index_libraries(
+    libraries: Sequence[str | Path],
+    *,
+    script_executor: SkillScriptExecutor | None = None,
+) -> dict[str, SkillPackage]:
+    """Index the bundled files of every skill package in `libraries`.
 
-    Searches for SKILL.md files in the given directories and loads
-    skill metadata and structure.
+    Scans the immediate child directories of each library for a `SKILL.md`, exactly as
+    harness's `Skills` does, so the keys of the returned mapping line up with the `id`
+    of each deferred capability harness produces.
 
     Args:
-        directories: List of directory paths to search for skills.
-        validate: Whether to validate skill structure.
+        libraries: Skill-library directories. Non-existent entries are skipped.
+        script_executor: Executor used for the discovered scripts.
 
     Returns:
-        List of discovered Skill objects.
-
-    Raises:
-        ValueError: If validation enabled and skill is invalid.
-
-    Example:
-        ```python
-        skills = discover_skills(
-            directories=["./skills"],
-            validate=True
-        )
-        for skill in skills:
-            print(f"{skill.name}: {skill.metadata.description}")
-        ```
+        Mapping of NFKC-normalized skill name to its `SkillPackage`.
     """
 ```
 
@@ -142,20 +131,43 @@ def discover_skills(
 
 ```python
 import pytest
-from pydantic_ai_skills import SkillsToolset
 
-def test_toolset_init():
-    """Test SkillsToolset initialization."""
-    toolset = SkillsToolset(directories=["./test_skills"])
-    assert len(toolset.skills) > 0
+from pydantic_ai_skills import SkillsCapability
 
-def test_get_skill_not_found():
-    """Test get_skill raises error for non-existent skill."""
-    toolset = SkillsToolset(directories=["./test_skills"])
 
-    with pytest.raises(KeyError):
-        toolset.get_skill("non-existent")
+def test_a_library_is_exposed_as_a_catalog(tmp_path):
+    """Each skill package becomes one entry the model can load."""
+    write_skill(tmp_path, 'demo-skill')
+
+    assert SkillsCapability(tmp_path).skill_names == ['demo-skill']
+
+
+def test_unknown_include_name_is_rejected(tmp_path):
+    """A typo in a selection is a configuration error, not a silent no-op."""
+    write_skill(tmp_path, 'demo-skill')
+
+    with pytest.raises(ValueError, match='Unknown skill in include'):
+        SkillsCapability(tmp_path, include=['nope'])
 ```
+
+Every test function needs a docstring — Ruff enforces `D103` on `tests/` as well as on the package.
+Write the docstring to say *why* the behaviour matters, not to restate the assertion.
+
+### Testing against a model
+
+Use `FunctionModel` to script exact tool calls. `TestModel` does not work with deferred
+capabilities: it calls every tool with synthesized arguments, including `load_capability` with an id
+that does not exist, which exhausts the retry budget. See `tests/test_capability.py` for worked
+examples.
+
+### The harness compatibility guard
+
+`tests/test_harness_compat.py` pins the `pydantic-ai-harness` behaviour this package depends on —
+that `Skills.apply()` yields `Capability` leaves, that a leaf's id is its directory name, that
+instructions come back as plain strings, and that bundled files are *not* loaded. harness is on 0.x
+and documents that its API may change between minor releases, so keep this file in sync with what
+`capability.py` actually relies on. The same applies to `tests/test_pydantic_ai_compat.py` for the
+private pydantic-ai symbols.
 
 ## Pull Request Process
 

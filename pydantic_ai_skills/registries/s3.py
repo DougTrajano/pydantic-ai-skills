@@ -2,22 +2,17 @@
 
 Provides :class:`S3SkillsRegistry` for downloading skills from an Amazon S3
 bucket (or any S3-compatible store such as MinIO, Ceph, or Cloudflare R2) and
-exposing them to :class:`~pydantic_ai_skills.SkillsToolset`.
+handing their skill library to :class:`~pydantic_ai_skills.SkillsCapability`.
 """
 
 from __future__ import annotations
 
 import shutil
-from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from pydantic_ai_skills.directory import discover_skills
-from pydantic_ai_skills.executors import SkillScriptExecutor
 from pydantic_ai_skills.registries._base import SkillRegistry
-from pydantic_ai_skills.registries._copy import copy_skill_directory
-from pydantic_ai_skills.types import Skill
 
 __all__ = ['S3SkillsRegistry']
 
@@ -25,12 +20,10 @@ __all__ = ['S3SkillsRegistry']
 class S3SkillsRegistry(SkillRegistry):
     """Skills registry backed by an S3 bucket, downloaded with boto3.
 
-    Lists and downloads every object under ``bucket/prefix`` into a local cache
-    directory on the first call to ``search``/``get``/``install`` (or eagerly
-    during ``__init__`` when ``auto_install=True``), then parses the synced tree
-    with :func:`~pydantic_ai_skills.discover_skills`. Each sync mirrors the
-    remote prefix — the cached subtree is cleared first, so skills removed from
-    the bucket no longer appear locally. Re-syncs on ``update``.
+    :meth:`sync` lists and downloads every object under ``bucket/prefix`` into a local
+    cache directory, then returns the directory holding the skill packages. Each sync
+    mirrors the remote prefix — the cached subtree is cleared first, so skills removed
+    from the bucket no longer appear locally.
 
     Works with Amazon S3 and any S3-compatible store (MinIO, Ceph, Cloudflare R2,
     etc.). All connection details — credentials, ``endpoint_url``, region, TLS,
@@ -38,10 +31,9 @@ class S3SkillsRegistry(SkillRegistry):
     ``boto3_client``. When omitted, a default ``boto3.client("s3")`` is built,
     which uses boto3's standard credential resolution chain.
 
-    ``search()`` and ``get()`` return :class:`~pydantic_ai_skills.Skill` objects
-    parsed from ``SKILL.md`` frontmatter + body. Registry-specific metadata
-    (``source_url``, ``version``, ``bucket``, ``prefix``) is stored in
-    ``skill.metadata``.
+    It does not parse ``SKILL.md``: the directory it produces is handed to
+    :class:`~pydantic_ai_skills.SkillsCapability`, and validating and rendering the
+    packages inside it is `pydantic-ai-harness`'s job.
 
     Args:
         bucket: Name of the S3 bucket containing the skills.
@@ -49,35 +41,24 @@ class S3SkillsRegistry(SkillRegistry):
             Defaults to the bucket root (``""``). For example, pass ``"skills"``
             when skills live at ``s3://bucket/skills/<skill>/``.
         target_dir: Local directory where objects are downloaded. Defaults to a
-            temporary directory scoped to the registry instance. The synced tree
-            persists across ``install`` / ``update`` calls but is **not** cleaned
-            up automatically — callers own the lifecycle.
+            temporary directory scoped to the registry instance. A directory you pass
+            persists across :meth:`sync` calls and is **not** cleaned up automatically —
+            callers own the lifecycle.
         boto3_client: A pre-built boto3 S3 client. Use this to configure
             credentials, ``endpoint_url`` (for MinIO/Ceph/R2), region, TLS, and
             path-style addressing. When ``None``, a default ``boto3.client("s3")``
             is created (requires the ``s3`` extra: ``pip install pydantic-ai-skills[s3]``).
-        validate: Whether to run metadata validation on every discovered
-            ``SKILL.md`` after syncing. Mirrors the homonymous flag on
-            :class:`~pydantic_ai_skills.SkillsDirectory`. Defaults to ``True``.
-        auto_install: When ``True`` (default), ``search`` and ``get`` trigger a
-            sync automatically so the local copy is always up to date. Set to
-            ``False`` to skip syncing on construction and on ``search`` / ``get``;
-            the registry then reads only what already exists in ``target_dir``.
-            Note that an explicit ``update()`` call always contacts S3.
-        script_executor: Executor used for file-based scripts in the discovered
-            skills. Registry skills are the least-trusted source there is, so
-            pass a sandboxing executor here to keep them off the host. When
-            None, scripts run as local subprocesses via
-            :class:`~pydantic_ai_skills.LocalSkillScriptExecutor`.
+        auto_install: When ``True`` (default), :meth:`sync` contacts S3 so the local copy
+            is up to date. Set to ``False`` to read only what already exists in
+            ``target_dir``, which is what offline or air-gapped environments want.
 
     Examples:
         Amazon S3 with the ambient credential chain:
 
         ```python
-        from pydantic_ai_skills import SkillsToolset
-        from pydantic_ai_skills.registries.s3 import S3SkillsRegistry
+        from pydantic_ai_skills import S3SkillsRegistry, SkillsCapability
 
-        toolset = SkillsToolset(
+        capability = SkillsCapability(
             registries=[S3SkillsRegistry(bucket="my-skills", prefix="skills")]
         )
         ```
@@ -107,9 +88,7 @@ class S3SkillsRegistry(SkillRegistry):
         prefix: str = '',
         target_dir: str | Path | None = None,
         boto3_client: Any | None = None,
-        validate: bool = True,
         auto_install: bool = True,
-        script_executor: SkillScriptExecutor | None = None,
     ) -> None:
         if boto3_client is None:
             try:
@@ -126,8 +105,6 @@ class S3SkillsRegistry(SkillRegistry):
 
         self._bucket = bucket
         self._prefix = prefix.strip('/')
-        self._validate = validate
-        self._script_executor = script_executor
         self._auto_install = auto_install
         self._tmp_dir: Any | None = None
         # Cache of the most recent object listing (Key -> LastModified), populated by _sync.
@@ -140,11 +117,6 @@ class S3SkillsRegistry(SkillRegistry):
             self._target_dir = Path(self._tmp_dir.name)
         else:
             self._target_dir = Path(target_dir).expanduser().resolve()
-
-        self._cached_skills: list[Skill] = []
-        if self._auto_install:
-            self._sync()
-            self._cached_skills = [self._enrich_metadata(s) for s in self._load_skills()]
 
     def __repr__(self) -> str:
         return (
@@ -213,164 +185,57 @@ class S3SkillsRegistry(SkillRegistry):
             except Exception as exc:  # surface any boto3/botocore error with context
                 raise RuntimeError(f"Failed to download '{key}' from bucket '{self._bucket}': {exc}") from exc
 
-    def _load_skills(self) -> list[Skill]:
-        """Discover all skills from the synced cache path."""
-        skills_root = self._skills_root()
-        if not skills_root.exists():
-            return []
-        return discover_skills(
-            path=skills_root,
-            validate=self._validate,
-            max_depth=2,
-            script_executor=self._script_executor,
-        )
+    def _latest_modified(self, skill_name: str) -> str | None:
+        """Return the newest ``LastModified`` across one skill's objects, ISO-formatted.
 
-    def _skill_version(self, skill: Skill) -> str | None:
-        """Return the latest LastModified across the skill's objects, ISO-formatted.
-
-        Uses the cached object listing from the most recent :meth:`_sync`, so it
-        performs no additional S3 calls.
+        Reads the object listing cached by the most recent :meth:`sync`, so it performs no
+        additional S3 calls.
         """
-        if not skill.uri or not self._object_modified:
-            return None
-        try:
-            skill_dir = Path(skill.uri).resolve().relative_to(self._target_dir.resolve())
-        except ValueError:
-            return None
-        key_prefix = f'{skill_dir.as_posix()}/'
+        key_prefix = f'{self._prefix}/{skill_name}/'.lstrip('/')
         latest: datetime | None = None
         for key, modified in self._object_modified.items():
             if key.startswith(key_prefix) and modified is not None and (latest is None or modified > latest):
                 latest = modified
         return latest.isoformat() if latest is not None else None
 
-    def _enrich_metadata(self, skill: Skill) -> Skill:
-        """Inject registry-specific keys into ``skill.metadata``."""
-        skill_path = f'{self._prefix}/{skill.name}'.strip('/')
-        extra: dict[str, Any] = {
-            'source_url': f's3://{self._bucket}/{skill_path}',
-            'registry': type(self).__name__,
-            'bucket': self._bucket,
-            'prefix': self._prefix,
-            'version': self._skill_version(skill),
-        }
-        existing = dict(skill.metadata) if skill.metadata else {}
-        existing.update(extra)
-        return replace(skill, metadata=existing)
-
-    def _ensure_skills_loaded(self) -> None:
-        """Populate the skills cache if empty, respecting ``auto_install``."""
-        if self._cached_skills:
-            return
-        if self._auto_install:
-            self._sync()
-        self._cached_skills = [self._enrich_metadata(s) for s in self._load_skills()]
-
-    # ------------------------------------------------------------------
-    # Synchronous skill access for SkillsToolset integration
-    # ------------------------------------------------------------------
-
-    def get_skills(self) -> list[Skill]:
-        """Return all skills discovered from the bucket.
-
-        Returns:
-            List of enriched :class:`~pydantic_ai_skills.Skill` objects.
-        """
-        self._ensure_skills_loaded()
-        return list(self._cached_skills)
-
     # ------------------------------------------------------------------
     # SkillRegistry interface
     # ------------------------------------------------------------------
 
-    async def search(self, query: str, limit: int = 10) -> list[Skill]:
-        """Search available skills by keyword.
+    def sync(self) -> Path:
+        """Download the bucket prefix and return its skill-library directory.
 
-        Matches ``query`` (case-insensitively) against each skill's ``name`` and
-        ``description``.
-
-        Args:
-            query: Keyword to search for.
-            limit: Maximum number of results.
+        The returned path is ``target_dir`` joined with ``prefix``, whose immediate
+        children are the skill packages. With ``auto_install=False`` nothing is
+        downloaded and whatever is already on disk is returned.
 
         Returns:
-            List of matching :class:`~pydantic_ai_skills.Skill` objects.
-        """
-        q = query.lower()
-        results: list[Skill] = []
-        for skill in self.get_skills():
-            if q in skill.name.lower() or q in (skill.description or '').lower():
-                results.append(skill)
-                if len(results) >= limit:
-                    break
-        return results
-
-    async def get(self, skill_name: str) -> Skill:
-        """Return the full skill by name.
-
-        Args:
-            skill_name: Exact skill name.
-
-        Returns:
-            A fully-parsed :class:`~pydantic_ai_skills.Skill`.
+            Path to the local skill-library directory.
 
         Raises:
-            KeyError: When no skill with ``skill_name`` exists.
+            RuntimeError: On S3 listing or download errors.
+            ValueError: When the prefix holds no synced skill library — usually a
+                ``prefix`` that does not match the bucket's layout, or
+                ``auto_install=False`` with nothing downloaded yet.
         """
-        for skill in self.get_skills():
-            if skill.name == skill_name:
-                return skill
-        raise KeyError(f"Skill '{skill_name}' not found in bucket '{self._bucket}'.")
+        if self._auto_install:
+            self._sync()
 
-    async def install(self, skill_name: str, target_dir: str | Path) -> Path:
-        """Copy a skill from the synced cache into ``target_dir``.
+        skills_root = self._skills_root()
+        if not skills_root.is_dir():
+            detail = (
+                'nothing has been downloaded yet and auto_install is disabled'
+                if not self._auto_install
+                else f'prefix={self._prefix!r} matched no objects'
+            )
+            raise ValueError(f"No skill library at {skills_root} for bucket '{self._bucket}': {detail}.")
+        return skills_root
 
-        Args:
-            skill_name: Name of the skill to install.
-            target_dir: Destination directory; a ``skill_name`` subdirectory is
-                created inside it.
+    def revision(self, skill_name: str) -> str | None:
+        """Return the newest object modification time for one skill, ISO-formatted.
 
-        Returns:
-            Path to the installed skill directory (``target_dir/skill_name``).
-
-        Raises:
-            KeyError: When ``skill_name`` is not found in the registry.
-            ValueError: When the destination or source path escapes its expected
-                directory (path traversal protection).
+        Useful for recording which version of a remote skill an agent ran with, since
+        :meth:`sync` otherwise tracks a moving prefix. Returns None before the first sync
+        or when the skill has no objects in the cached listing.
         """
-        self._ensure_skills_loaded()
-
-        src_skill_dir: Path | None = None
-        for skill in self._cached_skills:
-            if skill.name == skill_name and skill.uri:
-                src_skill_dir = Path(skill.uri)
-                break
-
-        if src_skill_dir is None:
-            raise KeyError(f"Skill '{skill_name}' not found in bucket '{self._bucket}'.")
-
-        return copy_skill_directory(src_skill_dir, target_dir, skill_name)
-
-    async def update(self, skill_name: str, target_dir: str | Path) -> Path:
-        """Re-sync from S3 and re-copy the skill to ``target_dir``.
-
-        Performs a fresh sync of the cache before re-installing. Falls back to a
-        plain ``install`` if the skill is not yet installed.
-
-        Args:
-            skill_name: Name of the skill to update.
-            target_dir: Directory where the skill was previously installed.
-
-        Returns:
-            Path to the updated skill directory.
-
-        Raises:
-            KeyError: When ``skill_name`` is not found after the sync.
-        """
-        dest = Path(target_dir).expanduser().resolve() / skill_name
-        if not dest.exists():
-            return await self.install(skill_name, target_dir)
-
-        self._sync()
-        self._cached_skills = [self._enrich_metadata(s) for s in self._load_skills()]
-        return await self.install(skill_name, target_dir)
+        return self._latest_modified(skill_name)

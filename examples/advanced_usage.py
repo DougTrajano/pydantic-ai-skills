@@ -13,7 +13,7 @@ from pydantic_ai.ext.langchain import tool_from_langchain
 from pydantic_ai.mcp import MCPServerStdio
 from pydantic_ai.tools import DeferredToolRequests
 
-from pydantic_ai_skills import SkillsToolset
+from pydantic_ai_skills import SkillsCapability
 
 load_dotenv()
 
@@ -22,7 +22,7 @@ logfire.instrument_pydantic_ai()
 
 # Initialize Skills Toolset with the skills directory
 script_dir = Path(__file__).parent
-skills_toolset = SkillsToolset(directories=[script_dir / 'skills', script_dir / 'anthropic-skills'])
+skills = SkillsCapability([script_dir / 'skills', script_dir / 'anthropic-skills'])
 
 # Create tmp directory for MCP filesystem server
 tmp_dir = script_dir / 'tmp'
@@ -42,7 +42,8 @@ search_tool = tool_from_langchain(search)
 agent = Agent(
     model='gateway/openai:gpt-5.2',
     instructions='You are a helpful research assistant.',
-    toolsets=[skills_toolset, fs_toolset],
+    toolsets=[fs_toolset],
+    capabilities=[skills],
     tools=[search_tool],
     output_type=[str, DeferredToolRequests],
 )

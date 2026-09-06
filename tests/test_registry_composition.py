@@ -1,444 +1,403 @@
-"""Tests for registry composition classes.
+"""Tests for registry composition.
 
-Tests WrapperRegistry, FilteredRegistry, PrefixedRegistry, RenamedRegistry,
-and CombinedRegistry independently of any concrete registry implementation.
+A registry's contract in v2 is one method: `sync()` returns a local skill-library
+directory. The composition wrappers therefore present a *different* library than the one
+they wrap, which means staging real directories rather than mapping objects in memory.
+These tests pin that the staged output is something harness will actually accept.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import warnings
 from pathlib import Path
 
 import pytest
+from pydantic_ai_harness import Skills
 
-from pydantic_ai_skills.registries._base import SkillRegistry
-from pydantic_ai_skills.registries.combined import CombinedRegistry
-from pydantic_ai_skills.registries.filtered import FilteredRegistry
-from pydantic_ai_skills.registries.prefixed import PrefixedRegistry
-from pydantic_ai_skills.registries.renamed import RenamedRegistry
-from pydantic_ai_skills.registries.wrapper import WrapperRegistry
-from pydantic_ai_skills.types import Skill
+from pydantic_ai_skills import SkillsCapability
+from pydantic_ai_skills.registries import (
+    CombinedRegistry,
+    FilteredRegistry,
+    LocalSkillsRegistry,
+    SkillRegistry,
+    WrapperRegistry,
+)
+
+
+def write_skill(library: Path, name: str, *, description: str | None = None, declare_name: bool = True) -> Path:
+    """Create a skill package under `library` and return its directory."""
+    skill = library / name
+    skill.mkdir(parents=True, exist_ok=True)
+    declared = f'name: {name}\n' if declare_name else ''
+    (skill / 'SKILL.md').write_text(
+        f'---\n{declared}description: {description or f"The {name} skill."}\n---\n\nBody.\n'
+    )
+    return skill
+
+
+def library_names(library: Path) -> list[str]:
+    """Names of the skill packages in a library, sorted."""
+    return sorted(child.name for child in library.iterdir() if (child / 'SKILL.md').is_file())
+
+
+def harness_names(library: Path) -> list[str]:
+    """What harness would actually call the skills in `library`.
+
+    The real assertion for a staged library: harness both accepts it and agrees with the
+    directory names we chose.
+    """
+    leaves: list[object] = []
+    Skills(library).apply(leaves.append)
+    return sorted(leaf.id for leaf in leaves)  # type: ignore[attr-defined]
+
+
+@pytest.fixture
+def source(tmp_path: Path) -> LocalSkillsRegistry:
+    """A registry over a library holding three skills, one with a bundled file."""
+    library = tmp_path / 'source'
+    write_skill(library, 'pdf-tools', description='Work with PDF documents.')
+    write_skill(library, 'web-research', description='Search the web.')
+    skill = write_skill(library, 'data-analysis', description='Analyze datasets.')
+    (skill / 'references').mkdir()
+    (skill / 'references' / 'NOTES.md').write_text('the notes')
+    return LocalSkillsRegistry(library)
+
 
 # ---------------------------------------------------------------------------
-# Stub registry for testing
+# LocalSkillsRegistry
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class StubRegistry(SkillRegistry):
-    """In-memory registry for testing composition wrappers."""
-
-    skills: list[Skill] = field(default_factory=list)
-
-    async def search(self, query: str, limit: int = 10) -> list[Skill]:
-        q = query.lower()
-        return [s for s in self.skills if q in s.name.lower() or q in (s.description or '').lower()][:limit]
-
-    async def get(self, skill_name: str) -> Skill:
-        for s in self.skills:
-            if s.name == skill_name:
-                return s
-        raise KeyError(f"Skill '{skill_name}' not found.")
-
-    async def install(self, skill_name: str, target_dir: str | Path) -> Path:
-        await self.get(skill_name)  # validate exists
-        dest = Path(target_dir) / skill_name
-        dest.mkdir(parents=True, exist_ok=True)
-        return dest
-
-    async def update(self, skill_name: str, target_dir: str | Path) -> Path:
-        return await self.install(skill_name, target_dir)
-
-    def get_skills(self) -> list[Skill]:
-        return list(self.skills)
+def test_local_registry_returns_its_directory(source: LocalSkillsRegistry) -> None:
+    """A local library needs no fetching, so sync just hands it back."""
+    assert library_names(source.sync()) == ['data-analysis', 'pdf-tools', 'web-research']
 
 
-def _make_skills() -> list[Skill]:
-    """Create a standard set of test skills."""
-    return [
-        Skill(name='pdf', description='PDF manipulation skill.', content='PDF instructions.'),
-        Skill(name='xlsx', description='Excel spreadsheet skill.', content='Excel instructions.'),
-        Skill(name='web-research', description='Search the web for information.', content='Web instructions.'),
-    ]
+def test_local_registry_rejects_a_missing_directory(tmp_path: Path) -> None:
+    """Failing here beats a confusing error from harness later."""
+    registry = LocalSkillsRegistry(tmp_path / 'nope')
+
+    with pytest.raises(ValueError, match='does not exist'):
+        registry.sync()
 
 
-@pytest.fixture()
-def stub_registry() -> StubRegistry:
-    """Return a stub registry with 3 skills."""
-    return StubRegistry(skills=_make_skills())
+def test_local_registry_rejects_a_file(tmp_path: Path) -> None:
+    """A library is a directory of skill packages, not a file."""
+    a_file = tmp_path / 'a-file'
+    a_file.write_text('not a directory')
+
+    registry = LocalSkillsRegistry(a_file)
+
+    with pytest.raises(ValueError, match='not a directory'):
+        registry.sync()
 
 
-# ===========================================================================
+def test_skill_names_reads_the_synced_library(source: LocalSkillsRegistry) -> None:
+    """Callers can inspect a registry without building an agent."""
+    assert source.skill_names() == ['data-analysis', 'pdf-tools', 'web-research']
+
+
+def test_skill_infos_carry_the_description(source: LocalSkillsRegistry) -> None:
+    """The description is what a filter predicate usually matches on."""
+    infos = {info.name: info for info in source.skill_infos()}
+
+    assert infos['pdf-tools'].description == 'Work with PDF documents.'
+    assert infos['pdf-tools'].directory.name == 'pdf-tools'
+
+
+# ---------------------------------------------------------------------------
 # WrapperRegistry
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 
-async def test_wrapper_delegates_search(stub_registry: StubRegistry) -> None:
-    """WrapperRegistry.search() delegates to the wrapped registry."""
-    wrapper = WrapperRegistry(wrapped=stub_registry)
-    results = await wrapper.search('pdf')
-    assert len(results) == 1
-    assert results[0].name == 'pdf'
+def test_wrapper_delegates_sync(source: LocalSkillsRegistry) -> None:
+    """The base wrapper is pure delegation; subclasses override what they change."""
+    assert WrapperRegistry(wrapped=source).sync() == source.sync()
 
 
-async def test_wrapper_delegates_get(stub_registry: StubRegistry) -> None:
-    """WrapperRegistry.get() delegates to the wrapped registry."""
-    wrapper = WrapperRegistry(wrapped=stub_registry)
-    skill = await wrapper.get('xlsx')
-    assert skill.name == 'xlsx'
+def test_a_custom_registry_only_has_to_implement_sync(tmp_path: Path) -> None:
+    """The ABC is deliberately one method wide."""
+    library = tmp_path / 'custom'
+    write_skill(library, 'custom-skill')
+
+    class MyRegistry(SkillRegistry):
+        def sync(self) -> Path:
+            return library
+
+    assert MyRegistry().skill_names() == ['custom-skill']
 
 
-async def test_wrapper_delegates_install(stub_registry: StubRegistry, tmp_path: Path) -> None:
-    """WrapperRegistry.install() delegates to the wrapped registry."""
-    wrapper = WrapperRegistry(wrapped=stub_registry)
-    result = await wrapper.install('pdf', tmp_path)
-    assert result.is_dir()
-    assert result.name == 'pdf'
-
-
-async def test_wrapper_delegates_update(stub_registry: StubRegistry, tmp_path: Path) -> None:
-    """WrapperRegistry.update() delegates to the wrapped registry."""
-    wrapper = WrapperRegistry(wrapped=stub_registry)
-    result = await wrapper.update('pdf', tmp_path)
-    assert result.is_dir()
-
-
-async def test_wrapper_get_raises_not_found(stub_registry: StubRegistry) -> None:
-    """WrapperRegistry.get() propagates KeyError."""
-    wrapper = WrapperRegistry(wrapped=stub_registry)
-    with pytest.raises(KeyError):
-        await wrapper.get('nonexistent')
-
-
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # FilteredRegistry
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 
-async def test_filtered_search_limits_results(stub_registry: StubRegistry) -> None:
-    """FilteredRegistry.search() only returns skills matching the predicate."""
-    filtered = FilteredRegistry(wrapped=stub_registry, predicate=lambda s: s.name == 'pdf')
-    results = await filtered.search('skill')
-    assert all(s.name == 'pdf' for s in results)
+def test_filtered_stages_only_matching_skills(source: LocalSkillsRegistry) -> None:
+    """Only matching packages are copied into the staged library."""
+    staged = FilteredRegistry(wrapped=source, predicate=lambda info: 'data' in info.name).sync()
+
+    assert library_names(staged) == ['data-analysis']
+    assert harness_names(staged) == ['data-analysis']
 
 
-async def test_filtered_search_returns_empty(stub_registry: StubRegistry) -> None:
-    """FilteredRegistry.search() returns empty when predicate matches nothing."""
-    filtered = FilteredRegistry(wrapped=stub_registry, predicate=lambda s: False)
-    results = await filtered.search('pdf')
-    assert results == []
+def test_filtered_can_match_on_description(source: LocalSkillsRegistry) -> None:
+    """Predicates see the description, not just the name."""
+    staged = source.filtered(lambda info: 'PDF' in info.description).sync()
+
+    assert library_names(staged) == ['pdf-tools']
 
 
-async def test_filtered_get_passes_predicate(stub_registry: StubRegistry) -> None:
-    """FilteredRegistry.get() returns a skill that passes the predicate."""
-    filtered = FilteredRegistry(wrapped=stub_registry, predicate=lambda s: s.name == 'pdf')
-    skill = await filtered.get('pdf')
-    assert skill.name == 'pdf'
+def test_filtered_leaves_the_source_untouched(source: LocalSkillsRegistry) -> None:
+    """Composition is a view: the wrapped registry is never modified."""
+    source.filtered(lambda info: False).sync()
+
+    assert library_names(source.sync()) == ['data-analysis', 'pdf-tools', 'web-research']
 
 
-async def test_filtered_get_rejects_excluded(stub_registry: StubRegistry) -> None:
-    """FilteredRegistry.get() raises KeyError for excluded skills."""
-    filtered = FilteredRegistry(wrapped=stub_registry, predicate=lambda s: s.name == 'pdf')
-    with pytest.raises(KeyError):
-        await filtered.get('xlsx')
+def test_filtered_copies_bundled_files(source: LocalSkillsRegistry) -> None:
+    """Filtering must not quietly drop a skill's references or scripts."""
+    staged = source.filtered(lambda info: info.name == 'data-analysis').sync()
+
+    assert (staged / 'data-analysis' / 'references' / 'NOTES.md').read_text() == 'the notes'
 
 
-async def test_filtered_install_validates(stub_registry: StubRegistry, tmp_path: Path) -> None:
-    """FilteredRegistry.install() checks predicate before installing."""
-    filtered = FilteredRegistry(wrapped=stub_registry, predicate=lambda s: s.name == 'pdf')
-    result = await filtered.install('pdf', tmp_path)
-    assert result.is_dir()
+def test_filtered_matching_nothing_yields_an_empty_library(source: LocalSkillsRegistry) -> None:
+    """An empty library is valid, and harness accepts it."""
+    staged = source.filtered(lambda info: False).sync()
+
+    assert library_names(staged) == []
+    assert harness_names(staged) == []
 
 
-async def test_filtered_install_rejects_excluded(stub_registry: StubRegistry, tmp_path: Path) -> None:
-    """FilteredRegistry.install() raises for excluded skills."""
-    filtered = FilteredRegistry(wrapped=stub_registry, predicate=lambda s: s.name == 'pdf')
-    with pytest.raises(KeyError):
-        await filtered.install('xlsx', tmp_path)
+def test_filtered_stages_into_a_requested_directory(source: LocalSkillsRegistry, tmp_path: Path) -> None:
+    """A caller can pin where a composed library lands instead of using a temp dir."""
+    target = tmp_path / 'staged'
+
+    staged = source.filtered(
+        lambda info: info.name == 'pdf-tools',
+    ).sync()
+    assert staged != target  # sanity: the default is a temporary directory
+
+    staged = FilteredRegistry(
+        wrapped=source,
+        predicate=lambda info: info.name == 'pdf-tools',
+        target_dir=target,
+    ).sync()
+
+    assert staged == target.resolve()
+    assert library_names(staged) == ['pdf-tools']
 
 
-async def test_filtered_update_validates(stub_registry: StubRegistry, tmp_path: Path) -> None:
-    """FilteredRegistry.update() checks predicate before updating."""
-    filtered = FilteredRegistry(wrapped=stub_registry, predicate=lambda s: s.name == 'pdf')
-    result = await filtered.update('pdf', tmp_path)
-    assert result.is_dir()
+def test_resyncing_a_target_directory_drops_stale_skills(source: LocalSkillsRegistry, tmp_path: Path) -> None:
+    """A narrowed filter must not leave the previous run's skills behind."""
+    target = tmp_path / 'staged'
+    FilteredRegistry(wrapped=source, predicate=lambda info: True, target_dir=target).sync()
+    assert len(library_names(target)) == 3
+
+    staged = FilteredRegistry(
+        wrapped=source,
+        predicate=lambda info: info.name == 'pdf-tools',
+        target_dir=target,
+    ).sync()
+
+    assert library_names(staged) == ['pdf-tools']
 
 
-async def test_filtered_update_rejects_excluded(stub_registry: StubRegistry, tmp_path: Path) -> None:
-    """FilteredRegistry.update() raises for excluded skills."""
-    filtered = FilteredRegistry(wrapped=stub_registry, predicate=lambda s: s.name == 'pdf')
-    with pytest.raises(KeyError):
-        await filtered.update('xlsx', tmp_path)
-
-
-async def test_filtered_via_convenience_method(stub_registry: StubRegistry) -> None:
-    """SkillRegistry.filtered() returns a FilteredRegistry."""
-    filtered = stub_registry.filtered(lambda s: s.name == 'xlsx')
-    assert isinstance(filtered, FilteredRegistry)
-    skill = await filtered.get('xlsx')
-    assert skill.name == 'xlsx'
-
-
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # PrefixedRegistry
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 
-async def test_prefixed_search_adds_prefix(stub_registry: StubRegistry) -> None:
-    """PrefixedRegistry.search() prepends prefix to all result names."""
-    prefixed = PrefixedRegistry(wrapped=stub_registry, prefix='acme-')
-    results = await prefixed.search('pdf')
-    assert len(results) == 1
-    assert results[0].name == 'acme-pdf'
+def test_prefixed_renames_the_directories(source: LocalSkillsRegistry) -> None:
+    """Skills are named after their directory, so prefixing renames it."""
+    staged = source.prefixed('vendor-').sync()
+
+    assert library_names(staged) == ['vendor-data-analysis', 'vendor-pdf-tools', 'vendor-web-research']
 
 
-async def test_prefixed_get_with_prefix(stub_registry: StubRegistry) -> None:
-    """PrefixedRegistry.get() resolves prefixed name to the inner skill."""
-    prefixed = PrefixedRegistry(wrapped=stub_registry, prefix='acme-')
-    skill = await prefixed.get('acme-pdf')
-    assert skill.name == 'acme-pdf'
+def test_prefixed_rewrites_the_frontmatter_name(source: LocalSkillsRegistry) -> None:
+    """Harness rejects a SKILL.md whose `name` disagrees with its directory.
+
+    Without the rewrite, prefixing would produce a library harness refuses outright.
+    """
+    staged = source.prefixed('vendor-').sync()
+
+    assert 'name: vendor-pdf-tools' in (staged / 'vendor-pdf-tools' / 'SKILL.md').read_text()
+    assert harness_names(staged) == ['vendor-data-analysis', 'vendor-pdf-tools', 'vendor-web-research']
 
 
-async def test_prefixed_get_without_prefix_raises(stub_registry: StubRegistry) -> None:
-    """PrefixedRegistry.get() raises when prefix is missing."""
-    prefixed = PrefixedRegistry(wrapped=stub_registry, prefix='acme-')
-    with pytest.raises(KeyError):
-        await prefixed.get('pdf')
+def test_prefixed_handles_a_skill_md_without_a_name_key(tmp_path: Path) -> None:
+    """Harness derives the name from the directory, so there is nothing to rewrite."""
+    library = tmp_path / 'source'
+    write_skill(library, 'nameless', declare_name=False)
+
+    staged = LocalSkillsRegistry(library).prefixed('vendor-').sync()
+
+    assert harness_names(staged) == ['vendor-nameless']
 
 
-async def test_prefixed_install_strips_prefix(stub_registry: StubRegistry, tmp_path: Path) -> None:
-    """PrefixedRegistry.install() strips prefix before delegating."""
-    prefixed = PrefixedRegistry(wrapped=stub_registry, prefix='acme-')
-    result = await prefixed.install('acme-pdf', tmp_path)
-    assert result.is_dir()
-    # Installed under the original (un-prefixed) name
-    assert result.name == 'pdf'
+def test_prefixed_rejects_a_prefix_that_yields_an_invalid_name(source: LocalSkillsRegistry) -> None:
+    """Failing here names the prefix; failing inside harness would not."""
+    registry = source.prefixed('Vendor_')
+
+    with pytest.raises(ValueError, match='Prefixing'):
+        registry.sync()
 
 
-async def test_prefixed_update_strips_prefix(stub_registry: StubRegistry, tmp_path: Path) -> None:
-    """PrefixedRegistry.update() strips prefix before delegating."""
-    prefixed = PrefixedRegistry(wrapped=stub_registry, prefix='acme-')
-    result = await prefixed.update('acme-pdf', tmp_path)
-    assert result.is_dir()
-    assert result.name == 'pdf'
+def test_prefixed_copies_bundled_files(source: LocalSkillsRegistry) -> None:
+    """Prefixing must not quietly drop a skill's references or scripts."""
+    staged = source.prefixed('vendor-').sync()
+
+    assert (staged / 'vendor-data-analysis' / 'references' / 'NOTES.md').read_text() == 'the notes'
 
 
-async def test_prefixed_via_convenience_method(stub_registry: StubRegistry) -> None:
-    """SkillRegistry.prefixed() returns a PrefixedRegistry."""
-    prefixed = stub_registry.prefixed('x-')
-    assert isinstance(prefixed, PrefixedRegistry)
-    skill = await prefixed.get('x-pdf')
-    assert skill.name == 'x-pdf'
-
-
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # RenamedRegistry
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 
-async def test_renamed_search_maps_names(stub_registry: StubRegistry) -> None:
-    """RenamedRegistry.search() applies the name map to results."""
-    renamed = RenamedRegistry(wrapped=stub_registry, name_map={'doc-tool': 'pdf'})
-    results = await renamed.search('pdf')
-    assert len(results) == 1
-    assert results[0].name == 'doc-tool'
+def test_renamed_maps_the_named_skills(source: LocalSkillsRegistry) -> None:
+    """A mapped skill is staged, and named, under its new name."""
+    staged = source.renamed({'documents': 'pdf-tools'}).sync()
+
+    assert library_names(staged) == ['data-analysis', 'documents', 'web-research']
+    assert harness_names(staged) == ['data-analysis', 'documents', 'web-research']
 
 
-async def test_renamed_get_with_new_name(stub_registry: StubRegistry) -> None:
-    """RenamedRegistry.get() resolves new name to original."""
-    renamed = RenamedRegistry(wrapped=stub_registry, name_map={'doc-tool': 'pdf'})
-    skill = await renamed.get('doc-tool')
-    assert skill.name == 'doc-tool'
+def test_renamed_leaves_unmapped_skills_alone(source: LocalSkillsRegistry) -> None:
+    """Skills the map does not mention keep their original name."""
+    staged = source.renamed({'documents': 'pdf-tools'}).sync()
+
+    assert 'name: web-research' in (staged / 'web-research' / 'SKILL.md').read_text()
 
 
-async def test_renamed_get_unmapped_name(stub_registry: StubRegistry) -> None:
-    """RenamedRegistry.get() passes through names not in the map."""
-    renamed = RenamedRegistry(wrapped=stub_registry, name_map={'doc-tool': 'pdf'})
-    skill = await renamed.get('xlsx')
-    assert skill.name == 'xlsx'
+def test_renamed_rejects_an_unknown_original(source: LocalSkillsRegistry) -> None:
+    """A typo in the map is a configuration error, not a silent no-op."""
+    registry = source.renamed({'new-name': 'nope'})
+
+    with pytest.raises(ValueError, match='Unknown skill in name_map: nope'):
+        registry.sync()
 
 
-async def test_renamed_install_resolves_name(stub_registry: StubRegistry, tmp_path: Path) -> None:
-    """RenamedRegistry.install() resolves renamed name before delegating."""
-    renamed = RenamedRegistry(wrapped=stub_registry, name_map={'doc-tool': 'pdf'})
-    result = await renamed.install('doc-tool', tmp_path)
-    assert result.is_dir()
-    assert result.name == 'pdf'
+def test_renamed_rejects_an_invalid_new_name(source: LocalSkillsRegistry) -> None:
+    """The new name still has to be one harness accepts."""
+    registry = source.renamed({'Bad_Name': 'pdf-tools'})
+
+    with pytest.raises(ValueError, match='Renaming'):
+        registry.sync()
 
 
-async def test_renamed_update_resolves_name(stub_registry: StubRegistry, tmp_path: Path) -> None:
-    """RenamedRegistry.update() resolves renamed name before delegating."""
-    renamed = RenamedRegistry(wrapped=stub_registry, name_map={'doc-tool': 'pdf'})
-    result = await renamed.update('doc-tool', tmp_path)
-    assert result.is_dir()
-    assert result.name == 'pdf'
+def test_renamed_rejects_a_collision(source: LocalSkillsRegistry) -> None:
+    """Renaming onto an existing name would hand harness a duplicate."""
+    registry = source.renamed({'web-research': 'pdf-tools'})
+
+    with pytest.raises(ValueError, match='the same name'):
+        registry.sync()
 
 
-async def test_renamed_via_convenience_method(stub_registry: StubRegistry) -> None:
-    """SkillRegistry.renamed() returns a RenamedRegistry."""
-    renamed = stub_registry.renamed({'doc-tool': 'pdf'})
-    assert isinstance(renamed, RenamedRegistry)
-    skill = await renamed.get('doc-tool')
-    assert skill.name == 'doc-tool'
-
-
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # CombinedRegistry
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 
-async def test_combined_search_merges_results() -> None:
-    """CombinedRegistry.search() merges results from all child registries."""
-    reg1 = StubRegistry(skills=[Skill(name='pdf', description='PDF skill.', content='')])
-    reg2 = StubRegistry(skills=[Skill(name='xlsx', description='Excel skill.', content='')])
-    combined = CombinedRegistry(registries=[reg1, reg2])
-    results = await combined.search('skill')
-    names = {s.name for s in results}
-    assert names == {'pdf', 'xlsx'}
+def test_combined_merges_libraries(tmp_path: Path) -> None:
+    """Both registries' skills end up in one library harness can read."""
+    first = tmp_path / 'first'
+    second = tmp_path / 'second'
+    write_skill(first, 'alpha')
+    write_skill(second, 'beta')
+
+    staged = CombinedRegistry(registries=[LocalSkillsRegistry(first), LocalSkillsRegistry(second)]).sync()
+
+    assert library_names(staged) == ['alpha', 'beta']
+    assert harness_names(staged) == ['alpha', 'beta']
 
 
-async def test_combined_search_deduplicates() -> None:
-    """CombinedRegistry.search() deduplicates by name (first wins)."""
-    reg1 = StubRegistry(skills=[Skill(name='pdf', description='First.', content='')])
-    reg2 = StubRegistry(skills=[Skill(name='pdf', description='Second.', content='')])
-    combined = CombinedRegistry(registries=[reg1, reg2])
-    results = await combined.search('pdf')
-    assert len(results) == 1
-    assert results[0].description == 'First.'
+def test_combined_prefers_the_earlier_registry_and_warns(tmp_path: Path) -> None:
+    """Silently merging would make the catalog depend on directory iteration order."""
+    first = tmp_path / 'first'
+    second = tmp_path / 'second'
+    write_skill(first, 'shared', description='From the first registry.')
+    write_skill(second, 'shared', description='From the second registry.')
+
+    combined = CombinedRegistry(registries=[LocalSkillsRegistry(first), LocalSkillsRegistry(second)])
+    with pytest.warns(UserWarning, match='provided by more than one registry'):
+        staged = combined.sync()
+
+    assert library_names(staged) == ['shared']
+    assert 'From the first registry.' in (staged / 'shared' / 'SKILL.md').read_text()
 
 
-async def test_combined_get_first_match() -> None:
-    """CombinedRegistry.get() returns the first registry's match."""
-    reg1 = StubRegistry(skills=[Skill(name='pdf', description='First.', content='')])
-    reg2 = StubRegistry(skills=[Skill(name='pdf', description='Second.', content='')])
-    combined = CombinedRegistry(registries=[reg1, reg2])
-    skill = await combined.get('pdf')
-    assert skill.description == 'First.'
+def test_or_operator_builds_a_combined_registry(tmp_path: Path) -> None:
+    """The `|` operator is shorthand for CombinedRegistry."""
+    first = tmp_path / 'first'
+    second = tmp_path / 'second'
+    write_skill(first, 'alpha')
+    write_skill(second, 'beta')
+
+    combined = LocalSkillsRegistry(first) | LocalSkillsRegistry(second)
+
+    assert isinstance(combined, CombinedRegistry)
+    assert library_names(combined.sync()) == ['alpha', 'beta']
 
 
-async def test_combined_get_tries_all_registries() -> None:
-    """CombinedRegistry.get() falls through to the next registry on miss."""
-    reg1 = StubRegistry(skills=[Skill(name='pdf', description='PDF.', content='')])
-    reg2 = StubRegistry(skills=[Skill(name='xlsx', description='Excel.', content='')])
-    combined = CombinedRegistry(registries=[reg1, reg2])
-    skill = await combined.get('xlsx')
-    assert skill.name == 'xlsx'
+# ---------------------------------------------------------------------------
+# Chaining
+# ---------------------------------------------------------------------------
 
 
-async def test_combined_get_raises_when_missing() -> None:
-    """CombinedRegistry.get() raises when no registry has the skill."""
-    reg1 = StubRegistry(skills=[Skill(name='pdf', description='PDF.', content='')])
-    combined = CombinedRegistry(registries=[reg1])
-    with pytest.raises(KeyError):
-        await combined.get('nonexistent')
+def test_filtered_then_prefixed(source: LocalSkillsRegistry) -> None:
+    """Wrappers chain, each staging from the previous one's output."""
+    staged = source.filtered(lambda info: 'pdf' in info.name).prefixed('vendor-').sync()
+
+    assert harness_names(staged) == ['vendor-pdf-tools']
 
 
-async def test_combined_install_routes_to_owner(tmp_path: Path) -> None:
-    """CombinedRegistry.install() routes to the registry that owns the skill."""
-    reg1 = StubRegistry(skills=[Skill(name='pdf', description='PDF.', content='')])
-    reg2 = StubRegistry(skills=[Skill(name='xlsx', description='Excel.', content='')])
-    combined = CombinedRegistry(registries=[reg1, reg2])
-    result = await combined.install('xlsx', tmp_path)
-    assert result.is_dir()
-    assert result.name == 'xlsx'
+def test_prefixed_then_filtered(source: LocalSkillsRegistry) -> None:
+    """The predicate sees the prefixed names, because filtering runs on the staged library."""
+    staged = source.prefixed('vendor-').filtered(lambda info: info.name == 'vendor-pdf-tools').sync()
+
+    assert harness_names(staged) == ['vendor-pdf-tools']
 
 
-async def test_combined_install_raises_when_missing(tmp_path: Path) -> None:
-    """CombinedRegistry.install() raises when no registry has the skill."""
-    combined = CombinedRegistry(registries=[StubRegistry(skills=[])])
-    with pytest.raises(KeyError):
-        await combined.install('nonexistent', tmp_path)
+def test_renamed_then_prefixed(source: LocalSkillsRegistry) -> None:
+    """A renamed skill can be prefixed again further down the chain."""
+    staged = source.renamed({'documents': 'pdf-tools'}).prefixed('vendor-').sync()
+
+    assert 'vendor-documents' in harness_names(staged)
 
 
-async def test_combined_update_routes_to_owner(tmp_path: Path) -> None:
-    """CombinedRegistry.update() routes to the registry that owns the skill."""
-    reg1 = StubRegistry(skills=[Skill(name='pdf', description='PDF.', content='')])
-    combined = CombinedRegistry(registries=[reg1])
-    result = await combined.update('pdf', tmp_path)
-    assert result.is_dir()
+def test_combined_with_prefixes_exposes_both_sides_of_a_collision(tmp_path: Path) -> None:
+    """The documented escape hatch when two registries ship the same skill name."""
+    first = tmp_path / 'first'
+    second = tmp_path / 'second'
+    write_skill(first, 'shared')
+    write_skill(second, 'shared')
+
+    combined = LocalSkillsRegistry(first).prefixed('a-') | LocalSkillsRegistry(second).prefixed('b-')
+
+    with warnings.catch_warnings():
+        warnings.simplefilter('error')
+        staged = combined.sync()
+
+    assert harness_names(staged) == ['a-shared', 'b-shared']
 
 
-async def test_combined_update_raises_when_missing(tmp_path: Path) -> None:
-    """CombinedRegistry.update() raises when no registry has the skill."""
-    combined = CombinedRegistry(registries=[StubRegistry(skills=[])])
-    with pytest.raises(KeyError):
-        await combined.update('nonexistent', tmp_path)
+# ---------------------------------------------------------------------------
+# Composed registries reach the agent
+# ---------------------------------------------------------------------------
 
 
-async def test_combined_search_respects_limit() -> None:
-    """CombinedRegistry.search() respects the limit parameter."""
-    skills = [Skill(name=f'skill-{i}', description='Test.', content='') for i in range(20)]
-    reg = StubRegistry(skills=skills)
-    combined = CombinedRegistry(registries=[reg])
-    results = await combined.search('test', limit=5)
-    assert len(results) == 5
+def test_a_composed_registry_feeds_the_capability(source: LocalSkillsRegistry) -> None:
+    """The whole point: a composed source reaches the agent."""
+    capability = SkillsCapability(registries=[source.filtered(lambda info: 'pdf' in info.name).prefixed('vendor-')])
+
+    assert capability.skill_names == ['vendor-pdf-tools']
 
 
-# ===========================================================================
-# Chaining / composition
-# ===========================================================================
+def test_bundled_files_survive_composition(source: LocalSkillsRegistry) -> None:
+    """A staged copy is only useful if the skill's files came with it."""
+    capability = SkillsCapability(registries=[source.prefixed('vendor-')])
 
-
-async def test_filtered_then_prefixed(stub_registry: StubRegistry) -> None:
-    """Chaining filtered() then prefixed() applies both transformations."""
-    view = stub_registry.filtered(lambda s: s.name == 'pdf').prefixed('x-')
-    results = await view.search('pdf')
-    assert len(results) == 1
-    assert results[0].name == 'x-pdf'
-
-
-async def test_prefixed_then_filtered(stub_registry: StubRegistry) -> None:
-    """Chaining prefixed() then filtered() — predicate sees prefixed names."""
-    view = stub_registry.prefixed('a-').filtered(lambda s: s.name == 'a-pdf')
-    results = await view.search('pdf')
-    assert len(results) == 1
-    assert results[0].name == 'a-pdf'
-
-
-async def test_renamed_then_filtered(stub_registry: StubRegistry) -> None:
-    """Chaining renamed() then filtered() — predicate sees renamed names."""
-    view = stub_registry.renamed({'doc': 'pdf'}).filtered(lambda s: s.name == 'doc')
-    results = await view.search('pdf')
-    assert len(results) == 1
-    assert results[0].name == 'doc'
-
-
-async def test_filtered_then_renamed(stub_registry: StubRegistry) -> None:
-    """Chaining filtered() then renamed() applies both transformations."""
-    view = stub_registry.filtered(lambda s: s.name == 'pdf').renamed({'doc': 'pdf'})
-    skill = await view.get('doc')
-    assert skill.name == 'doc'
-
-
-async def test_combined_with_filtered_children() -> None:
-    """CombinedRegistry with filtered children works correctly."""
-    reg1 = StubRegistry(
-        skills=[
-            Skill(name='pdf', description='PDF.', content=''),
-            Skill(name='xlsx', description='Excel.', content=''),
-        ]
-    )
-    reg2 = StubRegistry(
-        skills=[
-            Skill(name='web-research', description='Web.', content=''),
-        ]
-    )
-    combined = CombinedRegistry(
-        registries=[
-            reg1.filtered(lambda s: s.name == 'pdf'),
-            reg2,
-        ]
-    )
-    results = await combined.search('', limit=10)
-    names = {s.name for s in results}
-    # xlsx is filtered out from reg1
-    assert 'xlsx' not in names
-    assert 'pdf' in names
-    assert 'web-research' in names
-
-
-async def test_triple_chain(stub_registry: StubRegistry) -> None:
-    """Three-level chaining: filtered → prefixed → renamed."""
-    view = stub_registry.filtered(lambda s: s.name == 'pdf').prefixed('acme-').renamed({'document-tool': 'acme-pdf'})
-    skill = await view.get('document-tool')
-    assert skill.name == 'document-tool'
+    package = capability.packages['vendor-data-analysis']
+    assert sorted(package.resources_by_name) == ['references/NOTES.md']

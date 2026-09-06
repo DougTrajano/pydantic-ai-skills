@@ -12,17 +12,17 @@ Data classes:
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from pathlib import Path
+from inspect import signature as get_signature
 from typing import Any, Generic, TypeVar
 
 from pydantic.json_schema import GenerateJsonSchema
 from pydantic_ai import _function_schema
+from pydantic_ai._griffe import doc_descriptions
 from pydantic_ai.tools import GenerateToolJsonSchema
 
-from ._parsing import SKILL_NAME_PATTERN, parse_skill_md, validate_skill_metadata
-from .executors import SkillScriptExecutor
+from ._parsing import validate_skill_name
 
 # Generic type variable for dependencies
 DepsT = TypeVar('DepsT')
@@ -49,22 +49,11 @@ def normalize_skill_name(func_name: str) -> str:
         normalize_skill_name('InvalidName')  # Raises ValueError
         ```
     """
-    # Replace underscores with hyphens and convert to lowercase
+    # Replace underscores with hyphens and convert to lowercase, then hold the result to
+    # the same rule harness applies to directory-backed skills, so a programmatic skill
+    # and a file-based one can never disagree about what a legal name is.
     normalized = func_name.replace('_', '-').lower()
-
-    # Validate against pattern
-    if not SKILL_NAME_PATTERN.match(normalized):
-        raise ValueError(
-            f"Skill name '{normalized}' (derived from function '{func_name}') is invalid. "
-            'Skill names must contain only lowercase letters, numbers, and hyphens '
-            '(no consecutive hyphens).'
-        )
-
-    # Check length
-    if len(normalized) > 64:
-        raise ValueError(f"Skill name '{normalized}' exceeds 64 characters ({len(normalized)} chars).")
-
-    return normalized
+    return validate_skill_name(normalized, context=f'Deriving a skill name from function {func_name!r}')
 
 
 @dataclass
@@ -258,103 +247,6 @@ class Skill:
         if self.uri is None:
             self.uri = f'skill://{self.name}'
 
-    @classmethod
-    def from_file(
-        cls,
-        path: str | Path,
-        validate: bool = True,
-        script_executor: SkillScriptExecutor | None = None,
-        exclude_resources: Iterable[str] | None = None,
-    ) -> Skill:
-        """Load a :class:`Skill` from a SKILL.md file or its parent directory.
-
-        Args:
-            path: Path to a ``SKILL.md`` file or to the directory that contains one.
-                When a file path is given it must be named exactly ``SKILL.md``.
-            validate: When ``True`` (default), raises :exc:`ValueError` for
-                structural problems (missing ``SKILL.md``, YAML errors, absent ``name``
-                field).  Metadata quality issues (bad name format, missing description,
-                overlong body) emit :class:`UserWarning` regardless of this flag.
-            script_executor: Optional custom script executor for file-based scripts.
-            exclude_resources: Extra glob patterns to exclude from resource discovery,
-                in addition to the built-in defaults (``__pycache__``, ``*.pyc``,
-                ``.DS_Store`` …). None for defaults only. Any readable text file not
-                excluded and not discovered as a script becomes a resource.
-
-        Returns:
-            A :class:`Skill` instance.
-
-        Raises:
-            ValueError: For structural problems: wrong filename, invalid YAML
-                frontmatter, or (when *validate* is ``True``) a missing ``name``
-                field.
-            FileNotFoundError: When ``SKILL.md`` does not exist at the expected path.
-            OSError: Propagated directly for unreadable files, permission errors, or
-                I/O failures.  :func:`discover_skills` catches this and re-raises it
-                as :exc:`ValueError`, so direct callers should handle both.
-        """
-        from .directory import _discover_resources, _discover_scripts  # lazy: transitive circular via local.py
-        from .local import LocalSkillScriptExecutor as _LocalExecutor
-
-        skill_path = Path(path).expanduser().resolve()
-        if skill_path.is_dir():
-            skill_file = skill_path / 'SKILL.md'
-        else:
-            if skill_path.name != 'SKILL.md':
-                raise ValueError(f"Expected a SKILL.md file or its parent directory, got '{skill_path.name}'")
-            skill_file = skill_path
-
-        if not skill_file.exists():
-            raise FileNotFoundError(f'SKILL.md not found at {skill_file}')
-
-        skill_folder = skill_file.parent
-        raw = skill_file.read_text(encoding='utf-8')
-        frontmatter, instructions = parse_skill_md(raw)
-
-        # Coerce before the empty check so YAML scalars like `name: 0` load as '0'
-        # rather than being treated as missing.  Only None/empty-string falls back.
-        raw_name = frontmatter.get('name')
-        name = str(raw_name) if raw_name is not None else ''
-        if not name:
-            if validate:
-                raise ValueError(f'Skill at {skill_file} is missing the required "name" field')
-            name = skill_folder.name
-
-        # Coerce YAML scalar fields to str — YAML may return int/float/None
-        description = str(frontmatter.get('description') or '')
-        license_field = frontmatter.get('license')
-        license_field = str(license_field) if license_field is not None else None
-        compatibility_field = frontmatter.get('compatibility')
-        compatibility_field = str(compatibility_field) if compatibility_field is not None else None
-        metadata = {
-            k: v for k, v in frontmatter.items() if k not in ('name', 'description', 'license', 'compatibility')
-        }
-
-        if validate:
-            validate_skill_metadata(frontmatter, instructions, uri=str(skill_folder))
-
-        # `is None`, not `or`: a falsey custom executor must not be replaced by
-        # the host one.
-        executor = _LocalExecutor() if script_executor is None else script_executor
-        scripts = _discover_scripts(skill_folder, name, executor)
-        resources = _discover_resources(
-            skill_folder,
-            exclude_resources,
-            script_uris={script.uri for script in scripts if script.uri},
-        )
-
-        return cls(
-            name=name,
-            description=description,
-            content=instructions,
-            license=license_field,
-            compatibility=compatibility_field,
-            uri=str(skill_folder),
-            resources=resources,
-            scripts=scripts,
-            metadata=metadata if metadata else None,
-        )
-
     def resource(
         self,
         func: Callable[..., Any] | None = None,
@@ -494,22 +386,20 @@ class Skill:
 class SkillWrapper(Generic[DepsT]):
     """Generic wrapper for decorator-based skill creation with type-safe dependencies.
 
-    Typically created via `@skills.skill` decorator on a SkillsToolset instance.
+    Created by the [`@skill`][pydantic_ai_skills.skill] decorator.
 
     Example:
         ```python
         from dataclasses import dataclass
         from pydantic_ai import RunContext
-        from pydantic_ai_skills import SkillsToolset
+        from pydantic_ai_skills import skill
 
         @dataclass
         class MyDeps:
             database: DatabaseConn
 
-        skills = SkillsToolset[MyDeps]()
-
-        @skills.skill(resources=[], metadata={'version': '1.0'})
-        def data_analyzer(ctx: RunContext[MyDeps]) -> str:
+        @skill(resources=[], metadata={'version': '1.0'})
+        def data_analyzer() -> str:
             '''Analyze data from the database.'''
             return 'Use this skill for data analysis...'
 
@@ -723,3 +613,92 @@ class SkillWrapper(Generic[DepsT]):
             uri=None,  # __post_init__ will assign skill://{name}
             metadata=self.metadata,
         )
+
+
+def skill(
+    func: Callable[[], str] | None = None,
+    *,
+    name: str | None = None,
+    description: str | None = None,
+    license: str | None = None,
+    compatibility: str | None = None,
+    metadata: dict[str, Any] | None = None,
+    resources: list[SkillResource] | None = None,
+    scripts: list[SkillScript] | None = None,
+) -> Any:
+    """Define a skill in Python from a function returning its instructions.
+
+    The decorated function returns the skill's instructions. Its name becomes the skill's
+    name (underscores to hyphens) unless `name` is given, and its docstring becomes the
+    description unless `description` is given.
+
+    Pass the result to [`SkillsCapability`][pydantic_ai_skills.SkillsCapability] via
+    `skills=`; it joins the same deferred catalog as skills read from disk.
+
+    Example:
+        ```python
+        from pydantic_ai import Agent, RunContext
+        from pydantic_ai_skills import SkillsCapability, skill
+
+
+        @skill(metadata={'version': '1.0'})
+        def data_analyzer() -> str:
+            '''Analyze data from the application database.'''
+            return 'Query the warehouse before answering questions about usage.'
+
+
+        @data_analyzer.resource
+        async def get_schema(ctx: RunContext[MyDeps]) -> str:
+            '''The current warehouse schema.'''
+            return await ctx.deps.database.get_schema()
+
+
+        @data_analyzer.script
+        async def run_analysis(ctx: RunContext[MyDeps], query: str) -> str:
+            '''Run a read-only query.'''
+            return str(await ctx.deps.database.execute(query))
+
+
+        agent = Agent('openai:gpt-5.2', capabilities=[SkillsCapability(skills=[data_analyzer])])
+        ```
+
+    Args:
+        func: The function returning the skill's instructions.
+        name: Skill name. Defaults to the function name with underscores replaced by hyphens.
+        description: Skill description. Defaults to the function's docstring summary.
+        license: Optional license information (e.g. "Apache-2.0").
+        compatibility: Optional environment requirements.
+        metadata: Additional metadata fields.
+        resources: Initial resources to attach.
+        scripts: Initial scripts to attach.
+
+    Returns:
+        A [`SkillWrapper`][pydantic_ai_skills.SkillWrapper] that further resources and
+        scripts can be attached to with its own `resource` and `script` decorators.
+    """
+
+    def decorator(f: Callable[[], str]) -> SkillWrapper[Any]:
+        # An explicit name is validated as given; a derived one is normalized first, since
+        # `data_analyzer` is a perfectly good function name and a bad skill name.
+        skill_name = (
+            validate_skill_name(name, context=f'The name passed to @skill for {f.__name__!r}')
+            if name is not None
+            else normalize_skill_name(f.__name__)
+        )
+
+        skill_description = description
+        if skill_description is None:
+            skill_description, _ = doc_descriptions(f, get_signature(f), docstring_format='auto')
+
+        return SkillWrapper(
+            function=f,
+            name=skill_name,
+            description=skill_description,
+            license=license,
+            compatibility=compatibility,
+            metadata=metadata,
+            resources=list(resources) if resources else [],
+            scripts=list(scripts) if scripts else [],
+        )
+
+    return decorator if func is None else decorator(func)

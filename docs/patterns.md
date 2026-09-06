@@ -1,770 +1,370 @@
 # Implementation Patterns
 
-Common design patterns and best practices for skill systems.
+Recipes for common situations. Each one states the problem first, so you can tell whether it is
+yours.
 
-## Skill Selection Patterns
+## Skill selection
 
-### When to Use File-Based Skills
+### Give each agent only what it needs
 
-Best for:
-- **Large, stable skills** shared across projects
-- **Public/open-source skills**
-- **Complex resource files** (forms, templates, docs)
-- **Team collaboration** with centralized organization
+A shared skill directory serves several agents, but each should see a subset — a hundred catalog
+entries in the prompt is a hundred entries the model has to read past.
 
 ```python
 from pydantic_ai import Agent
-from pydantic_ai_skills import SkillsToolset
+from pydantic_ai_skills import SkillsCapability
 
-# File-based approach: organize skills in directory structure
-# ./skills/
-#   ├── data-analysis/
-#   │   ├── SKILL.md
-#   │   ├── reference.md
-#   │   └── scripts/
-#   │       └── analyze.py
-#   └── web-research/
-#       ├── SKILL.md
-#       └── scripts/
-
-toolset = SkillsToolset(directories=['./skills'])
-agent = Agent(model='openai:gpt-4o', toolsets=[toolset])
-```
-
-### When to Use Programmatic Skills
-
-Best for:
-- **Runtime-generated skills** based on configuration
-- **Skills requiring runtime dependencies** (databases, APIs)
-- **Dynamic resource generation** that changes per session
-- **Application-specific skills** tightly coupled with logic
-
-```python
-from pydantic_ai import RunContext
-from pydantic_ai_skills import SkillsToolset
-
-class MyDeps:
-    database: Database
-    config: Config
-
-skills = SkillsToolset()
-
-@skills.skill()
-def database_analysis() -> str:
-    """Analyze data in database."""
-    return "Use database resources and scripts to analyze data"
-
-@database_analysis.resource
-async def get_schema(ctx: RunContext[MyDeps]) -> str:
-    """Get schema from actual database."""
-    schema = await ctx.deps.database.get_schema()
-    return f"## Current Schema\n{schema}"
-
-agent = Agent(
-    model='openai:gpt-4o',
-    toolsets=[skills],
-    deps=MyDeps(database=my_db, config=my_config)
+support = Agent(
+    'openai:gpt-5.2',
+    capabilities=[SkillsCapability('./skills', include=['refunds', 'order-lookup'])],
+)
+research = Agent(
+    'openai:gpt-5.2',
+    capabilities=[SkillsCapability('./skills', include=['arxiv-search', 'web-research'])],
 )
 ```
 
-### Mixed Approach
+An `include` name matching nothing raises at construction, so a renamed skill breaks the build
+rather than silently shrinking an agent's catalog.
 
-Combine both for flexibility:
+### Keep work-in-progress skills out
 
 ```python
-from pydantic_ai_skills import SkillsToolset
-
-# Mix file-based and programmatic skills
-toolset = SkillsToolset(
-    directories=['./skills'],              # Stable, reusable skills
-    max_depth=2                            # Reasonable discovery depth
-)
-
-# Add runtime-specific skills
-@toolset.skill(
-    name='runtime-monitor',
-    metadata={'version': '1.0.0'}
-)
-def monitoring() -> str:
-    return "Monitor application runtime metrics"
-
-@monitoring.resource
-async def get_metrics(ctx: RunContext[MyDeps]) -> str:
-    metrics = await ctx.deps.monitoring.current_metrics()
-    return f"## Metrics\n{metrics}"
-
-agent = Agent(model='openai:gpt-4o', toolsets=[toolset])
+SkillsCapability('./skills', exclude=['draft-invoice-parser'])
 ```
 
-## Resource Parameter Patterns
-
-### Static Resources
-
-Use for reference documentation and fixed content:
+Better still, keep drafts in a separate directory and add it only in development:
 
 ```python
-from pydantic_ai_skills import Skill, SkillResource
+libraries = ['./skills']
+if settings.environment == 'development':
+    libraries.append('./skills-draft')
 
-skill = Skill(
-    name='reference-skill',
-    description='Provide reference documentation',
-    content='Main instructions...',
-    resources=[
-        SkillResource(
-            name='api-reference',
-            description='Complete API reference',
-            content='''
-## API Reference
-
-### GET /users
-Retrieve all users...
-
-### POST /users
-Create a new user...
-'''
-        ),
-        SkillResource(
-            name='examples',
-            description='Code examples',
-            content='''
-## Examples
-
-```python
-# Example 1: Basic usage
-client = APIClient()
-users = client.get_users()
-```
-'''
-        )
-    ]
-)
+capability = SkillsCapability(libraries)
 ```
 
-### Dynamic Resources with Context
+### Different subsets of the same remote source
 
-Use for resources that depend on runtime state:
+Filter the registry rather than the capability, so each agent's copy is staged independently:
 
 ```python
-from typing import TypedDict
-from pydantic_ai import RunContext
-from pydantic_ai_skills import SkillsToolset
+from pydantic_ai_skills import GitSkillsRegistry
 
-class MyDeps(TypedDict):
-    database: Database
-    cache: Cache
+source = GitSkillsRegistry('https://github.com/anthropics/skills', path='skills')
 
-skills = SkillsToolset()
-
-@skills.skill()
-def data_skill() -> str:
-    return "Database and cache management"
-
-# Resource that fetches current schema
-@data_skill.resource
-async def get_current_schema(ctx: RunContext[MyDeps]) -> str:
-    """Get latest schema from database."""
-    schema = await ctx.deps.database.get_schema()
-    # Could also cache this
-    await ctx.deps.cache.set('schema', schema, ttl=3600)
-    return f"## Current Schema\n{schema}"
-
-# Resource that lists available tables
-@data_skill.resource
-async def get_tables(ctx: RunContext[MyDeps]) -> str:
-    """Get available tables."""
-    tables = await ctx.deps.database.list_tables()
-    return "## Available Tables\n" + "\n".join(f"- {t}" for t in tables)
+office = SkillsCapability(registries=[source.filtered(lambda info: info.name in {'pdf', 'xlsx', 'docx'})])
 ```
 
-### Parameterized Resources
+## Writing descriptions the model can act on
 
-Resources can accept parameters for dynamic content:
+The description is the *only* thing the model sees before loading a skill. It answers one question:
+should I load this?
 
-```python
-from pydantic_ai_skills import SkillsToolset
+```yaml
+# Too vague — the model cannot tell when this applies
+description: Helps with documents.
 
-skills = SkillsToolset()
-
-@skills.skill()
-def query_skill() -> str:
-    return "Execute database queries"
-
-@query_skill.resource
-def documentation(topic: str = "general") -> str:
-    """Get documentation for a topic."""
-    docs = {
-        "general": "General query documentation...",
-        "aggregation": "Aggregation query documentation...",
-        "joins": "Join query documentation..."
-    }
-    return docs.get(topic, "Topic not found")
+# Better — says what it does and when to reach for it
+description: >
+  Fill and extract data from PDF forms. Use when the user asks to complete a form,
+  read values out of a filled PDF, or merge PDFs.
 ```
 
-## Script Execution Patterns
+The Agent Skills limit is 1,024 characters; harness warns above it rather than truncating. Two
+skills with overlapping descriptions is the usual cause of the model loading the wrong one — make
+the boundary explicit in both.
 
-### Simple Synchronous Scripts
+## Scripts
 
-For simple, stateless operations:
+### Argument marshalling
+
+`run_skill_script` passes `args` to the script as `--key value` pairs, so `argparse` works as
+written:
 
 ```python
-from pydantic_ai_skills import SkillsToolset
-
-skills = SkillsToolset()
-
-@skills.skill()
-def text_processing() -> str:
-    return "Process text data"
-
-@text_processing.script
-def count_words(text: str) -> str:
-    """Count words in text."""
-    words = len(text.split())
-    return f"Word count: {words}"
-
-@text_processing.script
-def reverse_text(text: str) -> str:
-    """Reverse text."""
-    return text[::-1]
+args = {'query': 'transformers', 'max_results': 3, 'verbose': True, 'tags': ['ml', 'nlp']}
 ```
 
-### Stateful Scripts with Initialization
+becomes:
 
-For scripts that manage shared state through dependencies:
-
-```python
-import sqlite3
-from dataclasses import dataclass, field
-from pydantic_ai import RunContext
-from pydantic_ai_skills import SkillsToolset, Skill
-
-@dataclass
-class DataAnalyzerDeps:
-    """Dependencies managing database connection state."""
-    db_path: str = ':memory:'
-    db: sqlite3.Connection | None = field(default=None)
-
-    def get_db_tables(self) -> list[str]:
-        """Get list of tables currently loaded in the database."""
-        if self.db is None:
-            return []
-        cursor = self.db.cursor()
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-        return [row[0] for row in cursor.fetchall()]
-
-# Create skill with stateful management
-skill = Skill(
-    name='data-analyzer',
-    description='Analyze data using SQL queries on in-memory database',
-    content='''Use this skill to:
-1. Call `load_data` script to initialize database
-2. Use `run_query` script to execute SQL analysis
-'''
-)
-
-@skill.script
-async def load_data(ctx: RunContext[DataAnalyzerDeps], csv_path: str) -> str:
-    """Load CSV data into in-memory SQLite database.
-
-    Initializes database connection if needed (idempotent).
-    """
-    if ctx.deps.db is None:
-        ctx.deps.db = sqlite3.connect(ctx.deps.db_path, check_same_thread=False)
-
-    loaded_tables = []
-    # Load CSV file into table
-    import pandas as pd
-    df = pd.read_csv(csv_path)
-    table_name = Path(csv_path).stem
-
-    if table_name not in ctx.deps.get_db_tables():
-        df.to_sql(table_name, ctx.deps.db, if_exists='replace', index=False)
-        loaded_tables.append(table_name)
-
-    if loaded_tables:
-        return f'Data loaded. Tables created: {", ".join(loaded_tables)}'
-    return 'Data already loaded. All tables available.'
-
-@skill.script
-async def run_query(ctx: RunContext[DataAnalyzerDeps], query: str) -> str:
-    """Execute SQL query on loaded data and return formatted results."""
-    if ctx.deps.db is None:
-        return 'Error: No data loaded. Run load_data script first.'
-
-    try:
-        cursor = ctx.deps.db.cursor()
-        cursor.execute(query)
-        rows = cursor.fetchall()
-        columns = [description[0] for description in cursor.description]
-
-        if not rows:
-            return 'Query executed successfully. No rows returned.'
-
-        # Format results as aligned table
-        col_widths = [max(len(str(col)), max(len(str(row[i])) for row in rows))
-                      for i, col in enumerate(columns)]
-        header = ' | '.join(col.ljust(col_widths[i]) for i, col in enumerate(columns))
-        separator = '-+-'.join('-' * width for width in col_widths)
-        result_lines = [header, separator]
-
-        for row in rows:
-            result_lines.append(' | '.join(str(item).ljust(col_widths[i])
-                                           for i, item in enumerate(row)))
-
-        return '\n'.join(result_lines)
-
-    except sqlite3.Error as e:
-        return f'SQL Error: {e}\n\nEnsure table names are correct and query syntax is valid.'
-
-toolset = SkillsToolset(skills=[skill])
+```text
+--query transformers --max_results 3 --verbose --tags ml --tags nlp
 ```
 
-### Asynchronous Scripts with Security
+Booleans become bare flags when true and are omitted when false; lists repeat the flag; `None` is
+omitted. Document the arguments in `SKILL.md` — the model chooses them from your prose, not from a
+schema.
 
-For scripts requiring dependencies with validated parameters:
+### Print results, not prose
+
+Script stdout goes back to the model verbatim. Structured output is easier for it to use than a
+sentence:
 
 ```python
-from pydantic_ai import RunContext
-from pydantic_ai_skills import SkillsToolset
+# Good
+print(json.dumps({'papers': papers, 'total': len(papers)}, indent=2))
 
-class AnalyticsContext:
-    database: Database
-    logger: Logger
-
-skills = SkillsToolset()
-
-@skills.skill()
-def analytics() -> str:
-    return "Perform data analytics with security controls"
-
-@analytics.script
-async def analyze_user_data(
-    ctx: RunContext[AnalyticsContext],
-    user_id: int,
-    metric: str = "sales"
-) -> str:
-    """Analyze user data by metric.
-
-    SECURITY: Uses whitelist to prevent SQL injection.
-    """
-    await ctx.deps.logger.info(f"Analyzing user {user_id}")
-
-    # SECURITY: Enforce whitelist of allowed metrics to prevent SQL injection
-    allowed_metrics = {
-        "sales": "sales",
-        "revenue": "revenue",
-        "total_compensation": "total_compensation",
-    }
-
-    if metric not in allowed_metrics:
-        raise ValueError(f"Unsupported metric: {metric!r}. Allowed: {', '.join(allowed_metrics.keys())}")
-
-    column_name = allowed_metrics[metric]
-
-    # Safe query: column_name is from whitelist, user_id is parameterized
-    data = await ctx.deps.database.query(f"""
-        SELECT {column_name} FROM users WHERE id = ?
-    """, (user_id,))
-
-    result = sum(data)
-    await ctx.deps.logger.info(f"Analysis complete: {result}")
-
-    return f"Analysis result: {result}"
+# Worse — the model has to parse English to find the numbers
+print(f'I found {len(papers)} papers, the first is {papers[0]["title"]}')
 ```
 
-### Chaining Scripts with Sequential Dependencies
+### Fail loudly
 
-Design scripts that build on each other, where agents call them in sequence:
-
-```python
-@analytics.script
-async def prepare_data(ctx: RunContext[AnalyticsContext], dataset: str) -> str:
-    """Prepare raw data for analysis.
-
-    Prerequisite for run_analysis and export_results scripts.
-    """
-    raw = await ctx.deps.database.fetch_raw(dataset)
-    cleaned = await ctx.deps.database.clean(raw)
-    await ctx.deps.logger.info(f"Prepared {len(cleaned)} records")
-    return f"Prepared {len(cleaned)} records"
-
-@analytics.script
-async def run_analysis(ctx: RunContext[AnalyticsContext], dataset: str) -> str:
-    """Run analysis on prepared data.
-
-    Expects prepare_data to have been called first.
-    """
-    prepared = await ctx.deps.database.load_prepared(dataset)
-    results = await analyze_data(prepared)
-    return format_results(results)
-
-@analytics.script
-async def export_results(
-    ctx: RunContext[AnalyticsContext],
-    dataset: str,
-    format: str = "json"
-) -> str:
-    """Export analysis results in requested format.
-
-    Args:
-        dataset: Dataset name to export results for
-        format: Output format (json, csv)
-    """
-    results = await ctx.deps.database.load_results(dataset)
-
-    if format == "json":
-        import json
-        output = json.dumps(results, indent=2)
-    elif format == "csv":
-        output = convert_to_csv(results)
-    else:
-        return f"Unknown format: {format}. Use 'json' or 'csv'."
-
-    return output
-```
-
-## Error Handling
-
-### Catching Skill Errors
-
-The package raises plain stdlib exceptions outside tool execution:
-
-| Operation | Exception |
-|---|---|
-| Unknown skill / resource / script lookup outside of agent tools | `KeyError` |
-| Malformed `SKILL.md` frontmatter or invalid skill name | `ValueError` |
-| Missing `SKILL.md` file | `FileNotFoundError` |
-| Resource read I/O failure | `OSError` |
-| Script subprocess failure / git registry failure | `RuntimeError` |
-| Script execution timeout | `TimeoutError` |
-
-Inside the tools registered by `SkillsToolset` (`load_skill`, `read_skill_resource`, `run_skill_script`), unknown skill / resource / script names raise `pydantic_ai.ModelRetry` so the LLM can correct itself within the configured retry budget (see `max_retries`).
+A script that swallows an error and prints nothing leaves the model guessing. Exit non-zero and
+write to stderr; both reach the model:
 
 ```python
-from pydantic_ai_skills import SkillsToolset
-
-toolset = SkillsToolset(directories=['./skills'])
-
-# Direct lookup raises KeyError
 try:
-    skill = toolset.get_skill('non-existent')
-except KeyError as e:
-    print(f"Skill not found: {e}")
+    result = fetch(args.url)
+except TimeoutError:
+    print(f'Timed out fetching {args.url}', file=sys.stderr)
+    sys.exit(1)
 ```
 
-### Graceful Degradation
+### Bound the runtime
+
+The local executor accepts a timeout, so one hung script does not hang the run:
 
 ```python
-from pydantic_ai import Agent, RunContext
-from pydantic_ai_skills import SkillsToolset
+from pydantic_ai_skills import LocalSkillScriptExecutor, SkillsCapability
 
-toolset = SkillsToolset(directories=['./skills'])
-
-agent = Agent(model='openai:gpt-4o', toolsets=[toolset])
-
-@agent.tool
-async def safe_load_skill(ctx: RunContext, skill_name: str) -> str:
-    """Load skill with graceful fallback."""
-    try:
-        skill = toolset.get_skill(skill_name)
-        return f"Loaded {skill_name}: {skill.description}"
-    except KeyError:
-        available = list(toolset.skills.keys())
-        return f"Skill '{skill_name}' not found. Available: {available}"
-
-result = agent.run_sync('Use the arxiv-search skill or let me know what skills are available')
-```
-
-### Timeout Handling
-
-For long-running scripts:
-
-```python
-from pydantic_ai import RunContext
-from pydantic_ai_skills import SkillsToolset
-
-class MyDeps:
-    database: Database
-
-skills = SkillsToolset()
-
-@skills.skill()
-def long_running() -> str:
-    return "Execute long-running operations"
-
-@long_running.script
-async def expensive_query(
-    ctx: RunContext[MyDeps],
-    query: str
-) -> str:
-    """Execute expensive database query.
-
-    Note: This script has a default 30-second timeout.
-    For longer operations, increase timeout or break into chunks.
-    """
-    try:
-        result = await asyncio.wait_for(
-            ctx.deps.database.execute_complex(query),
-            timeout=25  # Leave 5s buffer
-        )
-        return str(result)
-    except asyncio.TimeoutError:
-        return "ERROR: Query exceeded time limit. Try with filters or smaller dataset."
-```
-
-## Dependency Management
-
-### Structured Dependency Types
-
-Use TypedDict for clear dependency contracts:
-
-```python
-from typing import TypedDict
-from pydantic_ai import Agent, RunContext
-from pydantic_ai_skills import SkillsToolset
-
-class MyDeps(TypedDict):
-    """Dependencies available to skills."""
-    database: Database
-    cache: Cache
-    logger: Logger
-    config: AppConfig
-
-skills = SkillsToolset()
-
-@skills.skill()
-def db_skill() -> str:
-    return "Database operations"
-
-@db_skill.resource
-async def get_status(ctx: RunContext[MyDeps]) -> str:
-    """Get database status with full type hints."""
-    # Type checker knows db_skill.database is Database
-    status = await ctx.deps.database.health_check()
-
-    # Log the check
-    await ctx.deps.logger.info(f"Health check: {status}")
-
-    return f"Database status: {status}"
-
-# Initialize agent with deps
-agent = Agent(
-    model='openai:gpt-4o',
-    toolsets=[skills],
-    deps=MyDeps(
-        database=my_database,
-        cache=my_cache,
-        logger=my_logger,
-        config=app_config
-    )
+capability = SkillsCapability(
+    './skills',
+    script_executor=LocalSkillScriptExecutor(timeout=30),
 )
 ```
 
-### Optional Dependencies
+## Error handling
 
-Handle optional dependencies gracefully:
+The tools this package registers raise `pydantic_ai.ModelRetry` for anything the model can fix — an
+unknown skill, resource, or script name, or a skill it has not loaded yet. The message names what is
+available, so the model can correct itself within the agent's retry budget:
 
-```python
-from typing import Optional
-
-class MyDeps(TypedDict, total=False):
-    """Dependencies with optional fields."""
-    database: Database      # Required
-    cache: Optional[Cache]  # Optional
-    logger: Optional[Logger]  # Optional
-
-@db_skill.resource
-async def get_cached_status(ctx: RunContext[MyDeps]) -> str:
-    """Get status with optional caching."""
-    status = await ctx.deps.database.health_check()
-
-    # Cache if available
-    if 'cache' in ctx.deps and ctx.deps['cache']:
-        await ctx.deps['cache'].set('db_status', status)
-
-    return f"Database status: {status}"
+```text
+Resource 'FORMS.md' not found in skill 'pdf-processing'.
+Available resources: ['references/FORMS.md', 'references/LAYOUT.md'].
+Use the exact name from the skill instructions.
 ```
 
-### Lazy Initialization
+Genuine failures — a script exiting non-zero, an unreadable file — are returned as output rather
+than raised, so the model can react to them.
 
-Defer expensive setup:
+Construction-time problems are different: a malformed `SKILL.md`, a mismatched name, a duplicate,
+an unknown `include` entry, or a registry that cannot reach its source all raise immediately. That
+is deliberate — a misconfigured catalog should fail at startup, not halfway through a user's
+request.
 
 ```python
-from pydantic_ai_skills import SkillsToolset
-
-skills = SkillsToolset()
-
-@skills.skill()
-def expensive_skill() -> str:
-    return "Use expensive resources"
-
-@expensive_skill.resource
-async def get_expensive_resource(ctx: RunContext[MyDeps]) -> str:
-    """Lazy-load expensive resource only when needed."""
-    # First call initializes, subsequent calls reuse
-    if not hasattr(ctx.deps, '_expensive_resource'):
-        ctx.deps._expensive_resource = await initialize_expensive_resource()
-
-    return str(ctx.deps._expensive_resource)
+try:
+    capability = SkillsCapability('./skills', registries=[registry])
+except ValueError as exc:
+    logger.error('skill configuration is invalid: %s', exc)
+    raise
 ```
 
-## Testing Patterns
+## Dependency management
 
-### Unit Testing Skills
+### Request-scoped values in a file-based script
+
+File-based scripts are subprocesses and never see `RunContext`. Pass per-request values through the
+environment:
 
 ```python
-import pytest
+from pydantic_ai_skills import LocalSkillScriptExecutor, SkillsCapability
+
+executor = LocalSkillScriptExecutor(
+    env_vars={'AWS_REGION': 'us-east-1'},                       # static
+    context_env_vars_extractor=lambda ctx: {                    # per run
+        'REQUEST_ID': ctx.deps.request_id,
+        'TENANT_ID': ctx.deps.tenant_id,
+    },
+)
+
+capability = SkillsCapability('./skills', script_executor=executor, deps_type=AppDeps)
+```
+
+Scope the *data* by tenant, not just the instructions. A script that reads `TENANT_ID` and filters
+on it is a boundary; a `SKILL.md` asking the model to only look at one tenant is not.
+
+### Shared connections in a programmatic skill
+
+When a skill needs a database handle or an API client, define it in Python and reach through
+`ctx.deps`:
+
+```python
 from pydantic_ai import RunContext
-from pydantic_ai_skills import Skill, SkillsToolset
+from pydantic_ai_skills import Skill
 
-class MockDeps:
-    def __init__(self):
-        self.data = {"test": "value"}
+analytics = Skill(
+    name='analytics',
+    description='Answer questions about product usage.',
+    content='Read `schema`, then run `query` with a read-only SQL string.',
+)
 
-def test_skill_resource():
-    """Test a skill resource independently."""
-    skill = Skill(
-        name='test-skill',
-        description='Test skill',
-        content='Test'
-    )
 
-    @skill.resource
-    async def my_resource(ctx: RunContext[MockDeps]) -> str:
-        return ctx.deps.data['test']
-
-    # Test the resource
-    mock_deps = MockDeps()
-    ctx = RunContext(deps=mock_deps)
-
-    result = asyncio.run(my_resource(ctx))
-    assert result == "value"
-
-def test_skill_in_toolset():
-    """Test skill integration with toolset."""
-    skill = Skill(
-        name='test-skill',
-        description='Test skill',
-        content='Test content'
-    )
-
-    toolset = SkillsToolset(skills=[skill])
-
-    # Verify skill is registered
-    assert 'test-skill' in toolset.skills
-    assert toolset.get_skill('test-skill').description == 'Test skill'
+@analytics.script
+async def query(ctx: RunContext[AppDeps], sql: str) -> str:
+    """Run a read-only query."""
+    return str(await ctx.deps.database.execute(sql))
 ```
 
-### Integration Testing
+## Testing
+
+### Assert on the catalog, not the model
+
+What you want to know is that the right skills are exposed with the right files. That needs no
+model:
 
 ```python
-import pytest
+from pydantic_ai_skills import SkillsCapability
+
+
+def test_support_agent_exposes_only_support_skills() -> None:
+    capability = SkillsCapability('./skills', include=['refunds', 'order-lookup'])
+
+    assert capability.skill_names == ['order-lookup', 'refunds']
+
+
+def test_pdf_skill_ships_its_script() -> None:
+    package = SkillsCapability('./skills').packages['pdf-processing']
+
+    assert 'scripts/fill_form.py' in package.scripts_by_name
+```
+
+Because an unknown `include` raises, a test that merely constructs the capability already catches a
+renamed or deleted skill.
+
+### Drive the tools without a provider
+
+Use `FunctionModel` to script the exact tool calls you want to exercise:
+
+```python
 from pydantic_ai import Agent
-from pydantic_ai_skills import SkillsToolset
+from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
+from pydantic_ai.models.function import FunctionModel
 
-@pytest.fixture
-def test_skills():
-    """Create test skills."""
-    skills = SkillsToolset()
 
-    @skills.skill()
-    def test_skill() -> str:
-        return "Test skill for integration testing"
+async def test_the_model_can_read_a_skill_resource(tmp_path) -> None:
+    steps = [
+        ToolCallPart('load_capability', {'id': 'pdf-processing'}),
+        ToolCallPart(
+            'read_skill_resource',
+            {'skill_name': 'pdf-processing', 'resource_name': 'references/FORMS.md'},
+        ),
+    ]
+    calls: list[int] = []
 
-    @test_skill.script
-    def test_script(value: int) -> str:
-        return f"Result: {value * 2}"
+    def model_fn(messages, info):
+        calls.append(1)
+        step = len(calls) - 1
+        if step < len(steps):
+            return ModelResponse(parts=[steps[step]])
+        return ModelResponse(parts=[TextPart('done')])
 
-    return skills
+    agent = Agent(FunctionModel(model_fn), capabilities=[SkillsCapability('./skills')])
+    result = await agent.run('fill in the form')
 
-@pytest.mark.asyncio
-async def test_agent_with_skills(test_skills):
-    """Test agent interaction with skills."""
-    agent = Agent(
-        model='openai:gpt-4o',
-        toolsets=[test_skills]
-    )
-
-    # Agent can access skills
-    result = await agent.run('List available skills')
-    assert 'test-skill' in result.data
+    assert result.output == 'done'
 ```
 
-## Registry Patterns
+Note `load_capability` takes `id` — it is Pydantic AI's tool, not one this package registers.
 
-### Multi-Source Agent
+!!! warning "`TestModel` does not work here"
+    `TestModel` calls every registered tool with synthesized arguments, which means calling
+    `load_capability` with an id that does not exist and blowing the retry budget. Use
+    `FunctionModel` for anything involving deferred capabilities.
 
-Combine registries with local and programmatic skills for maximum flexibility:
+### Stub script execution
 
 ```python
-from pydantic_ai import Agent, RunContext
-from pydantic_ai_skills import SkillsToolset
-from pydantic_ai_skills.registries import (
-    CombinedRegistry,
-    GitSkillsRegistry,
-    GitCloneOptions,
-)
+from pydantic_ai_skills import CallableSkillScriptExecutor, SkillsCapability
 
-# Public skills from Anthropic
-anthropic_registry = GitSkillsRegistry(
-    repo_url='https://github.com/anthropics/skills',
-    path='skills',
-    target_dir='./anthropics-skills',
-    clone_options=GitCloneOptions(depth=1, single_branch=True),
-).prefixed('anthropic-')
+recorded = []
 
-# Internal skills from your org
-internal_registry = GitSkillsRegistry(
-    repo_url='https://github.com/my-org/skills',
-    target_dir='./my-org-skills',
-).prefixed('internal-')
 
-# Combine registries — avoid name collisions via prefixes
-combined = CombinedRegistry(registries=[anthropic_registry, internal_registry])
+def fake_run(script, args=None, ctx=None):
+    recorded.append((script.name, args))
+    return '{"papers": []}'
 
-toolset = SkillsToolset(
-    directories=['./skills'],       # Local overrides
-    registries=[combined],          # Remote registries
-)
 
-agent = Agent(
-    model='openai:gpt-5.2',
-    toolsets=[toolset],
-)
+capability = SkillsCapability('./skills', script_executor=CallableSkillScriptExecutor(fake_run))
 ```
 
-### Filtered Registry by Domain
+This keeps tests fast and hermetic, and lets you assert on the arguments the model chose.
 
-Expose only domain-relevant skills to each agent:
+## Registries
+
+### Cache the clone
+
+The default is a temporary directory that dies with the process, which means re-cloning on every
+start. Point it somewhere durable:
 
 ```python
-from pydantic_ai_skills.registries import GitSkillsRegistry
-
-registry = GitSkillsRegistry(
-    repo_url='https://github.com/anthropics/skills',
+GitSkillsRegistry(
+    'https://github.com/anthropics/skills',
     path='skills',
-    target_dir='./anthropics-skills',
-)
-
-# Document agent only sees document-related skills
-doc_agent_toolset = SkillsToolset(
-    registries=[
-        registry.filtered(lambda s: s.name in ('pdf', 'docx', 'pptx'))
-    ]
-)
-
-# Research agent only sees research-related skills
-research_agent_toolset = SkillsToolset(
-    registries=[
-        registry.filtered(lambda s: 'research' in (s.description or '').lower())
-    ]
+    target_dir='~/.cache/agent-skills',
 )
 ```
 
-See [Skill Registries](./registries.md) for the full registry guide and composition API.
+The second `sync()` becomes a `git pull`.
 
-## See Also
+### Pin what you shipped
 
-- [Advanced Features](./advanced.md) - Decorator patterns and custom executors
-- [Programmatic Skills](./programmatic-skills.md) - Creating skills in code
-- [Creating Skills](./creating-skills.md) - File-based skill creation
-- [Skill Registries](./registries.md) - Remote skill discovery and composition
+`sync()` tracks a moving branch. Record what a deployment actually ran with:
+
+```python
+registry = GitSkillsRegistry('https://github.com/anthropics/skills', path='skills')
+capability = SkillsCapability(registries=[registry])
+
+logger.info('skills at %s: %s', registry.revision(), capability.skill_names)
+```
+
+To pin rather than record, clone a tag with `GitCloneOptions(branch='v1.2.0')`.
+
+### Survive an unreachable source at startup
+
+A registry that cannot reach its source raises during construction, which will take your process
+down with it. Decide deliberately whether that is what you want:
+
+```python
+def build_capability() -> SkillsCapability:
+    try:
+        return SkillsCapability('./skills', registries=[remote])
+    except (ValueError, RuntimeError) as exc:
+        logger.warning('remote skills unavailable, continuing with local only: %s', exc)
+        return SkillsCapability('./skills')
+```
+
+Degrading like this changes what the agent can do, so log it loudly. For a deployment that must not
+drift, prefer failing fast — an agent silently missing half its skills is harder to diagnose than
+one that refuses to start.
+
+### Air-gapped deployments
+
+Mirror the repository at build time and turn off fetching at run time:
+
+```python
+GitSkillsRegistry(
+    'https://github.com/anthropics/skills',
+    target_dir='/opt/skills-mirror',
+    auto_install=False,   # sync() never reaches the network
+)
+```
+
+### Resolve a name collision
+
+Two registries shipping a `pdf` skill cannot both be exposed — each name becomes a capability id.
+`CombinedRegistry` picks the first and warns. To keep both:
+
+```python
+combined = internal.prefixed('acme-') | public.prefixed('anthropic-')
+```
+
+## See also
+
+- [Core Concepts](concepts.md) — what runs when
+- [Registries](registries.md) — the full composition story
+- [Sandboxing](sandbox.md) — untrusted scripts
+- [Security](security.md) — the trust model
+- [Advanced Features](advanced.md) — selection, executors, and rebuild strategies

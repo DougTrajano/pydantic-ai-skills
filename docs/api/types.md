@@ -9,10 +9,14 @@ The package uses dataclasses for type-safe skill representation:
 - `Skill` - Complete skill with metadata, resources, and scripts
 - `SkillResource` - Resource file (content) or callable resource within a skill
 - `SkillScript` - Executable script (file or callable function) within a skill
-- `SkillWrapper` - Generic decorator return type for `@toolset.skill()` supporting attachment of resources and scripts
+- `SkillWrapper` - Generic decorator return type supporting attachment of resources and scripts
 
-!!! info "File-Based vs Programmatic"
-    These types support both file-based skills (loaded from directories) and programmatic skills (created in Python code). For file-based skills, see [Creating Skills](../creating-skills.md). For programmatic skills, see [Programmatic Skills](../programmatic-skills.md). For advanced patterns, see [Advanced Features](../advanced.md).
+!!! info "These describe skills defined in Python"
+    In v2, skills loaded from a directory are read by `pydantic-ai-harness` and never become `Skill`
+    objects — their bundled files are described by [`SkillPackage`](packages.md) instead. `Skill` and
+    `SkillWrapper` are for [programmatic skills](../programmatic-skills.md); `SkillResource` and
+    `SkillScript` are shared by both. See [Creating Skills](../creating-skills.md) for the file
+    format and [Advanced Features](../advanced.md) for patterns.
 
 ## Skill Class
 
@@ -37,7 +41,11 @@ The package uses dataclasses for type-safe skill representation:
 
 | Method | Description |
 |--------|-------------|
-| `from_file(path, validate=True, script_executor=None)` | Classmethod — load a skill from a `SKILL.md` file or its parent directory. Raises `FileNotFoundError` when `SKILL.md` is missing, or `ValueError` for structural problems (wrong filename, YAML errors, missing `name` when `validate=True`). Metadata quality issues (bad name format, missing description, overlong body) emit `UserWarning` regardless of the `validate` flag. |
+| `resource(func=None, *, name=..., description=...)` | Decorator — attach a callable resource. |
+| `script(func=None, *, name=..., description=...)` | Decorator — attach a callable script. |
+
+!!! note "`Skill.from_file()` was removed in v2"
+    Directory-backed skills are loaded by harness. See [Migrating from v1](../migration-v2.md).
 | `@resource` | Decorator to attach a callable resource to the skill. |
 | `@script` | Decorator to attach a callable script to the skill. |
 
@@ -104,7 +112,7 @@ The package uses dataclasses for type-safe skill representation:
 
 ## SkillWrapper[T] Class
 
-Generic type returned by `@toolset.skill()` decorator that enables type-safe dependency injection and attachment of resources/scripts.
+Generic type that enables type-safe dependency injection and the attachment of resources and scripts to a Python-defined skill. Pass one to `SkillsCapability(skills=[...])`.
 
 **Generic Parameter**: `T` - The dependency type available in `RunContext[T]`
 
@@ -253,63 +261,152 @@ async def process(ctx: RunContext[MyDeps], query: str) -> str:
     return f"Processed: {result}"
 ```
 
-### Working with File-Based Skills
+### Inspecting a skill's bundled files
+
+Directory-backed skills are read by harness and never become `Skill` objects. To see what files a
+skill ships, read the capability's package index:
 
 ```python
-from pydantic_ai_skills import SkillsToolset
+from pydantic_ai_skills import SkillsCapability
 
-toolset = SkillsToolset(directories=["./skills"])
+capability = SkillsCapability('./skills')
 
-# Access skills
-for name, skill in toolset.skills.items():
-    print(f"\nSkill: {name}")
-    print(f"  Description: {skill.description}")
-
-    if skill.uri:  # File-based skill
-        print(f"  URI: {skill.uri}")
-
-    # Access metadata
-    if skill.metadata and "version" in skill.metadata:
-        print(f"  Version: {skill.metadata['version']}")
-
-    # List resources
-    if skill.resources:
-        print(f"  Resources:")
-        for resource in skill.resources:
-            print(f"    - {resource.name}")
-
-    # List scripts
-    if skill.scripts:
-        print(f"  Scripts:")
-        for script in skill.scripts:
-            print(f"    - {script.name}")
+for name, package in capability.packages.items():
+    print(f'\nSkill: {name}')
+    print(f'  Directory: {package.directory}')
+    print(f'  Resources: {sorted(package.resources_by_name)}')
+    print(f'  Scripts:   {sorted(package.scripts_by_name)}')
 ```
 
-### Mixing Programmatic and File-Based Skills
+See [Packages](packages.md) for the full `SkillPackage` reference.
+
+### Mixing programmatic and file-based skills
 
 ```python
 from pydantic_ai import RunContext
-from pydantic_ai_skills import Skill, SkillsToolset
+from pydantic_ai_skills import Skill, SkillsCapability
 
-# Create programmatic skill
 custom_skill = Skill(
     name='custom-skill',
     description='Programmatic skill',
-    content='Custom instructions...'
+    content='Custom instructions...',
 )
+
 
 @custom_skill.script
 async def custom_action(ctx: RunContext[MyDeps]) -> str:
     """Perform custom action."""
     return 'Action completed'
 
-# Combine with file-based skills
-toolset = SkillsToolset(
-    directories=["./skills"],  # File-based skills
-    skills=[custom_skill]      # Programmatic skills
+
+capability = SkillsCapability(
+    './skills',              # file-based skills, read by harness
+    skills=[custom_skill],   # Python-defined skills
 )
 
-print(f"Total skills: {len(toolset.skills)}")
+print(capability.skill_names)
+```
+
+Both kinds land in one deferred catalog, and the model cannot tell them apart.
+
+## Type Structures
+
+### Skill Structure
+
+```
+Skill
+├── name: str                              # Unique identifier (lowercase, hyphens only)
+├── description: str                       # Brief description (max 1024 chars)
+├── content: str                           # Main instructions (markdown)
+├── resources: list[SkillResource] | None  # Additional resources
+├── scripts: list[SkillScript] | None      # Executable scripts
+├── uri: str | None                        # Base path (file-based: set, programmatic: None)
+└── metadata: dict[str, Any] | None        # Custom fields (version, author, license, etc.)
+```
+
+### SkillResource Structure
+
+```
+SkillResource
+├── name: str                      # Resource identifier
+├── description: str | None        # Optional description
+├── content: str | None            # Static content
+├── function: Callable | None      # Callable (for dynamic resources)
+├── takes_ctx: bool                # Requires RunContext
+├── function_schema: FunctionSchema| None
+└── uri: str | None                # File path (file-based only)
+```
+
+### SkillScript Structure
+
+```
+SkillScript
+├── name: str                      # Script identifier
+├── description: str | None        # Optional description
+├── function: Callable | None      # Callable (for programmatic)
+├── takes_ctx: bool                # Requires RunContext
+├── function_schema: FunctionSchema| None
+├── uri: str | None                # File path (file-based only)
+└── skill_name: str | None         # Parent skill (file-based only)
+```
+
+## Common Metadata Fields
+
+When creating skills, these metadata fields are commonly used:
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `version` | `str` | Semantic version (e.g., "1.0.0") |
+| `author` | `str` | Creator/maintainer |
+| `license` | `str` | License identifier (e.g., "Apache-2.0") |
+| `compatibility` | `str` | Environment requirements |
+| `tags` | `list[str]` | Categorization tags |
+| `requires` | `dict[str, str]` | External dependencies |
+| `deprecated` | `bool` | Whether skill is deprecated |
+| `deprecation_message` | `str` | Explanation if deprecated |
+
+## Usage Examples
+
+### Creating Programmatic Skills
+
+```python
+from pydantic_ai import RunContext
+from pydantic_ai_skills import Skill, SkillResource
+
+# Create a skill with static resources
+my_skill = Skill(
+    name='my-skill',
+    description='A programmatic skill',
+    content='Instructions for using this skill...',
+    resources=[
+        SkillResource(
+            name='reference',
+            content='## Reference\n\nStatic documentation here...'
+        )
+    ]
+)
+
+# Add dynamic resources
+@my_skill.resource
+def get_info() -> str:
+    """Get dynamic information."""
+    return "Dynamic content generated at runtime"
+
+@my_skill.resource
+async def get_data(ctx: RunContext[MyDeps]) -> str:
+    """Get data from dependencies."""
+    return await ctx.deps.fetch_data()
+
+# Add scripts
+@my_skill.script
+async def process(ctx: RunContext[MyDeps], query: str) -> str:
+    """Process a query.
+
+    Args:
+        query: The query to process
+    """
+    result = await ctx.deps.process(query)
+    return f"Processed: {result}"
 ```
 
 ## Type Structures
@@ -376,7 +473,8 @@ Created in Python code:
 
 ## See Also
 
-- [SkillsToolset](toolset.md) - Main toolset API and initialization
+- [SkillsCapability](capability.md) - The entry point
+- [Packages](packages.md) - Bundled files of directory-backed skills
 - [Advanced Features](../advanced.md) - Decorator patterns and custom executors
 - [Creating Skills](../creating-skills.md) - File-based skill creation guide
 - [Programmatic Skills](../programmatic-skills.md) - Programmatic skill creation guide

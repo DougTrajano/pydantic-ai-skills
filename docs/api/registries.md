@@ -1,18 +1,28 @@
 # Registries API Reference
 
-::: pydantic_ai_skills.registries.SkillRegistry
+A registry materializes skill packages into a local directory that
+[`SkillsCapability`](capability.md) hands to harness. See [Skill Registries](../registries.md) for
+the guide.
+
+::: pydantic_ai_skills.SkillRegistry
     options:
         show_source: true
         heading_level: 2
         members:
-            - search
-            - get
-            - install
-            - update
-            - get_skills
+            - sync
+            - skill_infos
+            - skill_names
             - filtered
             - prefixed
             - renamed
+            - __or__
+
+---
+
+::: pydantic_ai_skills._parsing.SkillInfo
+    options:
+        show_source: true
+        heading_level: 2
 
 ---
 
@@ -20,6 +30,9 @@
     options:
         show_source: true
         heading_level: 2
+        members:
+            - sync
+            - revision
 
 ---
 
@@ -34,10 +47,25 @@
     options:
         show_source: true
         heading_level: 2
+        members:
+            - sync
+            - revision
+
+---
+
+::: pydantic_ai_skills.registries.local.LocalSkillsRegistry
+    options:
+        show_source: true
+        heading_level: 2
+        members:
+            - sync
 
 ---
 
 ## Composition Wrappers
+
+Each wrapper syncs the registry it wraps, then stages a new library holding the packages it wants
+under the names it wants. The wrapped registry is never modified.
 
 ::: pydantic_ai_skills.registries.wrapper.WrapperRegistry
     options:
