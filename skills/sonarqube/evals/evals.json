@@ -1,0 +1,45 @@
+{
+  "skill_name": "sonarqube",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I'm in a SonarQube-enabled repository. Check whether the CLI is authenticated, identify the exact Sonar project, and give me a concise project health summary with the latest quality gate, core measures, and open high-severity issues. Do not change anything.",
+      "expected_output": "A safe read-only workflow that checks the installed CLI and authentication, resolves the project key without guessing, queries project details/measures/quality gate/issues with structured output and pagination awareness, and reports scope and limitations without exposing credentials.",
+      "files": [],
+      "expectations": [
+        "Checks `sonar --version` and verifies authentication with `sonar auth status` before authenticated project queries.",
+        "Resolves and reports the exact project key without confusing it with a display name or silently choosing among multiple matches.",
+        "Uses dedicated read-only commands for projects, issues, and quality-gate status, plus authenticated GET API calls for measures or metadata.",
+        "Accounts for branch or pull-request scope and result pagination.",
+        "Does not run state-changing commands or expose authentication tokens."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Analyze only my staged changes with SonarQube, then explain the findings and the next fix to make. If the agent session cannot access my macOS Keychain even though I logged in earlier, handle that safely. Don't bypass any large-change warning.",
+      "expected_output": "A staged-change analysis workflow using `sonar analyze --staged`, with preflight scope inspection, safe auth handling for a sandboxed Keychain, structured results, no `--force`, no secret disclosure, and a same-scope rerun after remediation.",
+      "files": [],
+      "expectations": [
+        "Inspects the staged-file scope before running `sonar analyze --staged`.",
+        "Does not use `--force` and does not expand analysis beyond staged changes.",
+        "Explains Keychain isolation and either uses an explicitly approved read-only host credential check or the complete `SONARQUBE_CLI_TOKEN` plus Cloud organization/Server URL pairing, without printing or changing credentials.",
+        "Requests structured analysis output and preserves the command exit status.",
+        "Recommends rerunning the identical staged scope after fixes.",
+        "Does not claim the repository is clean when the staged change set is empty or analysis could not run."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Show me everything the installed SonarQube CLI can do, including auth, project and issue queries, quality gates, analysis modes, dependency risks, remediation, raw API access, integrations, context, telemetry, diagnostics, reset, and updates. Call out which operations are destructive or externally state-changing.",
+      "expected_output": "A complete, version-aware command inventory matching installed help, including all command groups, aliases and important options, while separating read-only operations from local/remote mutations and treating dynamic context actions accurately.",
+      "files": [],
+      "expectations": [
+        "Covers every v1.7.0 top-level command and documented subcommand: auth, analyze, remediate, list, quality-gate/qg, api, context, integrate, config, system, and update.",
+        "Includes analyze secrets, dependency-risks, and agentic; list issues/projects; auth login/logout/status; six integration targets; telemetry; system status/reset.",
+        "Explains that `sonar context` delegates to a separately installed component and discovers actions through installed help.",
+        "Marks credential changes, API mutation methods, remediation, integrations, telemetry changes, updates, and reset as state-changing, with reset destructive.",
+        "Uses installed `--help` as authority when the CLI version differs from the snapshot."
+      ]
+    }
+  ]
+}
