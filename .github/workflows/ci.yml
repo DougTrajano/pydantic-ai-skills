@@ -47,7 +47,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - uses: astral-sh/setup-uv@v7
+      - uses: ./.github/actions/setup-uv
 
       - name: Install dependencies
         run: uv pip install --system -e ".[test,git]"
@@ -108,7 +108,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - uses: astral-sh/setup-uv@v7
+      - uses: ./.github/actions/setup-uv
 
       - name: Install dependencies at their lowest declared versions
         run: uv pip install --system --resolution lowest-direct -e ".[test,git]"
@@ -134,7 +134,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - uses: astral-sh/setup-uv@v7
+      - uses: ./.github/actions/setup-uv
 
       - name: Build sdist and wheel
         run: uv build
@@ -163,7 +163,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - uses: astral-sh/setup-uv@v7
+      - uses: ./.github/actions/setup-uv
 
       - name: Install dependencies
         run: uv pip install --system -e ".[docs]"

@@ -16,8 +16,13 @@ updates:
         patterns:
           - "*"
 
+  # A `/` directory covers `.github/workflows/` and a root `action.yml` only, so the
+  # composite action under `.github/actions/` needs its own entry or the third-party
+  # action it pins never gets bumped.
   - package-ecosystem: "github-actions"
-    directory: "/"
+    directories:
+      - "/"
+      - "/.github/actions/setup-uv"
     schedule:
       interval: "monthly"
     cooldown:

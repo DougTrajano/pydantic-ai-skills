@@ -1,0 +1,55 @@
+name: "Set up uv"
+description: >-
+  astral-sh/setup-uv, retried. Resolving the uv version and its download URL both
+  go through a single un-retried fetch of the astral-sh/versions manifest on
+  raw.githubusercontent.com, so one dropped request fails the step and kills the
+  job before it installs anything.
+
+inputs:
+  version:
+    description: >-
+      uv version to install. Empty (the default) means the version in uv.toml or
+      pyproject.toml, falling back to latest.
+    default: ""
+  enable-cache:
+    description: "Passed through to astral-sh/setup-uv."
+    default: "auto"
+
+runs:
+  using: composite
+  steps:
+    - id: attempt-1
+      uses: astral-sh/setup-uv@v7
+      continue-on-error: true
+      with:
+        version: ${{ inputs.version }}
+        enable-cache: ${{ inputs.enable-cache }}
+
+    - if: steps.attempt-1.outcome == 'failure'
+      shell: bash
+      run: |
+        echo "::warning::setup-uv failed. Retrying in 5s."
+        sleep 5
+
+    - id: attempt-2
+      if: steps.attempt-1.outcome == 'failure'
+      uses: astral-sh/setup-uv@v7
+      continue-on-error: true
+      with:
+        version: ${{ inputs.version }}
+        enable-cache: ${{ inputs.enable-cache }}
+
+    - if: steps.attempt-1.outcome == 'failure' && steps.attempt-2.outcome == 'failure'
+      shell: bash
+      run: |
+        echo "::warning::setup-uv failed twice. Retrying in 15s."
+        sleep 15
+
+    # No continue-on-error on the last attempt: three failures spread over ~20s is
+    # an upstream outage or a real misconfiguration, not a dropped packet, and the
+    # job should fail with setup-uv's own error rather than a later missing-uv one.
+    - if: steps.attempt-1.outcome == 'failure' && steps.attempt-2.outcome == 'failure'
+      uses: astral-sh/setup-uv@v7
+      with:
+        version: ${{ inputs.version }}
+        enable-cache: ${{ inputs.enable-cache }}
