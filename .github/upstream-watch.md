@@ -12,6 +12,76 @@ for the next run.
 > dependency from 2026-09 onwards — see `.claude/commands/upstream-watch.md` for the
 > surface to check. Past entries are left as the record of what was known at the time.
 
+## 2026-09-11
+
+- **pydantic/pydantic-ai**: checked through `v2.42.0` (published 2026-09-08). Reviewed
+  `v2.40.0`–`v2.42.0`.
+- **pydantic/pydantic-ai-harness**: checked through `v0.30.0` (published 2026-09-08).
+  Reviewed `v0.29.1`–`v0.30.0`.
+- **Verdict**: No action needed. Three `v2.40.0` fixes looked directly relevant to
+  `SkillsCapability` on their titles alone (every skill leaf sets `defer_loading=True` and an
+  explicit `id`), so each was read in full and, where a title alone wasn't conclusive,
+  verified against a byte-for-byte diff of the actual source between `v2.39.0` (this log's
+  prior checked-through tag) and `v2.42.0`, downloaded via `pip download --no-deps
+  --no-binary :all:` rather than guessed from the release note: `#7879` ("Fixed
+  `defer_loading` reveal synthesis issue with parallel batch tool results") only touches
+  `_synthesize_tool_availability_delta_messages()` in `pydantic_ai/models/__init__.py` — a
+  message-reordering correctness fix for models that interleave tool results and
+  availability deltas in one parallel batch. It's a pure bug fix (previously-broken ordering
+  is now correct) with no change to `AbstractCapability`, `RunContext`, or any API this
+  package calls, so it can only improve behavior for our `defer_loading=True` leaves, not
+  break it. `#8099` ("Capability cache state and collection merge handling") and its
+  `capabilities/abstract.py`/`_merge.py`/`hooks.py`/`mcp.py`/`native_or_local.py` diff is
+  scoped to the *duplicate-id merge* path (`_reject_class_crossing_id` and friends): it
+  converts several hand-rolled `__dict__` caches to `cached_property` so a merge can
+  correctly drop and recompute them, and only activates when two capabilities collide on one
+  `id` across agent/run layers. `SkillsCapability.id` defaults to `None` (only set when a
+  caller explicitly passes `id=`), so — as the 2026-09-04 entry already established for the
+  sibling `#7248`/`#8047` combine machinery — this path is never triggered for it in normal
+  use; confirmed by reading the diff itself rather than assuming, since this is exactly the
+  kind of change that would silently reach us if the assumption were wrong. `#8119`
+  ("Synthetic capability registry keys", landed in `v2.42.0`) only changes the *unnamed*
+  handle format (`thing_2` → `<thing:4f3a9c>`) for capabilities with no `id` at all;
+  `SkillsCapability`'s skill leaves always carry an explicit `id` (the skill's directory
+  name, required so `load_capability` and this package's own `read_skill_resource`/
+  `run_skill_script` can address them), so they're never assigned a synthetic handle and this
+  change doesn't reach them — confirmed by the `_run_context.py` diff, whose only change is a
+  docstring clarifying that "a capability that needs a stable name across runs (any
+  `defer_loading=True` one) is already required to have one," which describes exactly what
+  this package already does. The private symbols this package imports
+  (`pydantic_ai._function_schema.FunctionSchema`/`function_schema`,
+  `pydantic_ai._griffe.doc_descriptions`, `pydantic_ai._utils.is_async_callable`/
+  `run_in_executor`) are confirmed unchanged: `_function_schema.py` and `_griffe.py` have
+  zero diff between `v2.39.0` and `v2.42.0`, and `_utils.py` only gained two unrelated new
+  helpers (`validate_uploaded_file_provider`, `estimate_string_tokens`) with the two
+  functions this package calls byte-for-byte unchanged. `toolsets/abstract.py` also has zero
+  diff in this window. `v2.42.0`'s Compatibility Notes item `#8081` ("Reject invalid
+  `DeferredToolResults.approvals` values") tightens `approvals` to `StrictBool |
+  DeferredToolApprovalResult` and rejects values like `'yes'`/`None` that were previously
+  silently coerced — this package never constructs `DeferredToolResults` (confirmed by grep:
+  no match for `DeferredToolResults` or `approval` anywhere in `pydantic_ai_skills/`), so it
+  cannot be affected. The remaining `v2.40.0`–`v2.42.0` items (realtime session barge-in/
+  `RealtimeSession.enqueue()`/`@agent.on_event`, `openai-codex`/`GitHubCopilotProvider`
+  providers, `ImageGenerator` direct image-generation API, Anthropic/Bedrock/Gemini
+  provider-specific fixes, code-mode `$ref` resolution, `ToolReturnContent` validation) touch
+  realtime sessions, model providers, and code-mode — none of it in `SkillsToolset`/
+  `SkillsCapability`, tool registration, or the bundled-file tools. `pydantic-ai-harness`
+  `v0.29.1`–`v0.30.0` (`MCPToolsetClient` re-export, internal `Agent` naming for Logfire
+  attribution, teardown protection in `guardrails`/`MontyExecutor`, `TrajectoryJudge`,
+  deprecating `on_spend`/`on_usage`/`on_fire`/`PlanEventEmitter` toward `@on_event`,
+  `FileSystem` traversal events, an OpenTelemetry-emission requirement for capabilities,
+  You.com attribution headers, GitHub agentic workflow hosting, truncation-marker counting)
+  are all harness-internal — none mention Agent Skills, `SKILL.md`, or skill discovery, and
+  `diff -rq` of harness's own `pydantic_ai_harness/skills/` directory between `v0.29.0` (this
+  log's prior checked-through tag) and `v0.30.0` is byte-for-byte identical, confirming the
+  `Skills` surface this package depends on (`Skills.__init__`, `.apply()`, leaf `id`/
+  `get_instructions()`, discovery/naming rules) is untouched. Verified empirically: `pytest`
+  passes identically (351 passed) against both `pydantic-ai-slim==2.42.0` +
+  `pydantic-ai-harness==0.30.0` (latest) and `pydantic-ai-slim==2.38.0` +
+  `pydantic-ai-harness[skills]==0.28.1` (the declared floor, installed fresh into a clean
+  virtualenv per the routine's own warning against downgrading in place). `pre-commit run
+  --all-files` (ruff, ruff-format, mypy) is clean. No floor bump needed.
+
 ## 2026-09-04
 
 - **pydantic/pydantic-ai**: checked through `v2.39.0` (published 2026-09-04). Reviewed
