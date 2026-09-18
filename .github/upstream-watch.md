@@ -12,6 +12,76 @@ for the next run.
 > dependency from 2026-09 onwards — see `.claude/commands/upstream-watch.md` for the
 > surface to check. Past entries are left as the record of what was known at the time.
 
+## 2026-09-18
+
+- **pydantic/pydantic-ai**: checked through `v2.45.0` (published 2026-09-17). Reviewed
+  `v2.43.0`–`v2.45.0`.
+- **pydantic/pydantic-ai-harness**: checked through `v0.31.0` (published 2026-09-11).
+  Reviewed `v0.31.0`.
+- **Verdict**: No action needed. `v2.43.0` (#7447 `clai` first-run banner, #8235 `OpenAIChatModel`
+  text-part boundary fix, #8257 Temporal MCP tool opt-out keyed on operation kind) touches the
+  `clai` CLI, one model provider, and Temporal — none of it in `SkillsToolset`/`SkillsCapability`,
+  tool registration, or the private symbols this package imports. `v2.44.0`'s four security
+  fixes (GHSA-vmxc-h2x2-jmf3 IPv6 zone-identifier blocklist bypass, GHSA-fpf4-vwcp-v4hp `web_fetch`
+  superlinear-time DoS, GHSA-22h6-qm39-v87j domain-list normalization, GHSA-4x9p-g9wm-8q7f
+  instrumentation content leakage) are all in the `web_fetch` tool and instrumentation content
+  redaction, neither of which this package wraps or uses (confirmed by grep: no match for
+  `web_fetch` or `InstrumentationSettings` anywhere in `pydantic_ai_skills/`). Its bug fix
+  "Fixed capability `prepare_tools` execution" (#8071) looked directly relevant to
+  `AbstractCapability` on its title alone, so was read in full via the PR's file list and the
+  actual `_run_context.py`/`capabilities/combined.py` diff (`pip install`'d at both the floor
+  and latest into separate clean virtualenvs and diffed directly rather than guessed from the
+  release note): it adds a new private `RunContext._dispatch_active_capability_ids` property
+  that widens `active_capability_ids` with anchored dispatch-time evidence, and re-points
+  `is_tool_available` and `CombinedCapability._capability_active` at it so a capability's
+  `prepare_tools` reliably re-runs when a history processor injects a capability load mid-step.
+  The existing public `active_capability_ids` property this package's own gate reads
+  (`_toolset.py`'s `require_loaded` check, `skill_name not in ctx.active_capability_ids`) is
+  byte-for-byte unchanged — confirmed by diff, not by the PR summary alone — and
+  `SkillsCapability` neither overrides `prepare_tools` nor injects capability loads via a
+  history processor, so this fix doesn't reach it. `capabilities/abstract.py`'s diff in this
+  window is otherwise all `@durable_operation`/combine-merge-cache internals
+  (`_DurableOperationBindings` removed in favor of a different binding mechanism,
+  `_combination_roots`/`_CapabilityOccurrence` added for the ongoing collection-merge work
+  tracked in the 2026-09-11 entry) — `AbstractCapability.id`'s default stays `None`
+  (`capabilities/abstract.py:225`, unchanged) and `apply`/`visit_and_replace`/`get_toolset`/
+  `get_instructions`/`get_description` are untouched, so `SkillsCapability` (which sets no
+  default `id`, doesn't use `@durable_operation`, and isn't a `CombinedCapability`) is outside
+  what either change touches. `toolsets/abstract.py` gained one new method,
+  `get_tool_for_tool_def`, with a working default implementation for durable-execution
+  toolset rebuilding — purely additive, and `SkillsToolset` doesn't override it. `v2.45.0`
+  (#8455 `DynamicToolset` resolved once per durable run, #8463 one MCP session per durable run,
+  #8466 `MCPSamplingModel` tool history, #8461 dropped legacy `httpx` import in `pydantic_ai.mcp`,
+  #8456 per-run usage reporting, #8392/#7825 Bedrock model fixes, #8450 `TypeSafeModel`) is
+  durable execution (Temporal/DBOS/Prefect), MCP, and model-provider work this package doesn't
+  touch (confirmed by grep: no match for `DynamicToolset`, `prepare_tools`, or `durable_exec`
+  in `pydantic_ai_skills/`). The private symbols this package imports
+  (`pydantic_ai._function_schema.FunctionSchema`/`function_schema`,
+  `pydantic_ai._griffe.doc_descriptions`, `pydantic_ai._utils.is_async_callable`/
+  `run_in_executor`) are confirmed unchanged: `_function_schema.py` and `_griffe.py` have zero
+  diff between the floor (`pydantic-ai-slim==2.38.0`) and latest (`2.45.0`) installs, and
+  `_utils.py` only gained two unrelated new helpers (`validate_uploaded_file_provider`,
+  `estimate_string_tokens`) with the two functions this package calls byte-for-byte unchanged.
+  `pydantic-ai-harness` `v0.31.0` (#746 `CodeMode` eager streamed execution, #842
+  `SummarizingCompaction.tool_return_max_chars`, #841 dropped `SpendStore` removal date, #833
+  `Planning` cache-breakpoint anchoring, #847 `FileSystem` content-hash agreement, #849 ACP
+  approval-required tool call correction, #848 `SnapshotHistorySource` dedup, #851 harness's own
+  floor bump to released `pydantic-ai` 2.40.0, #855 `SubAgents` delegation events, #854/#858 docs)
+  are entirely harness-internal — none mention Agent Skills, `SKILL.md`, or skill discovery, and
+  `diff -rq` of harness's own `pydantic_ai_harness/skills/` directory between `v0.28.1` (this
+  log's declared floor) and `v0.31.0` (latest) shows `__init__.py`, `_capability.py`, and
+  `_loader.py` byte-for-byte identical — only `README.md` changed, gaining a `pip install`
+  alongside the existing `uv` line (matches #858), confirming the `Skills` surface this package
+  depends on (`Skills.__init__`, `.apply()`, leaf `id`/`get_instructions()`, discovery/naming
+  rules) is untouched across the whole reviewed window, not just since the last checked-through
+  tag. Harness's own floor bump to `pydantic-ai` 2.40.0 (#851) is below this package's own
+  `pydantic-ai-slim>=2.38` floor's already-verified compatibility, so no floor change is needed
+  here. Verified empirically: `pytest` passes identically (351 passed) against both
+  `pydantic-ai-slim==2.45.0` + `pydantic-ai-harness==0.31.0` (latest) and
+  `pydantic-ai-slim==2.38.0` + `pydantic-ai-harness[skills]==0.28.1` (the declared floor,
+  installed fresh into a clean virtualenv). `pre-commit run --all-files` (ruff, ruff-format,
+  mypy) is clean. No floor bump needed.
+
 ## 2026-09-11
 
 - **pydantic/pydantic-ai**: checked through `v2.42.0` (published 2026-09-08). Reviewed
