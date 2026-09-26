@@ -12,6 +12,51 @@ for the next run.
 > dependency from 2026-09 onwards — see `.claude/commands/upstream-watch.md` for the
 > surface to check. Past entries are left as the record of what was known at the time.
 
+## 2026-09-25
+
+- **pydantic/pydantic-ai**: checked through `v2.50.0` (published 2026-09-24). Reviewed
+  `v2.46.0`–`v2.50.0` (the `v1.107.6` maintenance release in this window was skipped:
+  `pyproject.toml` floors `pydantic-ai-slim>=2.38`, so the v1 line is not a supported
+  configuration).
+- **pydantic/pydantic-ai-harness**: checked through `v0.35.0` (published 2026-09-24).
+  Reviewed `v0.32.0`–`v0.35.0`.
+- **Verdict**: No action needed. On the `pydantic-ai` side, every release in this window is
+  `TypeSafeModel`/`DecisionModel`/Jev routing work, realtime-session fixes, model-provider
+  additions (Claude Opus 5.5, GPT-6 sol/luna/astra), instrumentation, and durable-execution
+  internals — none of it touches `Skills`, capability registration, or tool dispatch as this
+  package uses them (confirmed by grep: no match for `TypeSafeModel`, `DecisionModel`,
+  `RealtimeSession`, or `Jev` anywhere in `pydantic_ai_skills/`). Two changes looked close
+  enough to verify by PR diff rather than title alone: `v2.46.0`'s "Dispatch tool calls with
+  the live `ToolDefinition` in `CombinedToolset` and `FunctionToolset`" (#8082) changes
+  `call_tool`'s internal behavior (reads `tool.tool_def.timeout` instead of a cached
+  `tool.timeout`) but not `AbstractToolset`'s or `RunContext`'s signatures, and this package
+  neither subclasses `CombinedToolset`/`FunctionToolset` nor reads `tool_def`/`timeout` off a
+  toolset's tool objects (confirmed by grep: only `self.timeout` on this package's own
+  `LocalSkillScriptExecutor`/`OpenSandbox`, unrelated); `v2.50.0`'s "Add
+  `RunContext.in_durable_context`" (#8723) is a new read-only property, purely additive, and
+  `_toolset.py`'s tools don't read it. On the `pydantic-ai-harness` side, `v0.32.0`–`v0.35.0`
+  add Deep Agents/Coder/FileSystem/Shell/ACP/hosted-MCP/CodeMode-speculation features and spend-
+  store/compaction work — all outside the `Skills` capability. Verified directly rather than
+  inferred from release notes: `git diff v0.31.0..v0.35.0 -- pydantic_ai_harness/skills/` in a
+  fresh clone of the harness repo shows **zero changes** to the module `SkillsCapability`
+  depends on. The one item worth recording even though it needs no action: `v0.32.0`/`v0.33.0`
+  (#893, #953) raised harness's *own* `pydantic-ai-slim` floor from `>=2.40.0` to `>=2.44.0`
+  (confirmed by diffing harness's `pyproject.toml` between those tags). Per AGENTS.md §"Harness
+  sets this package's floor," that only obligates a bump here if it makes our declared floor
+  pair unsatisfiable — it doesn't: our floor test pins the already-released, immutable
+  `pydantic-ai-harness==0.28.1` / `pydantic-ai-slim==2.38.0` pair, which harness's latest floor
+  change cannot retroactively alter. Confirmed empirically, not just by reading diffs: the full
+  test suite (351 tests) passes in a clean venv at the declared floor
+  (`pydantic-ai-harness==0.28.1`, `pydantic-ai-slim==2.38.0`) and in a clean venv at latest
+  (`pydantic-ai-harness==0.35.0`, `pydantic-ai-slim==2.50.0`, both resolved by
+  `pip install -e ".[test,git,s3,dev]"` with no pins). `pre-commit run --all-files` (ruff,
+  ruff-format, mypy) is also clean at latest, including the `TYPE_CHECKING`-only
+  `_function_schema.DocstringFormat` annotation in `types.py` that `pytest` alone can't catch.
+  The private-symbol surface (`pydantic_ai._function_schema.{FunctionSchema,function_schema}`,
+  `pydantic_ai._griffe.doc_descriptions`, `pydantic_ai._utils.{is_async_callable,run_in_executor}`)
+  and the harness `Skills` surface (`Skills.__init__`, `apply()`'s per-skill leaves, immediate-
+  children discovery, name/directory validation) are both unchanged and both green.
+
 ## 2026-09-18
 
 - **pydantic/pydantic-ai**: checked through `v2.45.0` (published 2026-09-17). Reviewed
