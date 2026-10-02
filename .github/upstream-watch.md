@@ -12,6 +12,115 @@ for the next run.
 > dependency from 2026-09 onwards — see `.claude/commands/upstream-watch.md` for the
 > surface to check. Past entries are left as the record of what was known at the time.
 
+## 2026-10-02
+
+- **pydantic/pydantic-ai**: checked through `v2.53.0` (published 2026-10-01). Reviewed
+  `v2.51.0`–`v2.53.0` (`v1.107.7`, a maintenance release in this window backporting the same
+  `web_fetch` HTML-parsing security fix as `v2.52.0`, was skipped: the v1 line is not a
+  supported configuration per `pyproject.toml`'s `pydantic-ai-slim>=2.38` floor).
+- **pydantic/pydantic-ai-harness**: checked through PyPI `0.53.0` (no GitHub release exists
+  for `0.53.0` or `0.52.0` — both 404 on the releases page; the git tag history stops at
+  `v0.36.0`, published 2026-09-25, and PyPI jumps straight from `0.36.0` to `0.52.0`).
+  Reviewed `v0.36.0` (tag) and `0.52.0`/`0.53.0` (sdist diff only, no tag/release notes).
+- **Verdict**: One real, confirmed break found and mitigated with a dependency cap;
+  the actual fix is **not implemented** here — filed as
+  [#90](https://github.com/dougtrajano/pydantic-ai-skills/issues/90) for a human to scope,
+  per AGENTS.md's "don't attempt a large refactor inline" rule.
+
+  **The break**: `pydantic-ai-harness` rewrote `Skills` between `0.36.0` and `0.52.0` to
+  discover skill libraries asynchronously from the run's `Workspace` (pydantic-ai's new
+  Workspaces API — see below) instead of synchronously scanning the filesystem at
+  construction. Confirmed by `diff -rq` of `pydantic_ai_harness/skills/` between a `0.36.0`
+  git checkout and the `0.52.0`/`0.53.0` sdists (downloaded via `pip download --no-deps
+  --no-binary :all:` since no tag exists to clone): `_capability.py` and `_loader.py` are
+  both rewritten. `Skills.__init__` no longer calls `load_skill_libraries` — it just records
+  a `_SkillSource`. `Skills.apply()` is no longer overridden, so it falls back to
+  `AbstractCapability.apply()` and visits `self` (one leaf, `id='skills'`,
+  `defer_loading=False`) instead of yielding one leaf per skill. The real per-skill
+  decomposition moved into a new async `Skills.for_run(ctx)` hook that reads `ctx.workspace`
+  (or an explicit `workspace=` backend) and returns `CombinedCapability([_Skill(skill) for
+  skill in skills])` for that run; a run with no workspace anywhere raises `UserError`.
+  `capability.py`'s `SkillsCapability.__init__` is synchronous and calls
+  `self._skills.apply(harness_leaves.append)` expecting the old immediate per-skill leaves
+  — with harness ≥0.52 it silently gets the single opaque `Skills` leaf instead. Reproduced
+  empirically, not just read off the diff: upgrading harness past `0.36.0` (floor pair still
+  at `0.28.1`/`2.38.0`, confirmed unaffected) turns 351 passed into **58 failed** across
+  `tests/test_harness_compat.py` and `tests/test_capability.py`, identically at both `0.52.0`
+  and `0.53.0` (the two are byte-identical in `skills/`). This also falsifies a documented
+  invariant — both `capability.py`'s own docstring ("Discovery is a snapshot taken during
+  construction, matching harness's own semantics") and AGENTS.md's "Discovery mirrors
+  harness exactly" — for any harness ≥0.52.
+
+  **The mitigation** (small and surgical, implemented here): capped the dependency to
+  `pydantic-ai-harness[skills]>=0.28,<0.52` in `pyproject.toml`, so a fresh install (and
+  CI's `latest` leg) can't silently land on the broken contract. This alone isn't enough —
+  `uv pip install --upgrade "pydantic-ai-harness[skills]"` with no version spec ignores the
+  already-installed package's own constraint and force-upgrades straight past the cap
+  (verified empirically in an isolated venv: resolved to `0.53.0` even with the `pyproject.toml`
+  cap in place), so `.github/workflows/ci.yml`'s `latest` step now installs
+  `"pydantic-ai-harness[skills]<0.52"` explicitly instead of the bare package name. No source
+  or test changes otherwise — `tests/test_harness_compat.py` already pins the old contract and
+  is what caught this; it should keep failing loudly again if a future attempt to adopt the
+  new contract gets something wrong.
+
+  **The real fix is out of scope for this routine**: per #90, `SkillsCapability` would need
+  to stop assuming synchronous, construction-time discovery and participate in harness's new
+  async run-start lifecycle, plus decide how a `Workspace` gets supplied for callers who just
+  pass filesystem directories today (construct one internally? require `workspace=`
+  passthrough?), plus keep the bundled-file layer's own synchronous `index_libraries`
+  (`packages.py`) in sync with whatever harness discovers per-run. That's a multi-file,
+  architecture-level change, not a surgical diff — filing it rather than guessing at it.
+
+  **Private-symbol surface** (`pydantic_ai._function_schema.{FunctionSchema,function_schema}`,
+  `pydantic_ai._griffe.doc_descriptions`, `pydantic_ai._utils.{is_async_callable,run_in_executor}`):
+  confirmed unchanged between `v2.50.0` and `v2.53.0` by diffing the actual source
+  (`git diff v2.50.0 v2.53.0 -- pydantic_ai_slim/pydantic_ai/_function_schema.py
+  pydantic_ai_slim/pydantic_ai/_griffe.py pydantic_ai_slim/pydantic_ai/_utils.py` in a local
+  clone). `_function_schema.py` has zero diff. `_griffe.py` changed (36 lines) but only
+  internally — swapped a manual `logging.root.setLevel` hack for griffe's own
+  `warnings=False` option and added `NumpyOptions`/`SphinxOptions` branches alongside the
+  existing `GoogleOptions` one; `doc_descriptions`'s signature
+  (`func, sig, *, docstring_format`) and return shape are byte-for-byte unchanged, confirmed
+  by reading the function definition directly, not inferred from the diff hunk. `_utils.py`
+  changed (9 lines) but only in `gather()` (a `len(coros) == 1` fast path, #8774 — this
+  package never calls `gather`) and `is_text_like_media_type()` (gained a TOML case,
+  unrelated); `is_async_callable`/`run_in_executor` don't appear in the diff at all. Also
+  checked `AbstractCapability`/`CombinedCapability`/`RunContext` directly since `#8775`
+  ("Reduce `RunContext` copying overhead in capability hooks") and the new Workspaces API
+  (`#6492`/`#8866`-`#8869`, the bulk of `v2.52.0`) both sounded close: `capabilities/abstract.py`
+  gained `get_workspace`/`_prepare_workspace`/`_default_run_id`/`_has_get_workspace`, all with
+  safe no-op defaults (`None`/pass-through) that `SkillsCapability` (which overrides none of
+  them) inherits unchanged; `capabilities/combined.py`'s only behavior change is
+  `_replace_capability_context` using `copy()` instead of `dataclasses.replace()` for a plain
+  `RunContext` — internal to capability-hook dispatch, not something `SkillsCapability` calls
+  itself, and confirmed via the PR's own file list (`#8775` touches only that one function)
+  rather than assumed. `RunContext` gained a new `workspace: Workspace` field
+  (`_run_context.py`) with a default factory — purely additive; `_toolset.py`'s tools only
+  read `ctx.active_capability_ids`, untouched. The remaining `v2.51.0`–`v2.53.0` changes
+  (OpenAI/Gemini realtime models, `ConcurrencyLimitedModel`/`web_fetch` security fixes,
+  `clai2` plugins, `ToolCallJudge`, managed subagents, `SystemOneModel`, sandbox backends)
+  touch model providers, the `clai2` CLI, and durable-execution/sandbox internals this
+  package doesn't use.
+
+  **Harness's `Skills` surface beyond the break above**: `v0.36.0` itself (hosted MCP tools
+  for Grain/DayAI/PostHog/Pylon, a `pydantic-monty>=1` bump, `Coder` self-delegation) has zero
+  diff in `pydantic_ai_harness/skills/` against `v0.35.0` — confirmed by `diff -rq`. Harness's
+  own `pydantic-ai-slim` floor is unchanged at `>=2.44.0` in both `0.36.0` and `0.52.0`'s
+  `pyproject.toml` (only new optional extras — `grain`/`day-ai`/`posthog`/`pylon` — and a
+  `pydantic-monty`/`websockets` bump were added), so no change to the "harness sets this
+  package's floor" conclusion from 2026-09-25: our floor test's `pydantic-ai-harness==0.28.1`
+  pin is below and unaffected either way, and is now also below the new `<0.52` cap, so the
+  floor pair still resolves and passes.
+
+  **Verified empirically**: `pytest` passes identically (351 passed) in three configurations —
+  a clean venv at the declared floor (`pydantic-ai-harness[skills]==0.28.1`,
+  `pydantic-ai-slim==2.38.0`); the main environment with harness held at `0.36.0` (the new cap's
+  effective ceiling) and `pydantic-ai-slim` at latest (`2.53.0`); and reproduced the break itself
+  (58 failed) by force-upgrading harness past the cap to `0.53.0` in the same environment, then
+  confirmed reinstalling within the cap (`pip install "pydantic-ai-harness[skills]<0.52"
+  --upgrade`) returns to 351 passed. `pre-commit run --all-files` (ruff, ruff-format, mypy) is
+  clean against the capped latest combination.
+
 ## 2026-09-25
 
 - **pydantic/pydantic-ai**: checked through `v2.50.0` (published 2026-09-24). Reviewed

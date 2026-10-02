@@ -36,7 +36,11 @@ jobs:
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
         # `floor` pins pydantic-ai-harness and pydantic-ai-slim to the oldest pair this
         # package declares support for; the two move together because harness sets its
-        # own pydantic-ai-slim floor. `latest` tracks whatever is on PyPI today.
+        # own pydantic-ai-slim floor. `latest` tracks whatever is on PyPI today, within
+        # pyproject.toml's `pydantic-ai-harness[skills]<0.52` cap (see the dependency
+        # comment there): `--upgrade` ignores an already-installed package's own
+        # constraints, so it must be repeated here or this job would upgrade straight
+        # past the cap it exists to enforce.
         deps: ["floor", "latest"]
     steps:
       - uses: actions/checkout@v7
@@ -55,7 +59,7 @@ jobs:
       - name: Select pydantic-ai / harness versions
         run: |
           if [ "${{ matrix.deps }}" = "latest" ]; then
-            uv pip install --system --upgrade "pydantic-ai-harness[skills]" pydantic-ai-slim
+            uv pip install --system --upgrade "pydantic-ai-harness[skills]<0.52" pydantic-ai-slim
           else
             uv pip install --system "pydantic-ai-harness[skills]==0.28.1" "pydantic-ai-slim==2.38.0"
           fi

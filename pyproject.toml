@@ -33,8 +33,15 @@ dependencies = [
     # The harness owns Agent Skills discovery, SKILL.md validation and instruction
     # injection; this package layers remote sources and bundled files on top. 0.28 is
     # the floor because that is the oldest release whose `Skills` public surface matches
-    # what `SkillsCapability` re-emits (pinned by tests/test_harness_compat.py).
-    "pydantic-ai-harness[skills]>=0.28",
+    # what `SkillsCapability` re-emits (pinned by tests/test_harness_compat.py). Capped
+    # below 0.52: starting there, `Skills` stopped scanning directories synchronously at
+    # construction and `apply()` no longer yields one leaf per skill — discovery moved to
+    # an async, workspace-based `for_run()` hook instead. `SkillsCapability.__init__` is
+    # synchronous and calls `Skills.apply()` expecting the old per-skill leaves immediately
+    # (capability.py's `_skills.apply(harness_leaves.append)`), so it silently gets a single
+    # opaque `Skills` leaf instead. See the 2026-10-02 upstream-watch entry for the full
+    # diff and https://github.com/dougtrajano/pydantic-ai-skills/issues/90 for the fix.
+    "pydantic-ai-harness[skills]>=0.28,<0.52",
     # Raised from >=1.105 in 2.0. 2.38 is the floor, not 2.37 (pydantic-ai-harness's own
     # floor at 0.28): `AbstractCapability.visit_and_replace` only exists from 2.38, and
     # SkillsCapability must override it alongside `apply` or its skill leaves are invisible
