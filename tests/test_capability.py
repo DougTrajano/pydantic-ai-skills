@@ -21,6 +21,7 @@ from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai_skills import Skill, SkillsCapability
 from pydantic_ai_skills._toolset import SkillFilesToolset
 from pydantic_ai_skills.registries import LocalSkillsRegistry
+from tests._harness import HARNESS_DISCOVERS_PER_RUN, for_run, harness_leaves, instruction_parts, run_leaves
 
 
 def write_skill(
@@ -76,7 +77,7 @@ def test_each_skill_becomes_one_deferred_capability(library: Path) -> None:
     """The v1 `list_skills`/`load_skill` pair is replaced by pydantic-ai's own flow."""
     capability = SkillsCapability(library)
 
-    skill_leaves = [leaf for leaf in leaves_of(capability) if leaf is not capability]
+    skill_leaves = [leaf for leaf in run_leaves(capability) if not isinstance(leaf, SkillsCapability)]
 
     assert [leaf.id for leaf in skill_leaves] == ['demo-skill']
     assert all(leaf.defer_loading for leaf in skill_leaves)
@@ -88,10 +89,9 @@ def test_instructions_carry_the_harness_skill_heading(library: Path) -> None:
     """The rendered body is harness's, not ours -- including the `# Skill:` heading."""
     capability = SkillsCapability(library)
 
-    leaf = next(leaf for leaf in leaves_of(capability) if leaf.id == 'demo-skill')
-    instructions = leaf.get_instructions()
+    leaf = next(leaf for leaf in run_leaves(capability) if leaf.id == 'demo-skill')
+    instructions = instruction_parts(leaf)
 
-    assert isinstance(instructions, list)
     assert instructions[0].startswith('# Skill: demo-skill\n\n')
 
 
@@ -106,15 +106,24 @@ def test_a_directory_without_skill_md_is_not_a_skill(tmp_path: Path) -> None:
     assert SkillsCapability(lib).skill_names == ['real-skill']
 
 
-def test_harness_validation_errors_surface_at_construction(tmp_path: Path) -> None:
-    """We do not pre-empt harness's validation, so its message is what the caller sees."""
+def test_harness_validation_errors_reach_the_caller(tmp_path: Path) -> None:
+    """We do not pre-empt harness's validation, so its message is what the caller sees.
+
+    Before 0.52 harness rejects the library during construction. From 0.52 it reads the
+    library when a run starts and skips the invalid skill with a warning instead.
+    """
     lib = tmp_path / 'skills'
     skill = lib / 'bad-skill'
     skill.mkdir(parents=True)
     (skill / 'SKILL.md').write_text('---\nname: mismatched\ndescription: A skill.\n---\n\nBody.\n')
 
-    with pytest.raises(ValueError, match='must match its parent directory'):
-        SkillsCapability(lib)
+    if HARNESS_DISCOVERS_PER_RUN:
+        capability = SkillsCapability(lib)
+        with pytest.warns(UserWarning, match='must match its parent directory'):
+            assert run_leaves(capability) == []
+    else:
+        with pytest.raises(ValueError, match='must match its parent directory'):
+            SkillsCapability(lib)
 
 
 def test_multiple_libraries_are_merged(tmp_path: Path) -> None:
@@ -277,10 +286,9 @@ def test_skill_dir_placeholder_is_resolved(tmp_path: Path, placeholder: str) -> 
     lib = tmp_path / 'skills'
     skill = write_skill(lib, 'demo-skill', body=f'Run {placeholder}/scripts/go.py')
 
-    leaf = next(leaf for leaf in leaves_of(SkillsCapability(lib)) if leaf.id == 'demo-skill')
-    instructions = leaf.get_instructions()
+    leaf = next(leaf for leaf in run_leaves(SkillsCapability(lib)) if leaf.id == 'demo-skill')
+    instructions = instruction_parts(leaf)
 
-    assert isinstance(instructions, list)
     assert str(skill.resolve()) in instructions[0]
     assert placeholder not in instructions[0]
 
@@ -290,23 +298,18 @@ def test_skill_dir_placeholder_is_left_alone_when_disabled(tmp_path: Path) -> No
     lib = tmp_path / 'skills'
     write_skill(lib, 'demo-skill', body='Run ${SKILL_DIR}/scripts/go.py')
 
-    leaf = next(leaf for leaf in leaves_of(SkillsCapability(lib, resolve_skill_dir=False)) if leaf.id == 'demo-skill')
-    instructions = leaf.get_instructions()
+    leaf = next(leaf for leaf in run_leaves(SkillsCapability(lib, resolve_skill_dir=False)) if leaf.id == 'demo-skill')
+    instructions = instruction_parts(leaf)
 
-    assert isinstance(instructions, list)
     assert '${SKILL_DIR}' in instructions[0]
 
 
 def test_a_leaf_with_nothing_to_add_is_passed_through_untouched(library: Path) -> None:
     """No placeholder and no inventory means no rebuild, so harness's own object reaches the agent."""
-    from pydantic_ai_harness import Skills
-
-    harness_leaves: list[AbstractCapability[Any]] = []
-    Skills(library).apply(harness_leaves.append)
     capability = SkillsCapability(library, list_bundled_files=False)
-    ours = next(leaf for leaf in leaves_of(capability) if leaf.id == 'demo-skill')
+    ours = next(leaf for leaf in run_leaves(capability) if leaf.id == 'demo-skill')
 
-    assert ours.get_instructions() == harness_leaves[0].get_instructions()
+    assert ours.get_instructions() == harness_leaves(library)[0].get_instructions()
 
 
 # ---------------------------------------------------------------------------
@@ -316,10 +319,9 @@ def test_a_leaf_with_nothing_to_add_is_passed_through_untouched(library: Path) -
 
 def test_bundled_files_are_listed_in_the_instructions(library: Path) -> None:
     """A SKILL.md names its files in prose; the tools need the indexed paths."""
-    leaf = next(leaf for leaf in leaves_of(SkillsCapability(library)) if leaf.id == 'demo-skill')
-    instructions = leaf.get_instructions()
+    leaf = next(leaf for leaf in run_leaves(SkillsCapability(library)) if leaf.id == 'demo-skill')
+    instructions = instruction_parts(leaf)
 
-    assert isinstance(instructions, list)
     inventory = instructions[-1]
     assert '## Bundled files' in inventory
     assert '- `references/NOTES.md`' in inventory
@@ -329,20 +331,18 @@ def test_bundled_files_are_listed_in_the_instructions(library: Path) -> None:
 def test_the_inventory_can_be_turned_off(library: Path) -> None:
     """A skill whose own instructions list its files does not need ours."""
     capability = SkillsCapability(library, list_bundled_files=False)
-    leaf = next(leaf for leaf in leaves_of(capability) if leaf.id == 'demo-skill')
-    instructions = leaf.get_instructions()
+    leaf = next(leaf for leaf in run_leaves(capability) if leaf.id == 'demo-skill')
+    instructions = instruction_parts(leaf)
 
-    assert isinstance(instructions, list)
     assert not any('Bundled files' in part for part in instructions)
 
 
 def test_the_inventory_omits_a_kind_whose_tool_is_not_registered(library: Path) -> None:
     """Advertising names the model has no tool to use would be noise."""
     capability = SkillsCapability(library, scripts=False)
-    leaf = next(leaf for leaf in leaves_of(capability) if leaf.id == 'demo-skill')
-    instructions = leaf.get_instructions()
+    leaf = next(leaf for leaf in run_leaves(capability) if leaf.id == 'demo-skill')
+    instructions = instruction_parts(leaf)
 
-    assert isinstance(instructions, list)
     inventory = instructions[-1]
     assert '- `references/NOTES.md`' in inventory
     assert 'scripts/hello.py' not in inventory
@@ -353,10 +353,9 @@ def test_a_skill_with_no_bundled_files_gets_no_inventory(tmp_path: Path) -> None
     lib = tmp_path / 'skills'
     write_skill(lib, 'plain-skill', body='Just instructions.')
 
-    leaf = next(leaf for leaf in leaves_of(SkillsCapability(lib)) if leaf.id == 'plain-skill')
-    instructions = leaf.get_instructions()
+    leaf = next(leaf for leaf in run_leaves(SkillsCapability(lib)) if leaf.id == 'plain-skill')
+    instructions = instruction_parts(leaf)
 
-    assert isinstance(instructions, list)
     assert not any('Bundled files' in part for part in instructions)
 
 
@@ -368,10 +367,9 @@ def test_a_long_inventory_is_truncated(tmp_path: Path) -> None:
     for index in range(60):
         (skill / 'references' / f'note-{index:03d}.md').write_text('note')
 
-    leaf = next(leaf for leaf in leaves_of(SkillsCapability(lib)) if leaf.id == 'big-skill')
-    instructions = leaf.get_instructions()
+    leaf = next(leaf for leaf in run_leaves(SkillsCapability(lib)) if leaf.id == 'big-skill')
+    instructions = instruction_parts(leaf)
 
-    assert isinstance(instructions, list)
     assert '- ...and 10 more' in instructions[-1]
 
 
@@ -410,7 +408,7 @@ def test_a_programmatic_skill_joins_the_deferred_catalog(library: Path) -> None:
 
     capability = SkillsCapability(library, skills=[python_skill])
 
-    leaf = next(leaf for leaf in leaves_of(capability) if leaf.id == 'in-python')
+    leaf = next(leaf for leaf in run_leaves(capability) if leaf.id == 'in-python')
     assert leaf.defer_loading is True
     assert leaf.get_description() == 'Defined in Python.'
     assert leaf.get_instructions() == ['# Skill: in-python\n\nDo the thing.']
@@ -424,6 +422,18 @@ def test_a_programmatic_skill_shadowing_a_directory_one_warns(library: Path) -> 
         capability = SkillsCapability(library, skills=[python_skill])
 
     assert capability.skill_names == ['demo-skill']
+
+
+def test_a_shadowed_directory_skill_never_reaches_the_run(library: Path) -> None:
+    """Harness is told to skip the shadowed name, so the run sees one capability under it."""
+    python_skill = Skill(name='demo-skill', description='Also called demo-skill.', content='Body.')
+
+    with pytest.warns(UserWarning, match='shadows a skill of the same name'):
+        capability = SkillsCapability(library, skills=[python_skill])
+
+    leaves = [leaf for leaf in run_leaves(capability) if leaf.id == 'demo-skill']
+    assert len(leaves) == 1
+    assert leaves[0].get_description() == 'Also called demo-skill.'
 
 
 def test_a_capability_may_hold_only_programmatic_skills() -> None:
@@ -447,7 +457,7 @@ def test_visit_and_replace_returns_self_when_nothing_changed(library: Path) -> N
 
 def test_visit_and_replace_rebuilds_the_container(library: Path) -> None:
     """A replaced leaf survives inside a fresh container."""
-    capability = SkillsCapability(library)
+    capability = for_run(SkillsCapability(library))
     replacement = Capability[Any](id='demo-skill', instructions='replaced', defer_loading=True)
 
     rewritten = capability.visit_and_replace(lambda leaf: replacement if leaf.id == 'demo-skill' else leaf)
@@ -459,7 +469,7 @@ def test_visit_and_replace_rebuilds_the_container(library: Path) -> None:
 
 def test_visit_and_replace_returns_none_when_everything_is_removed(library: Path) -> None:
     """Removing every leaf removes the container."""
-    assert SkillsCapability(library).visit_and_replace(lambda leaf: None) is None
+    assert for_run(SkillsCapability(library)).visit_and_replace(lambda leaf: None) is None
 
 
 def test_repr_shows_only_caller_configuration(library: Path) -> None:
@@ -496,6 +506,66 @@ def test_from_spec_accepts_a_single_directory_string(library: Path) -> None:
 
     assert isinstance(capability, SkillsCapability)
     assert capability.skill_names == ['demo-skill']
+
+
+# ---------------------------------------------------------------------------
+# Per-run discovery -- harness 0.52+ reads its libraries when a run starts
+# ---------------------------------------------------------------------------
+
+
+def test_resolving_for_a_run_leaves_the_capability_reusable(library: Path) -> None:
+    """Each run gets its own leaves; the configured capability is never mutated."""
+    capability = SkillsCapability(library)
+    before = leaves_of(capability)
+
+    first = sorted(leaf.id for leaf in run_leaves(capability) if leaf.id)
+    second = sorted(leaf.id for leaf in run_leaves(capability) if leaf.id)
+
+    assert first == second == ['demo-skill']
+    assert leaves_of(capability) == before
+    assert capability.skill_names == ['demo-skill']
+
+
+def test_resolving_twice_does_not_duplicate_skills(library: Path) -> None:
+    """A capability already resolved for a run is returned as is."""
+    resolved = for_run(SkillsCapability(library))
+
+    assert [leaf.id for leaf in run_leaves(resolved) if leaf.id] == ['demo-skill']
+    assert resolved.skill_names == ['demo-skill']  # type: ignore[attr-defined]
+
+
+def test_harness_skills_are_not_exposed_before_a_run(library: Path) -> None:
+    """Harness 0.52+'s undecomposed `Skills` (id `skills`) must not reach the agent's tree.
+
+    It would collide with a `Skills` the caller adds to the same agent, and is not a skill.
+    """
+    from pydantic_ai_harness import Skills
+
+    assert not any(isinstance(leaf, Skills) for leaf in leaves_of(SkillsCapability(library)))
+    assert not any(isinstance(leaf, Skills) for leaf in run_leaves(SkillsCapability(library)))
+
+
+def test_a_relative_library_resolves_against_the_construction_directory(
+    library: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Registries and the file tools see the library at construction, so harness must too."""
+    monkeypatch.chdir(library.parent)
+    capability = SkillsCapability(library.name)
+    monkeypatch.chdir(library)
+
+    assert [leaf.id for leaf in run_leaves(capability) if leaf.id] == ['demo-skill']
+
+
+async def test_a_run_needs_no_workspace(library: Path) -> None:
+    """Callers that pass plain directories keep working without attaching a workspace."""
+
+    def model_fn(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        return ModelResponse(parts=[TextPart('done')])
+
+    agent = Agent(FunctionModel(model_fn), capabilities=[SkillsCapability(library)])
+
+    assert (await agent.run('hi')).output == 'done'
+    assert (await agent.run('again')).output == 'done'
 
 
 # ---------------------------------------------------------------------------
@@ -600,7 +670,7 @@ def test_overlong_description_warning_comes_from_harness(tmp_path: Path) -> None
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter('always')
-        SkillsCapability(lib)
+        for_run(SkillsCapability(lib))
 
     assert any('1,024-character limit' in str(warning.message) for warning in caught)
 

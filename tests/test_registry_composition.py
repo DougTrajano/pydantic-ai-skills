@@ -12,7 +12,6 @@ import warnings
 from pathlib import Path
 
 import pytest
-from pydantic_ai_harness import Skills
 
 from pydantic_ai_skills import SkillsCapability
 from pydantic_ai_skills.registries import (
@@ -22,6 +21,7 @@ from pydantic_ai_skills.registries import (
     SkillRegistry,
     WrapperRegistry,
 )
+from tests._harness import harness_names
 
 
 def write_skill(library: Path, name: str, *, description: str | None = None, declare_name: bool = True) -> Path:
@@ -38,17 +38,6 @@ def write_skill(library: Path, name: str, *, description: str | None = None, dec
 def library_names(library: Path) -> list[str]:
     """Names of the skill packages in a library, sorted."""
     return sorted(child.name for child in library.iterdir() if (child / 'SKILL.md').is_file())
-
-
-def harness_names(library: Path) -> list[str]:
-    """What harness would actually call the skills in `library`.
-
-    The real assertion for a staged library: harness both accepts it and agrees with the
-    directory names we chose.
-    """
-    leaves: list[object] = []
-    Skills(library).apply(leaves.append)
-    return sorted(leaf.id for leaf in leaves)  # type: ignore[attr-defined]
 
 
 @pytest.fixture

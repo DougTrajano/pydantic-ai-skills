@@ -13,10 +13,10 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
-from pydantic_ai_harness import Skills
 
 from pydantic_ai_skills import SkillsCapability
 from pydantic_ai_skills.registries.s3 import S3SkillsRegistry
+from tests._harness import harness_names
 
 # ---------------------------------------------------------------------------
 # Fake boto3 S3 client
@@ -54,13 +54,6 @@ class FakeS3Client:
 def library_names(library: Path) -> list[str]:
     """Names of the skill packages in a library, sorted."""
     return sorted(child.name for child in library.iterdir() if (child / 'SKILL.md').is_file())
-
-
-def harness_names(library: Path) -> list[str]:
-    """What harness would actually call the skills in `library`."""
-    leaves: list[Any] = []
-    Skills(library).apply(leaves.append)
-    return sorted(leaf.id for leaf in leaves)
 
 
 # ---------------------------------------------------------------------------

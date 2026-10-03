@@ -209,17 +209,14 @@ def test_validate_skill_name_error_names_the_operation() -> None:
 
 def test_validate_skill_name_agrees_with_harness(tmp_path: Path) -> None:
     """Pin the mirror: a name we accept is one harness actually accepts."""
-    from pydantic_ai_harness import Skills
+    from tests._harness import harness_names
 
     name = validate_skill_name('anthropic-pdf', context='test')
     skill = tmp_path / name
     skill.mkdir()
     (skill / 'SKILL.md').write_text(f'---\nname: {name}\ndescription: A skill.\n---\n\nBody.\n')
 
-    leaves: list[object] = []
-    Skills(tmp_path).apply(leaves.append)
-
-    assert [leaf.id for leaf in leaves] == [name]  # type: ignore[attr-defined]
+    assert harness_names(tmp_path) == [name]
 
 
 # ---------------------------------------------------------------------------
