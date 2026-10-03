@@ -168,8 +168,8 @@ Three consequences:
 - harness's `SKILL.md` validation errors surface when a run starts. An invalid `SKILL.md` is skipped
   with a warning, where older harness raised during construction.
 - Windows is not supported. `LocalWorkspaceBackend` is POSIX-only in pydantic-ai, and constructing a
-  `SkillsCapability` over directories raises `NotImplementedError` there. pydantic-ai-harness declares
-  no operating systems and is tested on Linux only; this package is the same.
+  `SkillsCapability` over directories raises `NotImplementedError` there. Like pydantic-ai-slim, this
+  package supports Linux, Unix and macOS.
 
 v1 had `reload()` and `auto_reload`; both are gone. To pick up changes, build a new capability and a
 new agent:
