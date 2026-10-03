@@ -161,12 +161,15 @@ With `pydantic-ai-harness>=0.52`, harness itself reads each indexed skill's `SKI
 starts, rather than during construction. `SkillsCapability` hands it a
 `LocalWorkspaceBackend` over this machine's filesystem — the same files
 it indexed — so a run needs no workspace attached, and the catalog it sees is the snapshot's skills.
-Two consequences:
+Three consequences:
 
 - An edited `SKILL.md` body or description is picked up by the next run. Adding or removing a skill
   directory is not: rebuild for that, as below.
 - harness's `SKILL.md` validation errors surface when a run starts. An invalid `SKILL.md` is skipped
   with a warning, where older harness raised during construction.
+- Windows is not supported. `LocalWorkspaceBackend` is POSIX-only in pydantic-ai, and constructing a
+  `SkillsCapability` over directories raises `NotImplementedError` there. pydantic-ai-harness declares
+  no operating systems and is tested on Linux only; this package is the same.
 
 v1 had `reload()` and `auto_reload`; both are gone. To pick up changes, build a new capability and a
 new agent:
