@@ -42,7 +42,9 @@ needed.
    `${SKILL_DIR}` resolved in its instructions when the skill has a directory, and its
    [bundled files listed](#bundled-file-inventory) at the end of them.
 
-Everything happens at construction time. See [Snapshots](#snapshots) below.
+Steps 1 and 3 happen at construction time. Step 2 does too with `pydantic-ai-harness<0.52`; from
+0.52 harness reads `SKILL.md` at the start of each run instead, and step 4 follows it there. See
+[Snapshots](#snapshots) below.
 
 ## Deferred capabilities, not a `load_skill` tool
 
@@ -152,8 +154,22 @@ are discovered.
 
 ## Snapshots
 
-Discovery runs once, when `SkillsCapability` is constructed — registries sync, harness scans,
-files are indexed. Nothing re-reads the filesystem during a run.
+Registries sync and bundled files are indexed once, when `SkillsCapability` is constructed. Nothing
+re-syncs a registry or re-indexes files during a run.
+
+With `pydantic-ai-harness>=0.52`, harness itself reads each indexed skill's `SKILL.md` when a run
+starts, rather than during construction. `SkillsCapability` hands it a
+`LocalWorkspaceBackend` over this machine's filesystem — the same files
+it indexed — so a run needs no workspace attached, and the catalog it sees is the snapshot's skills.
+Three consequences:
+
+- An edited `SKILL.md` body or description is picked up by the next run. Adding or removing a skill
+  directory is not: rebuild for that, as below.
+- harness's `SKILL.md` validation errors surface when a run starts. An invalid `SKILL.md` is skipped
+  with a warning, where older harness raised during construction.
+- Windows is not supported. `LocalWorkspaceBackend` is POSIX-only in pydantic-ai, and constructing a
+  `SkillsCapability` over directories raises `NotImplementedError` there. Like pydantic-ai-slim, this
+  package supports Linux, Unix and macOS.
 
 v1 had `reload()` and `auto_reload`; both are gone. To pick up changes, build a new capability and a
 new agent:

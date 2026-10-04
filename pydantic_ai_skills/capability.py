@@ -16,6 +16,7 @@ Each skill remains one deferred capability, loaded by the model through pydantic
 
 from __future__ import annotations
 
+import inspect
 import unicodedata
 import warnings
 from collections.abc import Callable, Collection, Sequence
@@ -24,7 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from pydantic_ai.capabilities import AbstractCapability, Capability
-from pydantic_ai.tools import AgentDepsT
+from pydantic_ai.tools import AgentDepsT, RunContext
 from pydantic_ai.toolsets import AgentToolset
 from pydantic_ai_harness import Skills
 
@@ -45,6 +46,11 @@ _SKILL_DIR_PLACEHOLDERS = ('${SKILL_DIR}', '${CLAUDE_SKILL_DIR}')
 #: more than this gets a count instead of a wall of names; the file tools' not-found retry
 #: still reports the full list.
 _MAX_LISTED_FILES = 50
+
+#: harness 0.52 moved `Skills` discovery from construction to the run's start: it reads its
+#: libraries from a workspace in `for_run` and yields no per-skill leaves before then. Its
+#: `workspace=` argument arrived with that change, so its presence identifies the new shape.
+_HARNESS_DISCOVERS_PER_RUN = 'workspace' in inspect.signature(Skills.__init__).parameters
 
 
 def _normalize(name: str) -> str:
@@ -139,8 +145,10 @@ class SkillsCapability(AbstractCapability[AgentDepsT]):
     on disk are validated and rendered by `pydantic-ai-harness`; this capability adds
     remote sources, the bundled-file tools, and programmatic skills on top.
 
-    Discovery is a snapshot taken during construction, matching harness's own semantics.
-    Call `registry.sync()` and build a new `SkillsCapability` to pick up changes.
+    Registries are synced and bundled files indexed once, during construction. Call
+    `registry.sync()` and build a new `SkillsCapability` to pick up changes. With
+    `pydantic-ai-harness>=0.52`, harness itself re-reads the indexed skills' `SKILL.md` at the
+    start of each run, from this machine's filesystem: the run needs no workspace of its own.
 
     Example:
         ```python
@@ -177,6 +185,8 @@ class SkillsCapability(AbstractCapability[AgentDepsT]):
     """Exact skill names to omit from the catalog."""
 
     _skills: Skills[AgentDepsT] | None = field(init=False, repr=False, compare=False)
+    _pending_names: frozenset[str] = field(init=False, repr=False, compare=False)
+    _resolve_skill_dir: bool = field(init=False, repr=False, compare=False)
     _packages: dict[str, SkillPackage] = field(init=False, repr=False, compare=False)
     _leaves: tuple[AbstractCapability[AgentDepsT], ...] = field(init=False, repr=False, compare=False)
     _files_toolset: SkillFilesToolset | None = field(init=False, repr=False, compare=False)
@@ -246,6 +256,7 @@ class SkillsCapability(AbstractCapability[AgentDepsT]):
         # has no name worth advertising.
         self._list_resources = resources and list_bundled_files
         self._list_scripts = scripts and list_bundled_files
+        self._resolve_skill_dir = resolve_skill_dir
 
         programmatic = [entry.to_skill() if isinstance(entry, SkillWrapper) else entry for entry in skills]
 
@@ -269,20 +280,23 @@ class SkillsCapability(AbstractCapability[AgentDepsT]):
         programmatic_names = frozenset(_normalize(skill.name) for skill in programmatic)
         self._validate_selection(directory_names | programmatic_names)
 
-        self._skills = self._build_harness_skills(libraries, directory_names)
-
         selected_programmatic = self._resolve_duplicates(
             [skill for skill in programmatic if self._is_selected(_normalize(skill.name))]
         )
-        shadowed = {_normalize(skill.name) for skill in selected_programmatic}
+        shadowed = frozenset(_normalize(skill.name) for skill in selected_programmatic)
+
+        # A shadowed skill is withheld from harness rather than filtered out of its leaves
+        # afterwards: from harness 0.52 those leaves only exist once a run has started.
+        self._skills = self._build_harness_skills(libraries, directory_names, shadowed)
 
         leaves: list[AbstractCapability[AgentDepsT]] = []
-        if self._skills is not None:
-            harness_leaves: list[AbstractCapability[AgentDepsT]] = []
-            self._skills.apply(harness_leaves.append)
-            leaves.extend(
-                self._rebuild_leaf(leaf, resolve_skill_dir) for leaf in harness_leaves if leaf.id not in shadowed
-            )
+        if self._skills is not None and not _HARNESS_DISCOVERS_PER_RUN:
+            leaves.extend(self._harness_leaves(self._skills))
+        self._pending_names = (
+            frozenset(name for name in directory_names if self._is_selected(name)) - shadowed
+            if self._skills is not None and _HARNESS_DISCOVERS_PER_RUN
+            else frozenset()
+        )
 
         for skill in selected_programmatic:
             name = _normalize(skill.name)
@@ -389,19 +403,44 @@ class SkillsCapability(AbstractCapability[AgentDepsT]):
         self,
         libraries: Sequence[str | Path],
         directory_names: frozenset[str],
+        shadowed: frozenset[str],
     ) -> Skills[AgentDepsT] | None:
         """Construct the harness `Skills` that owns discovery and instruction rendering.
 
         The selection is narrowed to names harness can actually see: it raises on an
         `include` naming a skill it did not discover, and a selection may legitimately
-        refer to a programmatic skill instead.
+        refer to a programmatic skill instead. Skills shadowed by a programmatic one are
+        excluded, so no duplicate capability id reaches the run.
+
+        From harness 0.52 the libraries are read from a workspace at the start of each run.
+        Registries sync to this machine and the file tools index this machine, so harness is
+        pointed at the local filesystem rather than at the run's workspace, which may be a
+        remote sandbox, or absent.
         """
         if not libraries:
             return None
 
+        options: dict[str, Any] = {}
+        if _HARNESS_DISCOVERS_PER_RUN:
+            from pydantic_ai.workspaces import LocalWorkspaceBackend
+
+            # Relative library paths resolve against the directory at construction time, as
+            # they did when harness scanned them here.
+            options['workspace'] = LocalWorkspaceBackend(Path.cwd())
+
         if self.include is not None:
-            return Skills[AgentDepsT](libraries, include=sorted(self.include & directory_names))
-        return Skills[AgentDepsT](libraries, exclude=sorted(self.exclude & directory_names))
+            return Skills[AgentDepsT](libraries, include=sorted((self.include & directory_names) - shadowed), **options)
+        return Skills[AgentDepsT](libraries, exclude=sorted((self.exclude | shadowed) & directory_names), **options)
+
+    def _harness_leaves(self, capability: AbstractCapability[AgentDepsT]) -> list[AbstractCapability[AgentDepsT]]:
+        """Collect the per-skill leaves of harness's `Skills`, rebuilt for this package."""
+        harness_leaves: list[AbstractCapability[AgentDepsT]] = []
+        capability.apply(harness_leaves.append)
+        # harness 0.52+ hands its `Skills` back unchanged from `for_run` when no skill is
+        # selected, and that visits itself rather than any skill.
+        return [
+            self._rebuild_leaf(leaf, self._resolve_skill_dir) for leaf in harness_leaves if not isinstance(leaf, Skills)
+        ]
 
     def _rebuild_leaf(
         self,
@@ -410,14 +449,16 @@ class SkillsCapability(AbstractCapability[AgentDepsT]):
     ) -> AbstractCapability[AgentDepsT]:
         """Return `leaf` with placeholders resolved and its bundled files listed.
 
-        harness emits plain-string instructions, so when there is nothing to substitute and
-        nothing to list the original leaf is handed back untouched rather than rebuilt.
+        harness emits plain-string instructions — a list of strings before 0.52, a single
+        string from 0.52 — so when there is nothing to substitute and nothing to list the
+        original leaf is handed back untouched rather than rebuilt.
         """
         package = self._packages.get(leaf.id) if leaf.id else None
         if package is None:
             return leaf
 
-        instructions = leaf.get_instructions()
+        rendered = leaf.get_instructions()
+        instructions = [rendered] if isinstance(rendered, str) else rendered
         if not isinstance(instructions, list) or not all(isinstance(part, str) for part in instructions):
             return leaf
 
@@ -466,8 +507,12 @@ class SkillsCapability(AbstractCapability[AgentDepsT]):
 
     @property
     def skill_names(self) -> list[str]:
-        """Names of the skills exposed to the model, sorted."""
-        return sorted(leaf.id for leaf in self._leaves if leaf.id)
+        """Names of the skills exposed to the model, sorted.
+
+        Includes the skills harness will read at the start of a run when it discovers them
+        per run (`pydantic-ai-harness>=0.52`).
+        """
+        return sorted({leaf.id for leaf in self._leaves if leaf.id} | self._pending_names)
 
     @property
     def packages(self) -> dict[str, SkillPackage]:
@@ -491,6 +536,31 @@ class SkillsCapability(AbstractCapability[AgentDepsT]):
         for leaf in self._leaves:
             leaf.apply(visitor)
 
+    async def for_run(self, ctx: RunContext[AgentDepsT]) -> AbstractCapability[AgentDepsT]:
+        """Return this capability with harness's skills decomposed into per-skill leaves.
+
+        From harness 0.52, `Skills` reads its libraries at the start of each run and only then
+        yields one deferred capability per skill. Those leaves get the same `${SKILL_DIR}`
+        resolution and bundled-file listing as before, and are returned in a per-run copy so
+        this instance stays reusable across runs. With an older harness the leaves were built
+        during construction, and this returns `self`.
+        """
+        if self._skills is None or not _HARNESS_DISCOVERS_PER_RUN:
+            return self
+
+        leaves = self._harness_leaves(await self._skills.for_run(ctx))
+        resolved = self._with_leaves((*leaves, *self._leaves))
+        # The copy holds its skills as leaves now; resolving it again must not add them twice.
+        resolved.__dict__.update(_skills=None, _pending_names=frozenset())
+        return resolved
+
+    def _with_leaves(self, leaves: tuple[AbstractCapability[AgentDepsT], ...]) -> AbstractCapability[AgentDepsT]:
+        """Return a shallow copy of this capability holding `leaves`."""
+        clone = object.__new__(type(self))
+        clone.__dict__.update(self.__dict__)
+        clone._leaves = leaves
+        return clone
+
     def visit_and_replace(
         self,
         visitor: Callable[[AbstractCapability[AgentDepsT]], AbstractCapability[AgentDepsT] | None],
@@ -510,10 +580,7 @@ class SkillsCapability(AbstractCapability[AgentDepsT]):
         if not replaced:
             return None
 
-        clone = object.__new__(type(self))
-        clone.__dict__.update(self.__dict__)
-        clone._leaves = tuple(replaced)
-        return clone
+        return self._with_leaves(tuple(replaced))
 
     def get_toolset(self) -> AgentToolset[AgentDepsT] | None:
         """Return the bundled-file toolset, or None when no skill ships files.

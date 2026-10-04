@@ -13,10 +13,10 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-from pydantic_ai_harness import Skills
 
 from pydantic_ai_skills import SkillsCapability
 from pydantic_ai_skills.registries.git import GitCloneOptions, GitSkillsRegistry
+from tests._harness import harness_names
 
 # ---------------------------------------------------------------------------
 # Helpers / fixtures
@@ -37,13 +37,6 @@ def _write_skill(base: Path, name: str, description: str = 'A test skill.') -> P
 def library_names(library: Path) -> list[str]:
     """Names of the skill packages in a library, sorted."""
     return sorted(child.name for child in library.iterdir() if (child / 'SKILL.md').is_file())
-
-
-def harness_names(library: Path) -> list[str]:
-    """What harness would actually call the skills in `library`."""
-    leaves: list[object] = []
-    Skills(library).apply(leaves.append)
-    return sorted(leaf.id for leaf in leaves)  # type: ignore[attr-defined]
 
 
 @pytest.fixture()

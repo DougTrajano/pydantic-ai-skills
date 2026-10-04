@@ -45,7 +45,7 @@ The two tools exposed to the model: `read_skill_resource`, `run_skill_script`. L
 
 Invariants to preserve:
 
-- **harness owns levels 1 and 2.** `SkillsCapability` constructs `pydantic_ai_harness.Skills` and re-emits its leaves. Never reimplement `SKILL.md` parsing, validation, naming, or the catalog, and never import from `pydantic_ai_harness.skills._loader` — only the public `Skills` surface, pinned by [tests/test_harness_compat.py](tests/test_harness_compat.py).
+- **harness owns levels 1 and 2.** `SkillsCapability` constructs `pydantic_ai_harness.Skills` and re-emits its leaves — during construction before harness 0.52, and from `for_run` (per run, reading a `LocalWorkspaceBackend`, never the run's workspace) from 0.52. Never let the undecomposed `Skills` (id `skills`) into the tree `apply` yields. Never reimplement `SKILL.md` parsing, validation, naming, or the catalog, and never import from `pydantic_ai_harness.skills._loader` — only the public `Skills` surface, pinned by [tests/test_harness_compat.py](tests/test_harness_compat.py).
 - **`get_toolset()` must stay on the capability, not on a leaf.** pydantic-ai collects toolsets from a container's direct children (`CombinedCapability.get_toolset`) and does *not* recurse through `apply()`. A toolset parked on a leaf is silently never registered.
 - **`apply()` must visit `self` when a toolset is contributed.** The run's capability registry is built from `apply()`, and `CapabilityOwnedToolset` raises at first tool call if the owner is missing from it.
 - **Discovery mirrors harness exactly** — immediate children of a library containing `SKILL.md`. `index_libraries` and harness must never disagree about what a skill is, or the file tools cannot find packages for skills on the catalog.

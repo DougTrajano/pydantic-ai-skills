@@ -53,7 +53,9 @@ See [Registries](registries.md#composition) for the full composition story.
 
 ## Picking up changes to skills
 
-Discovery is a snapshot taken at construction. There is no `reload()`, and no `auto_reload` — v1 had
+Discovery is a snapshot taken at construction (with `pydantic-ai-harness>=0.52`, an edited `SKILL.md`
+body is re-read at the start of each run; see [Snapshots](concepts.md#snapshots)). There is no
+`reload()`, and no `auto_reload` — v1 had
 both, and neither was coherent: an agent's instructions and tools are fixed for a run.
 
 Rebuild instead:
