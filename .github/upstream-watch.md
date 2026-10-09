@@ -12,6 +12,61 @@ for the next run.
 > dependency from 2026-09 onwards — see `.claude/commands/upstream-watch.md` for the
 > surface to check. Past entries are left as the record of what was known at the time.
 
+## 2026-10-09
+
+- **pydantic/pydantic-ai**: checked through `v2.54.0` (published 2026-10-02). Reviewed
+  `v2.54.0` only (the `clai2-bleeding` tag, published 2026-10-06, was skipped: its own release
+  notes say "Sdists rebuilt from `main` for `/update` on the CLAI `bleeding` channel. Not a
+  release.").
+- **pydantic/pydantic-ai-harness**: checked through PyPI `0.54.0` (published 2026-10-03; no
+  GitHub release or tag exists past `v0.36.0` — confirmed by re-checking the repo's `/tags`
+  page, the same gap noted in the 2026-10-02 entry). Reviewed `0.53.0`→`0.54.0` (sdist diff
+  only, no tag or release notes exist to read; downloaded both via `pip download --no-deps
+  --no-binary :all:`).
+- **Verdict**: No action needed. On the `pydantic-ai` side, `v2.54.0`'s Compatibility Notes
+  (`#9560` JSON-schema draft-7 `items`/`prefixItems` handling, `#9477` `ImageGeneration` under
+  `FallbackModel`, `#9391` rejecting a second durable engine, `#9580` Temporal model-error
+  types, `#9434` `BackgroundTools` exception handling, `#9424` dropping the `SubAgents`
+  `agent_folders` warning) and its feature/bug-fix list (`clai2` UI work, realtime-model
+  reconnects, `CodeMode`, provider-specific fixes, `BubblewrapWorkspace` SSH hardening) touch
+  model providers, `clai2`, durable-execution engines, and other capabilities this package
+  doesn't use (confirmed by grep: no match for `BackgroundTools`, `SubAgents`, `CodeMode`, or
+  `agent_folders` anywhere in `pydantic_ai_skills/`). Two items looked close enough to read by
+  diff rather than title alone, in two depth-1 tag clones (`v2.53.0`, this log's prior
+  checked-through tag, vs `v2.54.0`): `#7053` ("`wrap_*` hooks now enclose full stage
+  lifecycles") only rewrites docstrings across `capabilities/abstract.py`'s `before_*`/
+  `after_*`/`on_*_error`/`wrap_*` hook pairs to document behavior that was already true, and
+  adds two new internal `ClassVar`/property members (`_one_per_agent`, `_cancellation_error_types`)
+  with safe no-op defaults that `SkillsCapability` (which overrides none of these hooks per
+  AGENTS.md — only `apply`, `visit_and_replace`, `get_toolset`, `get_instructions`,
+  `get_description`) doesn't touch; its only behavioral diff, a one-line `keep_mirroring()`
+  call added to `CombinedCapability.before_model_request`'s dispatch loop in
+  `capabilities/combined.py`, is internal to a hook `SkillsCapability` doesn't implement.
+  `#9397` ("Loads a capability once when `load_capability` is called twice in one response")
+  changes `toolsets/_deferred_capability_loader.py`, the implementation behind pydantic-ai's
+  own `load_capability` tool — which, per AGENTS.md, "is Pydantic AI's own `load_capability`,
+  not something this package registers" — to reject a second parallel `load_capability` call
+  for the same capability in one response instead of double-loading it; purely a correctness
+  fix to a mechanism this package's `defer_loading=True` skill leaves already rely on
+  unmodified, with no change to `AbstractCapability`'s or `RunContext`'s public surface
+  (`_run_context.py`'s only diff in this window is docstring wording around
+  `messages`/`model_request_parameters`, confirmed field-for-field unchanged).
+  `toolsets/abstract.py` has zero diff. The private symbols this package imports
+  (`pydantic_ai._function_schema.{FunctionSchema,function_schema}`,
+  `pydantic_ai._griffe.doc_descriptions`, `pydantic_ai._utils.{is_async_callable,run_in_executor}`)
+  and `tools.py` are all byte-for-byte identical between `v2.53.0` and `v2.54.0` (`diff -rq`
+  in the two clones). On the `pydantic-ai-harness` side, `0.54.0`'s sdist is a broad release
+  touching many other capabilities (a hosted-MCP `read_only=True` empty-toolset warning
+  mirroring `pydantic-ai`'s own `#9387`, plus `absurd`/`aws_lambda`/`background_tools`/
+  `compaction`/`conversation_search`/`code_mode` changes and a new `_web_search.py` module),
+  but `diff -rq` of `pydantic_ai_harness/skills/` between the `0.53.0` and `0.54.0` sdists is
+  byte-for-byte identical, and `pyproject.toml` is unchanged (no floor move) — confirming the
+  `Skills` surface this package depends on is untouched. Verified empirically: `pytest` passes
+  359 at latest (`pydantic-ai-harness[skills]==0.54.0`, `pydantic-ai-slim==2.54.0`) and 357
+  passed + 2 skipped at the declared floor (`pydantic-ai-harness[skills]==0.28.1`,
+  `pydantic-ai-slim==2.38.0`), both installed fresh into clean virtualenvs. `pre-commit run
+  --all-files` (ruff, ruff-format, mypy) is clean at latest. No floor bump needed.
+
 ## 2026-10-02
 
 - **pydantic/pydantic-ai**: checked through `v2.53.0` (published 2026-10-01). Reviewed
