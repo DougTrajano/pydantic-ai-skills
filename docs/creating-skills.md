@@ -735,10 +735,11 @@ Extra frontmatter keys are accepted and carried along, but nothing in the runtim
 own tooling, not as configuration.
 
 !!! warning "Some frontmatter keys are silently inert"
-    harness accepts, but does not implement, the behavioural fields other Agent Skills clients
-    define — `allowed-tools`, `model`, `hooks`, `disable-model-invocation`, and others. It emits a
-    `UserWarning` naming them at construction. A skill relying on `allowed-tools` to restrict itself
-    is **not** restricted here.
+    harness accepts, but does not implement, most of the behavioural fields other Agent Skills
+    clients define — `allowed-tools`, `model`, `hooks`, and others. It emits a `UserWarning` naming
+    them when a run starts. A skill relying on `allowed-tools` to restrict itself is **not**
+    restricted here. The exception is `disable-model-invocation: true`
+    (`pydantic-ai-harness>=0.57`), which keeps a skill out of the model's catalog entirely.
 
 ## Testing Skills
 

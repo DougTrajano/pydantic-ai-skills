@@ -340,10 +340,12 @@ owner: platform-team
 ---
 ```
 
-Treat those as documentation for your own tooling. In particular, the behavioural fields other Agent
-Skills clients define — `allowed-tools`, `model`, `hooks`, `disable-model-invocation` and friends —
-are accepted and **inert**; harness warns about them at construction. A skill relying on
-`allowed-tools` to restrict itself is not restricted here.
+Treat those as documentation for your own tooling. In particular, most of the behavioural fields
+other Agent Skills clients define — `allowed-tools`, `model`, `hooks` and friends — are accepted
+and **inert**; harness warns about them when a run starts. A skill relying on `allowed-tools` to
+restrict itself is not restricted here. The exception is `disable-model-invocation: true`
+(`pydantic-ai-harness>=0.57`), which *is* honored: such a skill is excluded from the model's
+catalog entirely.
 
 For metadata the runtime *does* act on, use [programmatic skills](programmatic-skills.md), where
 `metadata=` is yours to read back.

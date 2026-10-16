@@ -141,10 +141,11 @@ Be clear about the gaps:
   filesystem containment, run the agent in an environment that provides it.
 - **`require_loaded` is a disclosure boundary, not a permission.** It keeps the model from reading a
   skill's files before loading the skill. It does not stop a loaded skill from doing anything.
-- **Frontmatter restrictions are inert.** harness accepts `allowed-tools`, `disable-model-invocation`,
-  `model` and similar fields for compatibility but does not implement them, warning at construction.
-  A skill that declares `allowed-tools: [Read]` is **not** restricted here. Never treat a skill's own
-  frontmatter as a sandbox.
+- **Most frontmatter restrictions are inert.** harness accepts `allowed-tools`, `model`, `hooks`
+  and similar fields for compatibility but does not implement them, warning when a run starts. A
+  skill that declares `allowed-tools: [Read]` is **not** restricted here. The exception is
+  `disable-model-invocation: true` (`pydantic-ai-harness>=0.57`), which *is* honored: such a skill
+  is left out of the model's catalog entirely. Never treat a skill's own frontmatter as a sandbox.
 - **Instructions are not validated.** Nothing scans a `SKILL.md` body for prompt injection. Review it.
 
 ## Auditing
