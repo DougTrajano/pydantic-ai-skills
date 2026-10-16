@@ -12,6 +12,133 @@ for the next run.
 > dependency from 2026-09 onwards — see `.claude/commands/upstream-watch.md` for the
 > surface to check. Past entries are left as the record of what was known at the time.
 
+## 2026-10-16
+
+- **pydantic/pydantic-ai**: checked through `v2.57.0` (published 2026-10-15). Reviewed
+  `v2.55.0`–`v2.57.0` (the `clai2-bleeding` pre-release tag was not re-checked this run; its
+  own notes still say "Not a release," unchanged from the 2026-10-09 entry).
+- **pydantic/pydantic-ai-harness**: checked through PyPI `0.57.0` (published 2026-10-16).
+  Reviewed `0.55.0`→`0.57.0`. **Process change, not just a scope note**: the
+  `pydantic/pydantic-ai-harness` GitHub repository was archived by its owner on 2026-10-15.
+  Its own README now says development "is actively developed and released, now from the
+  Pydantic AI repository" — the package's source lives at `src/pydantic_ai_harness` in
+  `pydantic/pydantic-ai`, tagged in that repo's own releases under the `pkg:harness` label,
+  and still ships to PyPI as `pydantic-ai-harness`. Confirmed directly (not inferred from the
+  README alone): `0.56.0`'s only harness-relevant PR (`#9802`) and `0.57.0`'s (`#10378`) are
+  both listed in `pydantic/pydantic-ai`'s own `v2.56.0`/`v2.57.0` release notes, and harness's
+  minor version now tracks `pydantic-ai`'s own (`0.56.0` alongside `v2.56.0`, `0.57.0`
+  alongside `v2.57.0`). **Future runs should collect both repos' releases from
+  `pydantic/pydantic-ai` alone** — `gh api repos/pydantic/pydantic-ai-harness/releases` will
+  only ever return the frozen history up to `v0.36.0`.
+- **Verdict**: One real, confirmed, low-risk behavior change, fixed by a documentation
+  correction (no source change needed) — this package's own claim that harness ignores
+  certain `SKILL.md` frontmatter fields became false for two of them.
+
+  **The finding**: `pydantic-ai` `v2.57.0`'s Compatibility Notes list `#10378`
+  ("`Skills` now honor `disable-model-invocation` and `user-invocable`, and skip stray skill
+  library paths"). Read in full via the PR page rather than the title alone: `SkillDefinition`
+  gains `.model_invocable`/`.user_invocable` properties (the attributes themselves shipped two
+  days earlier, in `0.56.0`'s `#9802`, but inert until `0.57.0`), and harness's
+  `Skills.for_run()` now does `offered = [_Skill(skill) for skill in catalog.skills if
+  skill.model_invocable]` — a skill marked `disable-model-invocation: true` is excluded from
+  the leaves offered to the model entirely, where before it was offered like any other skill
+  (`user-invocable: false` only affects `clai2`'s own `/command` registration, which this
+  package has nothing to do with). This directly contradicts a claim repeated in three of this
+  package's own docs — `docs/security.md`'s "Frontmatter restrictions are inert," and the same
+  wording in `docs/creating-skills.md` and `docs/advanced.md` — all of which listed
+  `disable-model-invocation` alongside `allowed-tools`/`model`/`hooks` as fields harness
+  "accepts... but does not implement."
+
+  **Verified empirically, not just read off the PR**: confirmed `model_invocable` and the
+  filtering line are absent from `0.56.0`'s `pydantic_ai_harness/skills/_capability.py`
+  (installed fresh into a clean venv) and present in `0.57.0`'s — the behavior starts exactly
+  at `0.57.0`. Built two `SKILL.md` fixtures (one plain, one with
+  `disable-model-invocation: true`) under one library and drove `SkillsCapability` through
+  `for_run()` with `pydantic-ai-harness==0.57.0`/`pydantic-ai-slim==2.57.0`: the plain skill's
+  leaf is offered, the `disable-model-invocation` skill's is not, and no warning is raised for
+  it (unlike `allowed-tools`/`model`, which still warn — confirmed with a third fixture
+  declaring both, which produced `Ignoring unsupported Agent Skill behavioral frontmatter
+  fields: ...: allowed-tools, model` and nothing about `disable-model-invocation`). This needed
+  **no change to `SkillsCapability`'s own code**: `_harness_leaves` already handles "fewer
+  leaves than libraries" by design (it drops any leaf that is still the undecomposed `Skills`
+  instance, the case where `for_run` returns `self` because `offered` is empty), and a skill
+  excluded this way simply never gets a capability id, so `require_loaded`'s gate on the
+  bundled-file tools is never reached for it either. `allowed-tools`, `model`, and `hooks`
+  remain genuinely inert and still warn, confirmed by the same probe — only the "inert" framing
+  needed correcting, not the set of fields.
+
+  **Fix**: updated the three doc sites (`docs/security.md`, `docs/creating-skills.md`,
+  `docs/advanced.md`) to carve out `disable-model-invocation: true` as the one field harness
+  does honor (`pydantic-ai-harness>=0.57`, cited since the behavior is version-gated), while
+  keeping `allowed-tools`/`model`/`hooks` described as inert. No test changes: this package's
+  own test suite never asserted on `disable-model-invocation` behavior (it belongs to harness,
+  not to this package, per AGENTS.md's division of labour), so there was nothing stale to fix
+  there.
+
+  **Everything else checked and found not to reach this package.** The private symbols this
+  package imports (`pydantic_ai._function_schema.{FunctionSchema,function_schema}`,
+  `pydantic_ai._griffe.doc_descriptions`, `pydantic_ai._utils.{is_async_callable,
+  run_in_executor}`) were diffed directly between `v2.54.0` and `v2.57.0` in local clones, not
+  assumed from release notes: `_griffe.py` has zero diff. `_function_schema.py`'s only change
+  moves `Self` from a `typing_extensions` import to a `typing` import — zero behavioral change,
+  and the `if TYPE_CHECKING: from .tools import DocstringFormat` block this package's own
+  `types.py` relies on (the one risk `pytest` can't catch, per this routine's own notes) is
+  still there, confirmed by `pre-commit run --all-files`'s mypy pass staying clean at latest.
+  `_utils.py` changed (dropped the Python 3.10 `exceptiongroup` shim and an unused
+  `is_async_generator_already_running` helper, swapped `timezone.utc` for `datetime.UTC`,
+  extended `_update_mapped_json_schema_refs` to more JSON Schema keywords) but
+  `is_async_callable`/`run_in_executor` don't appear in the diff at all — byte-for-byte
+  unchanged, confirmed by `grep`ping their `def` lines in both clones. `toolsets/abstract.py`'s
+  only change is the same `Self` import move. `capabilities/abstract.py` gained one new
+  private no-op hook, `_default_conversation_id`, alongside the existing `_default_run_id` —
+  both part of the durable `run_id`/`conversation_id` stability work (`v2.55.0` `#9701`), with
+  safe `None` defaults that `SkillsCapability` (which overrides neither) inherits unchanged.
+  `_run_context.py`'s diff is `active_capability_ids`/`capability_active` untouched; the only
+  line `_toolset.py`'s `require_loaded` gate reads is unaffected. `v2.57.0`'s `#10280`
+  ("`available_tool_names` and `active_capability_ids` preserved on run context copies in
+  Temporal activities and Render child tasks") looked close enough on title alone to read the
+  PR directly: its own description says "New public surface: None" and scopes the fix to
+  `durable_exec/_toolset.py`'s Temporal/Render snapshot-copying internals — this package does
+  no durable execution, so the copy sites it touches are never reached here. `#10219` ("A
+  tool's `prepare` gets its own retry count under `.prefixed()`, `.renamed()`, and
+  `PrefixTools`") doesn't reach `SkillFilesToolset` either: confirmed by grep, nothing in
+  `pydantic_ai_skills/_toolset.py` or `capability.py` calls `AbstractToolset.prefixed()` or
+  `.renamed()` (the `prefixed`/`renamed` modules under `pydantic_ai_skills/registries/` are
+  this package's own *registry* composition wrappers, an unrelated concept with the same
+  name). `v2.55.0`'s Python 3.11+ requirement (`#9526`) needs no floor change here: a Python
+  3.10 install resolves to `pydantic-ai-slim<=2.54.0` automatically via `Requires-Python`
+  metadata rather than failing, and this package's own floor (`pydantic-ai-slim>=2.38`) still
+  supports Python 3.10 as declared. The remaining `v2.55.0`–`v2.57.0` items (`OpenAIDecisionsModel`,
+  `Conversation`, prompt-cache diagnostics and the new `Caching` capability, Postgres message/media
+  backends, realtime/Azure Voice Live work, `LogfireMCP` tool renaming, `MetaProvider`,
+  `ApprovalReviewer`, MCP Apps forwarding, `PGTaskDurability`, Render Workflows, `SmolSandbox`,
+  Python 3.15 support) touch model providers, caching, durable-execution engines, and MCP
+  surfaces this package doesn't use (confirmed by grep: no match for `Caching`, `Conversation`,
+  `ApprovalReviewer`, or `MCPApps` anywhere in `pydantic_ai_skills/`).
+
+  **Worth flagging for a future PR, not acted on now** (per this routine's own conservatism —
+  a feature addition, not a fix): `0.56.0`'s `#9802` also added `Skills.__init__` keyword
+  options `missing_directories` (`'error'`/`'skip'`) and `duplicate_names` (`'error'`/
+  `'keep_first'`), plus `Skills.load(workspace)` returning a `SkillCatalog` with a typed
+  `skipped: tuple[SkippedSkill, ...]` (changed from strings to a frozen dataclass in `0.57.0`'s
+  same PR — this package reads neither `.skipped` nor `SkillCatalog` itself, confirmed by grep,
+  so the type change doesn't reach it). `SkillsCapability._build_harness_skills` constructs
+  `Skills(...)` without passing either new option, so both keep harness's `'error'` default —
+  identical to pre-`0.56.0` behavior, which is why the full suite is unaffected either way.
+  Exposing them as `SkillsCapability.__init__` pass-throughs would be a legitimate small
+  enhancement (lets a caller tolerate a missing library directory or a duplicate name across
+  composed registries instead of raising) but is new surface, not a correctness fix, so it's
+  left for a future PR rather than bundled here.
+
+  **Verified empirically**: `pytest` passes identically — 359 passed at latest
+  (`pydantic-ai-harness[skills]==0.57.0`, `pydantic-ai-slim==2.57.0`) and 357 passed + 2 skipped
+  at the declared floor (`pydantic-ai-harness[skills]==0.28.1`, `pydantic-ai-slim==2.38.0`),
+  both installed fresh into clean virtualenvs per this routine's own warning against
+  downgrading in place. `pre-commit run --all-files` (ruff, ruff-format, mypy) is clean at
+  latest. No floor bump needed. Both tripwire tests
+  (`tests/test_pydantic_ai_compat.py`, `tests/test_harness_compat.py`) pass unchanged — neither
+  needed updating, since nothing they pin moved.
+
 ## 2026-10-09
 
 - **pydantic/pydantic-ai**: checked through `v2.54.0` (published 2026-10-02). Reviewed
