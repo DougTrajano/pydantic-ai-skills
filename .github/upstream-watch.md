@@ -12,6 +12,110 @@ for the next run.
 > dependency from 2026-09 onwards — see `.claude/commands/upstream-watch.md` for the
 > surface to check. Past entries are left as the record of what was known at the time.
 
+## 2026-10-23
+
+- **pydantic/pydantic-ai**: checked through `v2.60.0` (published 2026-10-22). Reviewed
+  `v2.58.0`–`v2.60.0` (the `v1.107.8`/`v1.107.9` backport releases and the `CLAI2 bleeding`
+  pre-release were not reviewed — the `v1.x` line is out of scope now that
+  `pyproject.toml` requires `pydantic-ai-slim>=2.38`, and the pre-release's own notes
+  still say "Not a release").
+- **pydantic/pydantic-ai-harness**: checked through PyPI `0.60.0` (shipped alongside
+  `pydantic-ai` `v2.60.0`, confirmed by `pip show` in both test venvs below). Per the
+  2026-10-16 entry's finding, harness releases and commits now live inside
+  `pydantic/pydantic-ai` itself, so this run collected and reviewed both repos' changes
+  from the `pydantic-ai` v2.58.0–v2.60.0 release notes alone; `gh api
+  repos/pydantic/pydantic-ai-harness/releases` was not queried again (it only returns the
+  frozen pre-archive history, as noted last week).
+- **Verdict**: One real behavior change, fixed with a small, surgical test update — no
+  change to `pydantic_ai_skills/` itself was needed.
+
+  **The finding**: `v2.60.0`'s Compatibility Notes list `#8094` ("Deprecate
+  `RetryPromptPart` in favor of `ToolReturnPart` outcomes and `RetryFeedbackPart`").
+  Verified empirically, not from the title alone — the PR's own page is inconsistent about
+  which design shipped, so I drove a `FunctionModel` agent with `SkillsCapability` through
+  the exact scenario `tests/test_capability.py::test_reading_files_before_loading_the_skill_is_refused`
+  exercises (calling `read_skill_resource` before `load_capability`) and inspected the
+  resulting message history directly: the `ModelRetry` `_toolset.py`'s `require_loaded`
+  gate raises is no longer recorded as a `RetryPromptPart` (`part_kind='retry-prompt'`);
+  it is now a `ToolReturnPart` with `outcome='retried'` and `retry=RetryInfo(cause=
+  'model_retry', attempt=1, max_retries=1)`, `part_kind='tool-return'`. This broke that one
+  test, which filtered messages for `part_kind == 'retry-prompt'` and therefore saw no
+  retries at all under `pydantic-ai-slim==2.60.0`/`pydantic-ai-harness==0.60.0` (confirmed:
+  `pytest` failed with exactly this test, 358 passed + 1 failed, before the fix).
+
+  **Scope of the fix, and why nothing in `pydantic_ai_skills/` itself changed**: the
+  package never imports or constructs `RetryPromptPart` — `grep -rn 'RetryPromptPart\|
+  retry-prompt'` across `pydantic_ai_skills/`, `tests/`, and `docs/` turned up exactly one
+  hit, the now-broken assertion. `_toolset.py`'s `require_loaded` gate raises a plain
+  `pydantic_ai.ModelRetry`, which is pydantic-ai's own exception type and is untouched by
+  this change — only how pydantic-ai *records* the resulting message in history changed.
+  Fixed `tests/test_capability.py` to accept either `part_kind` (`'retry-prompt'` or
+  `'tool-return'`) so the same test passes unchanged at both ends of the supported range:
+  `RetryPromptPart` is only deprecated, not removed, so the floor (`pydantic-ai-slim==2.38.0`)
+  still produces it. `tests/test_skill_files.py`'s direct `pytest.raises(ModelRetry, ...)`
+  assertions on the gate are unaffected either way, since they catch the raised exception
+  itself rather than inspecting recorded history.
+
+  **Also reviewed and found not actionable**: `v2.58.0`'s `#10506` ("Let harness `Skills`
+  ignore `include`/`exclude` names no library has with `unknown_names='skip'`") is the one
+  other PR across all three releases whose title matches the harness `Skills` surface.
+  Read via the PR page directly: it adds a `Skills(..., unknown_names: Literal['error',
+  'skip'] = 'error')` keyword and a matching `Skills.unknown_names` attribute; the default
+  stays `'error'`, so a caller that doesn't pass it — `SkillsCapability._build_harness_skills`
+  among them — keeps the exact pre-PR behavior. Purely additive, same category as the
+  `missing_directories`/`duplicate_names` options the 2026-10-16 entry flagged for a future
+  PR rather than acting on; not bundled here for the same reason (new surface, not a fix).
+  No other PR title across `v2.58.0`–`v2.60.0` matched `Skills`, `SkillDefinition`,
+  `SkillCatalog`, `_function_schema`, `_griffe`, `_utils`, `AbstractCapability`,
+  `AbstractToolset`, `GenerateToolJsonSchema`, or `DocstringFormat` (checked by keyword
+  search over every PR title in the Compatibility Notes/Breaking Changes, Features, and
+  Bug Fixes sections of all three releases, not just a skim).
+
+  Three PRs matched `RunContext`/`capabilities`/`harness`/`toolset` loosely enough to read
+  in full rather than dismiss on title: `#10909` ("Keep the ids of instructions a wrapper
+  toolset passes on from the toolsets it wraps") only changes `AbstractToolset`'s internal
+  instruction-relay bookkeeping for `WrapperToolset`/`CombinedToolset` — confirmed by
+  diffing `toolsets/abstract.py` between `v2.57.0` and `v2.60.0` directly, and confirmed
+  `SkillFilesToolset` doesn't reach that path (`grep` for `get_instructions`,
+  `WrapperToolset`, `CombinedToolset`, `.prefixed(`, `.renamed(` in `_toolset.py` and
+  `capability.py` finds nothing — `capability.py`'s one `get_instructions()` call is on a
+  harness `Capability` leaf, a different class hierarchy entirely). `#10904` ("Give several
+  built-in capabilities stable default IDs") only adds explicit `id` class attributes to
+  five named built-in harness capabilities (`AskUser`, `ConversationSearch`, `Macroscope`,
+  `PlaywrightBrowser`, `PydanticAIDocs`) plus `ManagedPrompt`'s derived-id pattern — none of
+  which `SkillsCapability` is or subclasses; confirmed by diffing `capabilities/abstract.py`
+  that the only base-class additions are `_derived_id_source()` (default `None`,
+  `SkillsCapability` doesn't override it) and two new `_run_clock`/`_run_start_time` hooks
+  (also defaulted `None`), neither touching `apply()`, `visit_and_replace()`, or
+  `get_toolset()`. `#10673` ("Add `ToolDefinition.unless_tool_kind` and
+  `RunContext.tool_name_for_kind`") is purely additive new attributes/methods on
+  `RunContext`/`ToolDefinition`; `_toolset.py`'s only `RunContext` read,
+  `ctx.active_capability_ids`, is unaffected (confirmed unchanged by diffing
+  `_run_context.py` between `v2.57.0` and `v2.60.0` — same field, same semantics, only line
+  numbers shifted for unrelated additions).
+
+  **The private-symbol surface is unchanged**: diffed `_function_schema.py` and
+  `_griffe.py` directly between `v2.57.0` and `v2.60.0` — both byte-for-byte identical
+  (confirmed by `diff`, not just a changelog search). `_utils.py` changed elsewhere in the
+  file, but `is_async_callable` and `run_in_executor`'s own definitions are identical
+  (confirmed by diffing just those function bodies). The `if TYPE_CHECKING: from .tools
+  import DocstringFormat` re-export `types.py` relies on is still present — confirmed
+  indirectly by `pre-commit run --all-files`'s `mypy` pass staying clean at latest (same
+  check this routine's own notes call out as the one `pytest` can't catch).
+
+  **Verified empirically**: `pytest` passes identically — 359 passed at latest
+  (`pydantic-ai-harness[skills]==0.60.0`, `pydantic-ai-slim==2.60.0`, installed via the
+  session's normal `pip install -e ".[test,git,s3,dev]"`, which resolved to latest) and 357
+  passed + 2 skipped at the declared floor (`pydantic-ai-harness[skills]==0.28.1`,
+  `pydantic-ai-slim==2.38.0`), the latter installed fresh into a clean `venv` per this
+  routine's own warning against downgrading in place. `pre-commit run --all-files` (ruff,
+  ruff-format, mypy) is clean at latest. No floor bump needed — nothing in `v2.58.0`–
+  `v2.60.0` raises pydantic-ai's or harness's own floor past what `pyproject.toml` already
+  declares. Both tripwire tests (`tests/test_pydantic_ai_compat.py`,
+  `tests/test_harness_compat.py`) pass unchanged — neither needed updating, since nothing
+  they pin moved; only the one test described above, which pins message-history shape
+  rather than an import, needed the fix.
+
 ## 2026-10-16
 
 - **pydantic/pydantic-ai**: checked through `v2.57.0` (published 2026-10-15). Reviewed

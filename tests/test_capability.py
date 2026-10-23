@@ -625,11 +625,14 @@ async def test_reading_files_before_loading_the_skill_is_refused(library: Path) 
     agent = Agent(FunctionModel(model_fn), capabilities=[SkillsCapability(library)])
     result = await agent.run('read the notes without loading anything')
 
+    # pydantic-ai 2.60 replaced the RetryPromptPart ('retry-prompt') a raised ModelRetry
+    # produced with a ToolReturnPart (outcome='retried'); check both kinds so this passes
+    # at both the floor and latest.
     retries = [
         part.content
         for message in result.all_messages()
         for part in getattr(message, 'parts', [])
-        if part.part_kind == 'retry-prompt'
+        if part.part_kind in ('retry-prompt', 'tool-return')
     ]
     assert any('is not loaded' in str(retry) for retry in retries)
 
