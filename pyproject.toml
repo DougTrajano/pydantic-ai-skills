@@ -7,7 +7,7 @@ name = "pydantic-ai-skills"
 dynamic = ["version"]
 description = "Remote skill registries and bundled-file execution for Pydantic AI Agent Skills"
 authors = [
-    { name = "Douglas Trajano", email = "douglas.trajano@outlook.com" },
+    { name = "Douglas Trajano", email = "github@dougtrajano.dev" },
 ]
 license = "MIT"
 license-files = ["LICENSE"]
