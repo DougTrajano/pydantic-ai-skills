@@ -1,19 +1,22 @@
 ---
-description: Review pydantic-ai and pydantic-ai-harness releases published since the last watch entry, and record a verdict in .github/upstream-watch.md
+description: Review pydantic-ai releases (which now include pydantic-ai-harness) published since the last watch entry, and record a verdict in .github/upstream-watch.md
 allowed-tools: Bash, Read, Grep, Glob, Edit, Write, WebFetch
 ---
 
 # Upstream watch
 
-Two upstream projects can break this package without any change here:
+One upstream repository, [`pydantic/pydantic-ai`](https://github.com/pydantic/pydantic-ai),
+can break this package without any change here. It holds two things we depend on:
 
-- **pydantic-ai** — it wraps the framework and imports several of its **private** symbols,
-  which no deprecation policy protects.
-- **pydantic-ai-harness** — a **required runtime dependency** since v2.
+- **pydantic-ai** (`pydantic_ai_slim/`) — the framework this package wraps. It imports
+  several of its **private** symbols, which no deprecation policy protects.
+- **pydantic-ai-harness** (`src/pydantic_ai_harness/`) — a **required runtime dependency**.
   [`SkillsCapability`](../../pydantic_ai_skills/capability.py) is built directly on its
-  public `Skills` class, and harness is on `0.x` releases where
-  [its own README](https://github.com/pydantic/pydantic-ai-harness#version-policy) says the
-  API may change between minor releases.
+  public `Skills` class. The standalone `pydantic/pydantic-ai-harness` repository is
+  **archived**; harness is developed, tagged and released from `pydantic/pydantic-ai` and
+  still ships to PyPI as `pydantic-ai-harness`. Do not query the archived repo — its
+  releases stop at `v0.36.0`. Harness stays on `0.x`, so its API may change between minor
+  releases.
 
 This routine is the standing review that catches both. It produces one entry in
 `.github/upstream-watch.md` and, when action is needed, the issue or PR that fixes it.
@@ -22,32 +25,51 @@ Run it weekly, or on demand before a release.
 
 ## 1. Establish the lower bound
 
-Read the **top entry** of `.github/upstream-watch.md`. Its two "checked through" tags are
-the lower bound for this run — you are reviewing everything published *after* them. Note
-today's date for the new entry heading.
+Read the **top entry** of `.github/upstream-watch.md`. Its "checked through" tag is the
+lower bound for this run — you are reviewing everything published *after* it. Note today's
+date for the new entry heading.
 
 ## 2. Collect the releases
 
+Harness and pydantic-ai release together: a `pydantic-ai` release `v2.N.P` ships
+`pydantic-ai-harness` `0.N.P` (the harness minor and patch follow pydantic-ai's). So the
+`pydantic-ai` release notes are the single changelog for both. Harness PRs carry the
+`pkg:harness` label; core PRs carry `pkg:core`.
+
 ```bash
 gh release list --repo pydantic/pydantic-ai --limit 40
-gh release list --repo pydantic/pydantic-ai-harness --limit 20
+gh release view <tag> --repo pydantic/pydantic-ai
 ```
 
-Everything newer than the lower bound is in scope **for both repositories**. The
-`pydantic-ai` `v1.x` backport line is *not*: `pyproject.toml` declares
-`pydantic-ai-slim>=2.38`, so v1 is no longer a supported configuration. (Entries before
-2026-09 reviewed it because the floor was then `>=1.105` — that is why the log mentions it.)
+Everything newer than the lower bound is in scope. Skip the `v1.x` backport line
+(`pyproject.toml` declares `pydantic-ai-slim>=2.38`, so v1 is not a supported
+configuration) and the `clai2-bleeding` pre-release (its notes say "Not a release").
+The changelog excludes `docs`, `chore` and `pkg:clai2` PRs, so a harness-only chore will not
+appear in the notes — diff the source (below) rather than trusting the notes for that.
 
-Read each release body with `gh release view <tag> --repo <repo>`. When a release note is
-ambiguous about what a PR actually touched, open the PR's file list rather than guessing —
-past entries in the log did exactly this, and it is what turned a scary-sounding release
-note into a confident "no action".
+Then check `main`, not only the tagged releases, so a change that is merged but unreleased
+is known before it lands:
+
+```bash
+git clone --depth 1 https://github.com/pydantic/pydantic-ai /tmp/upstream/pydantic-ai
+git -C /tmp/upstream/pydantic-ai log -1 --format='%h %cd'
+```
+
+Record the `main` commit you reviewed in the entry. For a tag-to-tag or tag-to-`main`
+comparison, fetch the earlier tag with `git fetch --depth 1 origin tag <tag>` and `diff -rq`
+the paths named in section 3.
+
+Read each release body. When a note is ambiguous about what a PR actually touched, open the
+PR's file list rather than guessing — that is what turns a scary-sounding release note into
+a confident "no action".
 
 ## 3. Assess impact against what this package actually uses
 
 Two narrow surfaces. Check each release against them specifically.
 
 ### 3a. pydantic-ai private imports
+
+Under `pydantic_ai_slim/pydantic_ai/` on `main`.
 
 The real risk — no deprecation policy protects these:
 
@@ -88,8 +110,13 @@ Also relevant on the pydantic-ai side:
 
 ### 3b. The harness `Skills` surface
 
+Source: `src/pydantic_ai_harness/pydantic_ai_harness/skills/` on `main`
+(`_capability.py`, `_loader.py`, `__init__.py`, `README.md`). Diff that directory between
+the lower-bound tag and `main` first; an empty diff settles the harness side.
+
 `SkillsCapability` constructs `pydantic_ai_harness.Skills` and re-emits the leaves it
-produces. What it depends on, all of it public:
+produces (at construction before harness 0.52, from `for_run` since). What it depends on,
+all of it public:
 
 - `Skills.__init__` — `directories` positionally, `include` / `exclude` keyword-only
 - `Skills.apply()` yields `pydantic_ai.capabilities.Capability` leaves, each with an `id`
@@ -117,29 +144,37 @@ release notes for them specifically:
   that rule. If they desynchronize, the bundled-file tools stop finding packages for skills
   that are on the model's catalog — the model sees a skill it cannot read the files of.
 
-### 3c. Harness sets this package's `pydantic-ai-slim` floor
+### 3c. Version floor and Python support
 
-A harness release that raises its own floor may require raising `pydantic-ai-slim` in
+Since harness `0.51`, harness pins `pydantic-ai-slim` to the **exact** release it was built
+with (`pydantic-ai-slim==<same version>` in
+`src/pydantic_ai_harness/pyproject.toml`), rather than declaring a range. So a floor is a
+*co-released pair*, never an independent harness version plus an independent slim version.
+Any change to this package's floor must move `pydantic-ai-harness`, `pydantic-ai-slim` in
 [pyproject.toml](../../pyproject.toml) *and* the `floor` pin in the `deps` matrix axis of
-[ci.yml](../../.github/workflows/ci.yml).
+[ci.yml](../../.github/workflows/ci.yml) together.
 
-**The two must move together.** Pinning `pydantic-ai-slim` alone becomes unsatisfiable as
-soon as harness raises its floor past that pin — which is why the CI axis is
-`floor` / `latest` over the pair rather than three `pydantic-ai-slim` pins.
+Also check `requires-python` in both `pydantic_ai_slim/pyproject.toml` and
+`src/pydantic_ai_harness/pyproject.toml` on `main`. Both are `>=3.11` today; this package
+still declares 3.10, which resolves to older releases automatically via `Requires-Python`.
+Flag it if a change makes that resolution fail or silently pick a very old release.
 
 Not in scope, and worth stating explicitly in the verdict so the next run doesn't re-triage
 it: model providers, the local dev web chat UI (`Agent.to_web()`, `clai web`), `web_fetch`,
-MCP client support, and durable-execution engines (Temporal, DBOS, Prefect). Harness
+MCP client support, and durable-execution engines (Temporal, DBOS, Prefect). Other harness
 features this package does not touch — compaction, spend limits, `Shell`, `FileSystem`,
 `CodeMode` — are also out of scope, but say so per release rather than dismissing harness
 wholesale: only the `Skills` surface above is load-bearing here.
 
 ## 4. Verify empirically when anything looks close
 
-Do not settle a real question by reading release notes alone.
+Do not settle a real question by reading release notes alone. Test the latest PyPI release
+and, when `main` has unreleased changes under section 3's paths, `main` itself:
 
 ```bash
 uv pip install --system --upgrade "pydantic-ai-harness[skills]" pydantic-ai-slim && pytest
+# unreleased main (both are in the one monorepo checkout):
+uv pip install --system -e /tmp/upstream/pydantic-ai/pydantic_ai_slim -e /tmp/upstream/pydantic-ai/src/pydantic_ai_harness && pytest
 ```
 
 **Test the declared floor in a clean virtualenv, not by downgrading in place.** Repeated
@@ -168,19 +203,22 @@ catches different errors than a local `mypy` does. Reproduce it with
 Prepend a new `## YYYY-MM-DD` section to `.github/upstream-watch.md`, above the previous
 top entry, following the existing format exactly:
 
-- **pydantic/pydantic-ai**: checked through `<tag>` (published `<date>`), reviewed `<range>`
-- **pydantic/pydantic-ai-harness**: checked through `<tag>` (published `<date>`), reviewed `<range>`
+- **pydantic/pydantic-ai**: checked through `<tag>` (published `<date>`), reviewed `<range>`,
+  and the `main` commit reviewed (`<sha>`, `<date>`)
+- **pydantic-ai-harness**: the PyPI version checked through (`0.N.P`, which matches
+  `pydantic-ai` `v2.N.P`), and the `skills/` diff result
 - **Verdict**: what you concluded and *why*, naming the specific releases, PR numbers, and
   symbols you checked.
 
 Write the verdict so a future reader can tell whether you actually verified something or
 merely assumed it. A vague "no breaking changes" entry is worse than useless — it looks like
 coverage while providing none. Always close by confirming the status of both the
-private-symbol surface and the harness `Skills` surface.
+private-symbol surface and the harness `Skills` surface, on the release and on `main`.
 
 The log is append-only. **Do not edit past entries** — entries before 2026-09 conclude that
-harness is out of scope because this package did not depend on it, which was true when they
-were written. Leave them as the record of what was known at the time.
+harness is out of scope because this package did not depend on it, and entries before
+2026-10-16 collect harness releases from the now-archived `pydantic/pydantic-ai-harness`
+repo. Both were true when written. Leave them as the record of what was known at the time.
 
 ## 6. Open the PR
 
