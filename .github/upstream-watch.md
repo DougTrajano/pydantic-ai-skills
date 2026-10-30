@@ -12,6 +12,112 @@ for the next run.
 > dependency from 2026-09 onwards — see `.claude/commands/upstream-watch.md` for the
 > surface to check. Past entries are left as the record of what was known at the time.
 
+## 2026-10-30
+
+- **pydantic/pydantic-ai**: checked through `v2.63.0` (published 2026-10-27). Reviewed
+  `v2.61.0`–`v2.63.0` (no `v1.x` backport or pre-release tags appeared in this range).
+  Also checked `main` at commit `fb04437` (2026-10-30), i.e. the day's unreleased tip —
+  nothing under `pydantic_ai_slim/pydantic_ai/_function_schema.py`, `_griffe.py`,
+  `_utils.py`, or `src/pydantic_ai_harness/pydantic_ai_harness/skills/` differs between
+  `v2.63.0` and `main`, so `main` carries nothing beyond what `v2.63.0` already ships on
+  the surfaces this routine tracks.
+- **pydantic-ai-harness**: checked through PyPI `0.63.0` (shipped alongside `pydantic-ai`
+  `v2.63.0`, confirmed by `pip show` in both test environments below). Harness's
+  `skills/_capability.py` and `skills/_loader.py` **did change** in this range (see
+  below); `skills/_loader.py`'s diff is 7 lines (a new `SkipReason` literal and a new
+  `SkippedSkill.scan` field), `_capability.py`'s is ~110 lines (a new `scanner=` feature).
+  `gh api repos/pydantic/pydantic-ai-harness/releases` was not queried — per the
+  2026-10-16 entry's finding, that repo only returns the frozen pre-archive history.
+- **Verdict**: No code change needed in `pydantic_ai_skills/`. One new upstream feature
+  is worth a human's attention for a *future* PR, documented below rather than
+  implemented now; everything else across `v2.61.0`–`v2.63.0` is either unrelated to this
+  package's surface or purely additive with a safe default.
+
+  **The one finding worth a closer look**: harness `Skills.__init__` gained a new
+  keyword-only `scanner: ArtifactScanner | None = None` parameter (added in the same
+  harness release as `pydantic-ai` `v2.63.0`; confirmed by diffing
+  `skills/_capability.py` between `v2.60.0` and `main` directly, not from a changelog
+  entry — the harness `skills/README.md` diff documents it under a new "Scan skills
+  before loading them" section). When set, `Skills` runs each skill's description and
+  body through `pydantic_ai_harness.artifact_scanning.ArtifactScanner` before offering it
+  to the model, and a flagged skill is left out of the catalog with a `UserWarning` and a
+  `SkippedSkill(reason='flagged', scan=...)` entry — never raises. This is purely
+  additive and backward compatible: the default is `None` (unscanned, today's behavior),
+  the new `SkippedSkill.scan` field defaults to `None`, and the new `'flagged'`
+  `SkipReason` literal is additive to the existing `Literal` type. Confirmed
+  `SkillsCapability._build_harness_skills` constructs `Skills(...)` without a `scanner=`
+  keyword and without touching `SkippedSkill`/`SkipReason` at all (`grep -rn
+  'SkippedSkill\|SkipReason' pydantic_ai_skills/ tests/` finds nothing) — the new
+  parameter and fields are invisible to this package as it stands, and `pytest` below
+  confirms nothing broke.
+
+  **Why this isn't implemented now rather than just noted**: this package's own
+  `docs/security.md` is built around exactly the threat `scanner=` targets — content
+  pulled from a Git or S3 registry that is not the caller's own code. Threading a
+  `scanner` parameter through `SkillsCapability.__init__` to `Skills(...)` (with
+  `inspect.signature` feature-detection the same way `_HARNESS_DISCOVERS_PER_RUN` already
+  gates the `workspace=` parameter, since the floor harness `0.28.1` predates this
+  feature) would be a small, mechanically obvious patch. But *where* to scan is a design
+  question this routine shouldn't decide on its own: harness's `scanner=` only covers
+  `SKILL.md` description/body text read through `Skills` itself — it does not reach the
+  bundled `references/`/`scripts/` files this package indexes and serves through
+  `read_skill_resource`/`run_skill_script`, which are exactly the files a malicious
+  registry entry would most want executed. Exposing `scanner=` here without covering that
+  gap could read as "scanning is handled," when the larger attack surface this package
+  adds on top of harness would stay unscanned. That's a product decision for a human,
+  not a mechanical compatibility fix — flagging it here rather than opening a PR for it.
+
+  **Everything else reviewed and found not actionable** (title- and PR-page-level review
+  across all three releases' Compatibility Notes, Features, and Bug Fixes sections; none
+  of the following touches `AbstractCapability.apply`/`visit_and_replace`/`get_toolset`,
+  `AbstractToolset`, `RunContext.active_capability_ids`, or the private-symbol surface
+  this package imports):
+
+  - `v2.63.0` `#10321` ("A deferred `CombinedCapability` loads as one capability") sounds
+    closest to home — `CombinedCapability` is the class `AGENTS.md`'s `get_toolset()`
+    invariant names. Read the PR in full: it adds opt-in grouping behavior to
+    `CombinedCapability(..., defer_loading=True)` specifically — a container whose
+    *members* stay hidden until the model loads the *group's own* `id`. Confirmed
+    `SkillsCapability` does not subclass `CombinedCapability` at all (it subclasses
+    `AbstractCapability` directly and implements its own `apply`/`visit_and_replace`/
+    `get_toolset`, per `pydantic_ai_skills/capability.py`), and does not set
+    `defer_loading=True` on itself as a container — only on each individual skill leaf,
+    which was already true before this PR and is a different mechanism (each skill is
+    its own always-visible, individually-deferred capability, not a member of a group
+    whose tools stay hidden together). `_default_run_id`/`_default_conversation_id`/
+    `_run_clock`/`_run_start_time` were also renamed to public
+    `get_default_run_id`/`get_default_conversation_id`/`get_run_clock`/
+    `get_run_start_time` in the same `abstract.py` diff (unrelated durable-execution
+    hooks); `grep` confirms `pydantic_ai_skills/` overrides none of them.
+  - `v2.63.0` `#11641` ("Harness `LLMReminder` defaults to `interval=10`") and the rest of
+    harness's own changes in this range are in `_capability.py`'s `scanner=` addition
+    (above) and `_loader.py`'s matching `SkippedSkill.scan` field — no other harness
+    `skills/` behavior changed. `Skills.__init__`'s existing parameters
+    (`directories`, `include`, `exclude`, `missing_directories`, `duplicate_names`,
+    `unknown_names`, `workspace`) are unchanged; it also gained a `from_spec` classmethod
+    for agent-spec construction, which this package does not call.
+  - `v2.62.0`'s batch-API, durable-execution, and compaction features (`#10672`, `#7329`,
+    `#11422`, `#11432`, `#10893`) and `v2.61.0`'s citation/guardrail/sandbox work are all
+    in areas this routine's scope notes already exclude (model providers, durable
+    engines, `Shell`/sandboxes beyond what harness's `Skills` itself uses, realtime).
+  - The private-symbol surface is unchanged: `diff`ing `_function_schema.py` and
+    `_griffe.py` between `v2.60.0` and `main` (`fb04437`) is empty for both, and the
+    `_utils.py` diff touches neither `is_async_callable` nor `run_in_executor`'s bodies
+    (confirmed by `git diff` scoped to those files, not a changelog search).
+  - `requires-python` is still `>=3.11` in both `pydantic_ai_slim/pyproject.toml` and
+    `src/pydantic_ai_harness/pyproject.toml` on `main` — unchanged from last week, no
+    floor-related Python-version concern.
+
+  **Verified empirically**: `pytest` — 359 passed at latest (`pydantic-ai-harness==0.63.0`,
+  `pydantic-ai-slim==2.63.0`, resolved by the session's normal
+  `pip install -e ".[test,git,s3,dev]"`) and 357 passed + 2 skipped at the declared floor
+  (`pydantic-ai-harness[skills]==0.28.1`, `pydantic-ai-slim==2.38.0`, installed fresh into
+  a clean `venv` per this routine's own warning against downgrading in place) — identical
+  pass counts to the 2026-10-23 entry, so nothing regressed either end of the supported
+  range. `pre-commit run --all-files` (ruff, ruff-format, mypy) is clean at latest. Both
+  tripwire tests (`tests/test_pydantic_ai_compat.py`, `tests/test_harness_compat.py`)
+  pass unchanged. No floor bump needed.
+
 ## 2026-10-23
 
 - **pydantic/pydantic-ai**: checked through `v2.60.0` (published 2026-10-22). Reviewed
