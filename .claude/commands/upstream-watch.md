@@ -19,7 +19,7 @@ can break this package without any change here. It holds two things we depend on
   releases.
 
 This routine is the standing review that catches both. It produces one entry in
-`.github/upstream-watch.md` and, when action is needed, the issue or PR that fixes it.
+`.github/upstream-watch.md` and, when a change is required, the fix itself in the same PR.
 
 Run it weekly, or on demand before a release.
 
@@ -220,10 +220,38 @@ harness is out of scope because this package did not depend on it, and entries b
 2026-10-16 collect harness releases from the now-archived `pydantic/pydantic-ai-harness`
 repo. Both were true when written. Leave them as the record of what was known at the time.
 
-## 6. Open the PR
+## 6. Implement what the review requires
 
-Branch, commit the log entry, and open a PR. If the review found real impact, file the issue
-or include the fix, and reference it from the verdict.
+Decide whether the review found a **required change**: something that makes this package
+fail or misbehave against a current upstream release or `main` — a failing test or `mypy`
+error, a moved private symbol, a `Skills` surface change that breaks an invariant in
+[AGENTS.md](../../AGENTS.md), a desynchronized naming rule, or a floor/`requires-python`
+problem from 3c. A new upstream feature this package merely *could* adopt is not required.
+
+- **Required change found:** implement it in this same run, on the same branch. Keep the
+  diff surgical, add or update tests (including
+  [tests/test_pydantic_ai_compat.py](../../tests/test_pydantic_ai_compat.py) /
+  [tests/test_harness_compat.py](../../tests/test_harness_compat.py) when a symbol moved),
+  and run `pytest` and `pre-commit run --all-files` until both pass. Reference the change
+  from the verdict. Do not leave a required change for a human to pick up.
+- **Nothing required:** the log entry is the only change.
+- **Optional opportunities** (new additive upstream features): do not implement them. Say
+  so in the verdict and file an issue, so the note does not sit unread in the log.
+
+## 7. Open the PR
+
+Branch `upstream-watch/YYYY-MM-DD`, commit, and open a PR against `main` (with `gh pr create`
+or the GitHub MCP tools, whichever is available). The PR title is load-bearing — it tells
+a reader, and any automation, whether the PR changes behavior:
+
+- **Only `.github/upstream-watch.md` changed:** the title is exactly
+  `chore: upstream watch YYYY-MM-DD (no changes needed)`.
+- **Anything else changed** (a fix from section 6): the title is
+  `chore: upstream watch YYYY-MM-DD — <what was changed>` and must **not** contain
+  `(no changes needed)`.
+
+Check `git diff --name-only origin/main` before choosing: the suffix is accurate only when
+the log is the sole changed file.
 
 **Do not skip the entry when the verdict is "no action".** The log's value is the unbroken
 chain of lower bounds; a missing week silently widens the next run's range.
