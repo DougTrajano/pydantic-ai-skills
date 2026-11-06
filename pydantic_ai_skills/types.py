@@ -27,6 +27,11 @@ from ._parsing import validate_skill_name
 # Generic type variable for dependencies
 DepsT = TypeVar('DepsT')
 
+# pydantic-ai 2.65 dropped `doc_descriptions`'s `sig` positional parameter (griffe's own
+# `Signature`-as-`parent` workaround was no longer needed). Detect which shape is installed
+# rather than raising the floor past 2.38, where `sig` is still required.
+_DOC_DESCRIPTIONS_TAKES_SIG = 'sig' in get_signature(doc_descriptions).parameters
+
 
 def normalize_skill_name(func_name: str) -> str:
     """Normalize a function name to a valid skill name.
@@ -688,7 +693,10 @@ def skill(
 
         skill_description = description
         if skill_description is None:
-            skill_description, _ = doc_descriptions(f, get_signature(f), docstring_format='auto')
+            if _DOC_DESCRIPTIONS_TAKES_SIG:
+                skill_description, _ = doc_descriptions(f, get_signature(f), docstring_format='auto')
+            else:
+                skill_description, _ = doc_descriptions(f, docstring_format='auto')
 
         return SkillWrapper(
             function=f,

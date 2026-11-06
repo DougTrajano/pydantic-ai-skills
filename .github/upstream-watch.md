@@ -12,6 +12,180 @@ for the next run.
 > dependency from 2026-09 onwards — see `.claude/commands/upstream-watch.md` for the
 > surface to check. Past entries are left as the record of what was known at the time.
 
+## 2026-11-06
+
+- **pydantic/pydantic-ai**: checked through `v2.66.0` (published 2026-11-04). Reviewed
+  `v2.64.0`–`v2.66.0` (`v1.107.10`, the `v1.x` backport release in this window, was
+  skipped — not a supported configuration per `pyproject.toml`'s `pydantic-ai-slim>=2.38`
+  floor; the `clai2-bleeding` pre-release tag still says "Not a release"). Also checked
+  `main` at commit `c833840` (2026-11-06).
+- **pydantic-ai-harness**: checked through PyPI `0.66.0` (shipped alongside `pydantic-ai`
+  `v2.66.0`, confirmed by `pip show` in both test environments below). Harness's
+  `skills/_capability.py` and `skills/_loader.py` changed again in this range (114 and 22
+  lines respectively, between `v2.63.0` and `v2.66.0`) — see the non-actionable findings
+  below for what changed. `skills/README.md` also changed (35 lines, docs only).
+- **Verdict**: One real, confirmed break in this package's own code, fixed with a small,
+  surgical change — `doc_descriptions`'s signature lost a positional parameter this
+  package passed. Everything else reviewed across `v2.64.0`–`v2.66.0` and `main` is either
+  unrelated to this package's surface or purely additive with a safe default.
+
+  **The break**: `pydantic-ai` `v2.65.0`'s Bug Fixes list `#10035` ("Reads tool parameter
+  descriptions from `Keyword Args` and `Other Parameters` docstring sections") and
+  `#12126` ("Keeps `*args` and `**kwargs` docstring descriptions on tool parameters").
+  Verified by diffing the actual source rather than the title alone: `git diff v2.63.0
+  v2.66.0 -- pydantic_ai_slim/pydantic_ai/_griffe.py` shows `doc_descriptions` dropped its
+  second positional parameter, `sig: Signature` (the `cast(GriffeObject, sig)`/`parent=`
+  workaround it existed for, linked to a griffe issue in a now-removed comment, is gone
+  too). The change happened between `v2.64.0` and `v2.65.0`, confirmed by `git show
+  <tag>:pydantic_ai_slim/pydantic_ai/_griffe.py | grep 'sig: Signature'` across all four
+  tags: present in `v2.63.0`/`v2.64.0`, absent from `v2.65.0`/`v2.66.0`. New signature:
+  `doc_descriptions(func, *, docstring_format)`.
+
+  This package's own `types.py` calls this private symbol directly (the one case AGENTS.md
+  and this routine's own notes call out — `_function_schema.function_schema()`'s *internal*
+  call to `doc_descriptions` was updated by the same pydantic-ai release that changed it, so
+  only *our* direct call site breaks): `@skill`'s decorator, used when no explicit
+  `description` is given, called `doc_descriptions(f, get_signature(f),
+  docstring_format='auto')`. Reproduced empirically, not just read off the diff: with the
+  fix reverted (`git stash`) and `pydantic-ai-slim==2.66.0`/`pydantic-ai-harness==0.66.0`
+  installed, `@skill` on any function without an explicit `description` raised `TypeError:
+  doc_descriptions() takes 1 positional argument but 2 positional arguments (and 1
+  keyword-only argument) were given` — caught by the existing
+  `tests/test_programmatic_skills.py::test_skill_decorator_derives_name_and_description`
+  test, which already exercises exactly this path (no new test needed; the regression
+  coverage already existed, it just hadn't been run against `>=2.65` before now).
+
+  **The fix**: `pydantic_ai_skills/types.py` now detects which shape is installed with
+  `_DOC_DESCRIPTIONS_TAKES_SIG = 'sig' in get_signature(doc_descriptions).parameters` at
+  import time, the same `inspect.signature(...).parameters` feature-detection pattern
+  `capability.py`'s `_HARNESS_DISCOVERS_PER_RUN` already uses, and branches at the one call
+  site — calling with `get_signature(f)` positionally when the installed pydantic-ai still
+  takes it, and without it otherwise. This keeps the declared floor
+  (`pydantic-ai-slim>=2.38`) working rather than raising it, per this routine's own
+  preference for feature detection over a floor bump. `tests/test_pydantic_ai_compat.py`
+  did not need updating: it only pins that `doc_descriptions` *imports*, which stayed true
+  throughout — the break was in the call shape, not the import, so that tripwire correctly
+  did not fire here; the real tripwire was the existing behavioral test above.
+
+  **Everything else reviewed and found not actionable:**
+
+  - **Harness's `scanner=` feature kept evolving, still invisible to this package.** The
+    2026-10-30 entry already found `Skills(scanner: ArtifactScanner | None = None)` shipped
+    in harness `0.63.0` and is not called by `SkillsCapability`. Between `v2.63.0` and
+    `v2.66.0` it gained a `Skills.from_spec()` classmethod (for agent-spec construction,
+    which this package doesn't call), an OpenTelemetry `record_flagged()` tracing hook when
+    a skill is flagged, and a reordering of the scan-vs-duplicate-name logic in `_load()` so
+    a flagged skill's name can't be silently reclaimed by an unscanned duplicate — all
+    internal to harness's own `_load()`, none of it changing `Skills.__init__`'s existing
+    parameters or `Skills.apply()`'s/`for_run()`'s leaf shape. `grep -rn
+    'ArtifactScanner\|SkippedSkill\|SkipReason'` across `pydantic_ai_skills/` and `tests/`
+    still finds nothing, confirming `SkillsCapability._build_harness_skills` still
+    constructs `Skills(...)` without a `scanner=` keyword. On `main`, `skills/_loader.py`
+    has a further 44-line diff past `v2.66.0`, but it is a pure internal refactor
+    (extracting `_skip_non_library()`/`_read_skill()` helper functions out of
+    `_libraries()`/`load_skill_libraries()` with identical behavior) — confirmed by reading
+    the diff directly, not inferred. The design question the 2026-10-30 entry raised
+    (whether to expose `scanner=` here, and that it wouldn't cover the bundled
+    `references/`/`scripts/` files this package serves) is unchanged and still left for a
+    human to decide, not this routine.
+
+  - **A namesake, not a collision**: `pydantic-ai` `v2.66.0` adds `#11841` ("Add
+    `OpenSandbox` for self-hosted agent workspaces") — `pydantic_ai_harness.OpenSandbox`
+    and `OpenSandboxBackend`, a Docker/Kubernetes-hosted sandbox workspace provider for
+    harness's `Coder`/`Shell`/`FileSystem` capabilities
+    (`src/pydantic_ai_harness/pydantic_ai_harness/opensandbox_sandbox/`), confirmed via the
+    PR page rather than the title alone. This package already has its own
+    `OpenSandboxScriptExecutor` in
+    [pydantic_ai_skills/sandboxes/opensandbox.py](../pydantic_ai_skills/sandboxes/opensandbox.py),
+    which wraps the unrelated third-party `opensandbox` PyPI package
+    (opensandbox-group/OpenSandbox) to run skill scripts in a container — same project name,
+    different package, different author, no code relationship (this package doesn't import
+    anything from `pydantic_ai_harness.opensandbox_sandbox`). Same category as the
+    `prefixed`/`renamed` naming collision the 2026-10-16 entry noted between this package's
+    registry-composition wrappers and pydantic-ai's toolset methods of the same name — worth
+    recording so a future run doesn't mistake one for the other, no action needed.
+
+  - **`AbstractCapability`/`AbstractToolset`/`RunContext` changes are all elsewhere.**
+    `capabilities/abstract.py`'s 124-line diff (`v2.63.0`→`v2.66.0`) and `_run_context.py`'s
+    63-line diff are entirely the new `ModelFallback` capability
+    (`#9348`/`#11679`/`#11330`/`#12039`, a per-attempt `prepare_model_request` hook and
+    `RetryModelRequest`) and `RunContext.load_capability()` (`#10090`, loading a deferred
+    capability from code instead of only via the model's `load_capability` tool) plus an
+    internal `_dispatched_tool_name` field supporting it. Confirmed by `grep`ping the diff
+    for `def apply\|def visit_and_replace\|def get_toolset` directly: zero matches — the
+    three hooks `SkillsCapability` overrides, and the AGENTS.md invariants built on them,
+    are untouched. `_run_context.py`'s `active_capability_ids` property — the only
+    `RunContext` member `_toolset.py`'s `require_loaded` gate reads — has zero diff,
+    confirmed directly rather than assumed from the `loaded_capability_ids` docstring
+    wording change nearby. `toolsets/abstract.py`'s only change removes a private
+    `_appends_instructions_by_default` property (realtime/deferred-capability instruction
+    bookkeeping); `grep` confirms nothing in `pydantic_ai_skills/` overrides or calls it.
+    `RunContext.load_capability()` is a genuine new capability this package *could* use to
+    load a skill from code instead of waiting for the model to call `load_capability` — but
+    that's new surface, not a fix, so it's left for a human to consider rather than bundled
+    here, same as the `scanner=` and `missing_directories`/`duplicate_names` findings in
+    prior entries.
+
+  - **`RepoContext`'s symlink fix is a different capability.** `v2.66.0`'s `#12044`
+    ("`RepoContext` no longer follows symlinks out of the working directory") sounded close
+    to this package's own path-traversal/symlink conventions on title alone, so it was read
+    via the PR's file list rather than assumed: it touches only
+    `src/pydantic_ai_harness/pydantic_ai_harness/repo_context/` (the `AGENTS.md`/`CLAUDE.md`
+    instruction-file capability), unrelated to `skills/` or to anything this package indexes
+    or stages. No action, and no regression risk to this package's own symlink checks in
+    `registries/`/`sandboxes/_staging.py`, which are independent code.
+
+  - **The ten security advisories in `v2.66.0` don't reach this package's surface.**
+    Checked each by name against what this package imports: the `web_fetch`/private-key
+    redaction/secret-exfiltration/DNS-allowlist/MCP-credential fixes are in capabilities and
+    tools this package doesn't wrap (confirmed by `grep`: no match for `web_fetch`,
+    `redact`, or `MCP` anywhere in `pydantic_ai_skills/`). The two schema-related ones —
+    "Exponential tool-schema expansion for models requiring inlined schemas" and
+    "Exponential `$ref` resolution in decision models" — sounded closest to
+    `_function_schema.function_schema()`/`GenerateToolJsonSchema`, which this package calls
+    directly, so they were checked against the diff rather than dismissed on description
+    alone: `_function_schema.py`'s only change in the whole `v2.63.0`–`v2.66.0` range is the
+    one-line `doc_descriptions` call site above (confirmed by the full diff shown earlier),
+    and `tools.py`'s only change is a docstring example rewrite
+    (`turn_on_strict_if_openai`→`turn_on_strict_if_supported`, unrelated to
+    `GenerateToolJsonSchema`'s own definition). Both ReDoS fixes are in provider-specific
+    schema transformers and decision-model `$ref` handling this package's own schema
+    generation path doesn't go through.
+
+  - **Checked `main`'s unreleased private-symbol diff, not just the tagged releases.**
+    `_function_schema.py` (186 lines) and `_utils.py` (227 lines) both have substantial
+    unreleased diffs past `v2.66.0`. Rather than treat that as a finding, the actual public
+    shapes this package depends on were read directly from `main`'s source: `function_schema(function,
+    schema_generator, *, tool_name=None, takes_ctx=None, docstring_format='auto',
+    require_parameter_descriptions=False)` and `class FunctionSchema` both still exist with
+    the same names, and `function_schema`'s keyword parameters still match this package's
+    four call sites in `types.py` exactly (`schema_generator`, `takes_ctx`,
+    `docstring_format`, `require_parameter_descriptions`, all as keywords — confirmed by
+    reading each call site). `is_async_callable`/`run_in_executor` keep their existing
+    signatures in `_utils.py` on `main` too (`run_in_executor`'s internal body changed to
+    relay exceptions through an outcome tuple rather than letting the worker thread raise
+    directly, but its call signature — `func, *args, **kwargs` — is unchanged, and this
+    package only calls it that way). `doc_descriptions` on `main` already matches the fixed
+    `v2.65.0`+ shape this entry's fix now handles. Harness's `skills/_loader.py` diff on
+    `main` is the pure refactor noted above. **This diff was read, not executed**: this
+    session's sandbox denied installing editable packages from the cloned `pydantic-ai`
+    checkout (a restriction on installing code from an untrusted clone, not specific to this
+    task), so `main` was verified by reading its source directly rather than by running
+    `pytest` against it — a future run with that restriction lifted should still run the
+    suite against `main` per this routine's own guidance.
+
+  **Verified empirically**: `pytest` — 359 passed at latest (`pydantic-ai-harness==0.66.0`,
+  `pydantic-ai-slim==2.66.0`, resolved by the session's normal `pip install
+  -e ".[test,git,s3,dev]"`) and 357 passed + 2 skipped at the declared floor
+  (`pydantic-ai-harness[skills]==0.28.1`, `pydantic-ai-slim==2.38.0`, installed fresh into a
+  clean `venv` per this routine's own warning against downgrading in place) — identical pass
+  counts to every prior entry back to 2026-10-16, confirming the fix restores parity rather
+  than changing behavior at either end of the supported range, and confirming (by reverting
+  the fix locally and re-running, see above) that the fix is what makes latest pass rather
+  than something else. `pre-commit run --all-files` (ruff, ruff-format, mypy) is clean at
+  latest. `tests/test_pydantic_ai_compat.py` and `tests/test_harness_compat.py` both pass
+  unchanged. No floor bump needed.
+
 ## 2026-10-30
 
 - **pydantic/pydantic-ai**: checked through `v2.63.0` (published 2026-10-27). Reviewed
