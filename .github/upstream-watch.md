@@ -12,6 +12,114 @@ for the next run.
 > dependency from 2026-09 onwards — see `.claude/commands/upstream-watch.md` for the
 > surface to check. Past entries are left as the record of what was known at the time.
 
+## 2026-11-14
+
+- **pydantic/pydantic-ai**: checked through `v2.68.0` (published 2026-11-12). Reviewed
+  `v2.67.0`–`v2.68.0` (no `v1.x` backport release appeared in this window; the
+  `clai2-bleeding` pre-release tag was re-checked and its notes still say "Sdists rebuilt
+  from `main` for `/update` on the CLAI `bleeding` channel. Not a release."). Also checked
+  `main` at commit `fb64b41` (2026-11-13) — one day past `v2.68.0`.
+- **pydantic-ai-harness**: checked through PyPI `0.68.0` (shipped alongside `pydantic-ai`
+  `v2.68.0`, confirmed by `pip show` in both test environments below).
+- **Verdict**: No action needed. Everything reviewed across `v2.67.0`–`v2.68.0` and `main`
+  is either purely additive with a safe default, an internal refactor with no behavioral
+  change, or outside this package's surface.
+
+  **Harness `skills/` surface**: `skills/_capability.py` has **zero diff** between
+  `v2.66.0` (last week's checked-through tag) and `v2.68.0`, and zero diff again between
+  `v2.68.0` and `main` — confirmed by `git diff --stat`, not inferred from release notes.
+  `Skills.__init__`'s parameters are therefore unchanged. `skills/_loader.py` has a 44-line
+  diff between `v2.66.0` and `v2.68.0`: this is the exact pure refactor the 2026-11-06 entry
+  already found on `main` as an unreleased diff (extracting `_skip_non_library()`/
+  `_read_skill()` helper functions out of `_libraries()`/`load_skill_libraries()`) — now
+  landed in a tagged release, confirmed byte-for-byte identical in behavior by reading the
+  diff directly (same branches, same `SkippedSkill`/`ValueError` construction, just moved
+  into named helpers). `skills/README.md` changed twice: `v2.66.0`→`v2.68.0` adds a "Ship
+  skills with your application" section documenting the existing per-library `workspace=`
+  pattern (`LocalWorkspaceBackend` rooted at the application's own files, no code change —
+  `_capability.py`'s zero diff confirms this is new prose for old behavior) plus a pointer to
+  harness's own Markdown-file/database-backed capability docs for non-`SKILL.md` instruction
+  sources; `v2.68.0`→`main` only swaps a static SVG diagram for an equivalent Mermaid
+  flowchart. Neither is a behavior change `SkillsCapability` needs to track.
+
+  **Private-symbol surface, checked by diffing source directly, not release notes**:
+  - `_griffe.py`: the only change between `v2.66.0` and `v2.68.0` extracts a `_parser_options()`
+    helper out of `doc_descriptions()`'s body (same `GoogleOptions`/`NumpyOptions`/
+    `SphinxOptions` construction, now in a `match` statement) — confirmed by reading the full
+    diff. `doc_descriptions`'s signature, `(func, *, docstring_format)`, and its
+    `TYPE_CHECKING`-gated `DocstringFormat` re-export, are both still present on `v2.68.0`,
+    confirmed by reading the file directly — this is the shape last week's fix
+    (`_DOC_DESCRIPTIONS_TAKES_SIG` feature detection in `types.py`) already handles. Zero diff
+    between `v2.68.0` and `main`.
+  - `_utils.py`: `v2.66.0`→`v2.68.0`'s 227-line diff adds `_TemporalGroupsContext`,
+    `_mapped_json_subschemas`, and `_rename_shared_defs_with_renamed_refs` — all new
+    functions/classes, confirmed by `grep`ping the diff for `^[+-]def \|^[+-]class `. Neither
+    `is_async_callable` nor `run_in_executor` appears anywhere in the diff (confirmed by
+    `grep`ping their names directly in the diff output, not just their definitions) — this
+    package's only two imports from this module are untouched. `main` adds one further
+    function, `host_derived_id()` (shared by `MCPToolset`/`MCP` for deriving an id from a
+    URL's hostname) — also unrelated.
+  - `_function_schema.py`: `v2.66.0`→`v2.68.0` adds `FunctionSchema.revalidate()` (a new
+    method for re-validating already-validated args after a serialization round-trip) and
+    refactors `function_schema()`'s parameter-processing loop into `_FunctionSchemaContext`/
+    `_add_parameter()`/`_add_field()` helpers — confirmed by reading the diff in full:
+    `function_schema()`'s own signature (`function, schema_generator, *, tool_name,
+    takes_ctx, docstring_format, require_parameter_descriptions`) is unchanged, matching all
+    four call sites in `types.py` exactly (verified by reading each call site, which only
+    passes `schema_generator`/`takes_ctx`/`docstring_format`/`require_parameter_descriptions`
+    as keywords). `main` carries this further: `single_field_name` moves from a computed
+    `@property` to a stored field on `FunctionSchema` (populated by a 4-tuple-returning
+    `_build_schema()`, up from 3), and `revalidate`/`_Revalidated` support it. Both are
+    unreleased-as-of-`main` and private helpers this package never touches — confirmed by
+    `grep -rn 'single_field_name\|single_arg_name\|_build_schema\|FunctionSchema('
+    pydantic_ai_skills/ tests/`, zero matches. The four `FunctionSchema` attributes this
+    package actually reads (`.description`, `.takes_ctx`, and `.call()` via
+    `SkillResource`/`SkillScript`'s `function_schema.call(args, ctx)`) are untouched in every
+    diff read above.
+  - `tools.py`: one-line addition, re-exporting `DeferredToolKind` from `_deferred` (unrelated
+    deferred-tool-kind feature). `GenerateToolJsonSchema` itself has no diff anywhere in this
+    range.
+  - `capabilities/abstract.py`: `v2.66.0`→`v2.68.0` adds `_durable_operations_need_id:
+    ClassVar[bool] = True` (default preserves existing behavior; `SkillsCapability` doesn't
+    set it). `v2.68.0`→`main` adds a private `_get_default_run_id_for_inputs()` hook with a
+    safe default implementation that just calls the existing `get_default_run_id()` —
+    `SkillsCapability` overrides neither, confirmed by the same `grep` the 2026-11-06 entry
+    already ran for the sibling `_default_run_id`/`_default_conversation_id` hooks.
+  - `toolsets/abstract.py`: zero diff, `v2.66.0` through `main`.
+  - `_run_context.py`: `v2.66.0`→`v2.68.0`'s 79-line diff adds `RunContext.dequeue()` and
+    `RunContext.set_enqueue_priority()` (the `#12345` feature from `v2.67.0`'s release notes)
+    plus a docstring wording update to `load_capability()`'s error message — `grep`ping the
+    diff for `active_capability_ids`, the one `RunContext` member `_toolset.py`'s
+    `require_loaded` gate reads, finds zero matches; confirmed unchanged. Zero diff
+    `v2.68.0`→`main`.
+
+  **Harness release-note items checked by name and found unrelated**: `v2.68.0`'s
+  Compatibility Notes list several harness renames (`num_results`→`max_results`,
+  `max_duration_secs`→`max_duration_seconds` in `#13075`; `CapabilityEvent` field renames in
+  `#13068`/`#13065`; the new `RefineOutput` capability in `#13120`) and `v2.67.0` adds
+  `KeenableSearch` and a `ConversationStore`-backed `conversation_store` feature — `grep -rn
+  'num_results\|max_duration_secs\|CapabilityEvent\|RefineOutput\|ConversationStore\|
+  KeenableSearch' pydantic_ai_skills/ tests/ docs/` finds nothing; none of these are capabilities
+  or fields this package wraps or reads. `v2.67.0`'s `RepoContext` changes (#11691, #11699)
+  are the `AGENTS.md`/`CLAUDE.md` instruction-file capability, the same unrelated capability
+  the 2026-11-06 entry's `#12044` finding already distinguished from `skills/`.
+
+  **Version floor and Python support**: `requires-python` is still `>=3.11` in both
+  `pydantic_ai_slim/pyproject.toml` and `src/pydantic_ai_harness/pyproject.toml` on `main` —
+  unchanged from every prior entry. No floor-related concern; no floor bump needed.
+
+  **Verified empirically**: `pytest` — 359 passed at latest (`pydantic-ai-harness==0.68.0`,
+  `pydantic-ai-slim==2.68.0`, resolved by the session's normal `pip install
+  -e ".[test,git,s3,dev]"`) and 357 passed + 2 skipped at the declared floor
+  (`pydantic-ai-harness[skills]==0.28.1`, `pydantic-ai-slim==2.38.0`, installed fresh into a
+  clean `venv` per this routine's own warning against downgrading in place) — identical pass
+  counts to every prior entry back to 2026-10-16, confirming nothing regressed at either end
+  of the supported range. `pre-commit run --all-files` (ruff, ruff-format, mypy) is clean at
+  latest — covering the one risk (the `TYPE_CHECKING`-only `DocstringFormat` re-export)
+  `pytest` alone can't catch. Both tripwire tests (`tests/test_pydantic_ai_compat.py`,
+  `tests/test_harness_compat.py`) pass unchanged — neither needed updating, since nothing
+  they pin moved. No floor bump needed; no source change needed.
+
 ## 2026-11-06
 
 - **pydantic/pydantic-ai**: checked through `v2.66.0` (published 2026-11-04). Reviewed
