@@ -30,7 +30,6 @@ from tests._harness import (
     HARNESS_DISCOVERS_PER_RUN,
     harness_leaves,
     harness_names,
-    harness_skills,
     instruction_parts,
     run_context,
 )
@@ -239,13 +238,13 @@ def leaves_of(capability: AbstractCapability[Any]) -> list[Any]:
 
 
 @pytest.mark.skipif(not HARNESS_DISCOVERS_PER_RUN, reason='harness <0.52 scans libraries during construction')
-async def test_for_run_returns_no_leaves_when_nothing_is_selected(library: Path) -> None:
+def test_for_run_returns_no_leaves_when_nothing_is_selected(library: Path) -> None:
     """`SkillsCapability._harness_leaves` ends up with nothing to re-emit as a skill.
 
-    harness 0.70 stopped returning `Skills` itself here, in favor of an empty
-    `CombinedCapability` — but either way `.apply()` visits no leaves, which is the only
-    thing `_harness_leaves` actually relies on.
+    Before harness 0.70, `for_run` returned `Skills` itself unchanged here; from 0.70 it
+    returns an empty `CombinedCapability` instead. `harness_leaves` filters out a bare
+    `Skills` leaf the same way `SkillsCapability._harness_leaves` does, so this passes
+    under either harness version — including the older one CI's Python 3.10 job resolves
+    for its "latest" dependency set, since newer harness releases require Python >=3.11.
     """
-    skills = harness_skills(library, include=[])
-
-    assert leaves_of(await skills.for_run(run_context())) == []
+    assert harness_leaves(library, include=[]) == []

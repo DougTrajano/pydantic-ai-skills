@@ -66,9 +66,20 @@ for the next run.
   `SkillsCapability._harness_leaves` reads — `self` is a bare `AbstractCapability` whose
   un-overridden `apply()` visits itself, filtered out by `_harness_leaves`'s
   `isinstance(leaf, Skills)` check; `CombinedCapability([])` has no `defer_loading` set, so
-  its `apply()` visits nothing at all. No source change needed; the test was renamed to
-  `test_for_run_returns_no_leaves_when_nothing_is_selected` and now asserts
-  `leaves_of(...) == []` instead of identity.
+  its `apply()` visits nothing at all. No source change needed. The test was renamed to
+  `test_for_run_returns_no_leaves_when_nothing_is_selected`; it now asserts
+  `harness_leaves(library, include=[]) == []`, reusing `tests/_harness.py`'s existing
+  `harness_leaves` helper (which already filters out a bare `Skills` leaf the same way
+  `_harness_leaves` does), rather than asserting on the raw, harness-version-dependent
+  `for_run()`/`apply()` shape directly. The first version of this fix asserted on the raw
+  shape with a local `leaves_of()` helper that does *not* filter `Skills` leaves, which is
+  correct against latest (`harness==0.71.0`, where `for_run` returns an empty
+  `CombinedCapability`) but wrong against CI's `Test (Python 3.10, deps latest)` job, which
+  resolves `pydantic-ai-harness==0.54.0` / `pydantic-ai-slim==2.54.0` (the newest release
+  pair that still supports Python 3.10, since 2.55+ requires Python >=3.11) — pre-0.70
+  harness, where `for_run` still returns `self` directly and `leaves_of(self)` is `[self]`,
+  not `[]`. CI caught this; reproduced locally in a clean venv pinned to that exact pair
+  before fixing it, see Verified empirically below.
 
   **The larger #13678 feature, checked for overlap with this package's own file tools**:
   `Skills(read_files=True)` is new in `v2.70.0` and gives the model a `read_skill_file` tool
@@ -135,15 +146,19 @@ for the next run.
   **Verified empirically**: `pytest` — before the fix, 354 passed / 5 failed at latest
   (`pydantic-ai-harness==0.71.0`, `pydantic-ai-slim==2.71.0`, via the session's normal `pip
   install -e ".[test,git,s3,dev]"`), confirming the break; after the fix, 359 passed at
-  latest, and 357 passed + 2 skipped at the declared floor (`pydantic-ai-harness[skills]==
+  latest, 357 passed + 2 skipped at the declared floor (`pydantic-ai-harness[skills]==
   0.28.1`, `pydantic-ai-slim==2.38.0`, installed fresh into a clean `venv` per this routine's
   own warning against downgrading in place) — identical pass counts to every prior entry
-  back to 2026-10-16, confirming nothing regressed at either end of the supported range.
-  `pre-commit run --all-files` (ruff, ruff-format, mypy) is clean at latest. Both tripwire
-  tests (`tests/test_pydantic_ai_compat.py`, `tests/test_harness_compat.py`) pass after the
-  fix — `test_pydantic_ai_compat.py` needed no change, since it only checks importability and
-  every symbol it pins still imports; `test_harness_compat.py` needed the one rename/
-  assertion update described above.
+  back to 2026-10-16, confirming nothing regressed at either end of the supported range —
+  and 359 passed at `pydantic-ai-harness==0.54.0`/`pydantic-ai-slim==2.54.0` in a third clean
+  `venv`, matching exactly what CI's `Test (Python 3.10, deps latest)` job resolves, which is
+  what caught the first version of the `test_harness_compat.py` fix being wrong for that
+  older harness shape (see the finding above). `pre-commit run --all-files` (ruff,
+  ruff-format, mypy) is clean at latest. Both tripwire tests
+  (`tests/test_pydantic_ai_compat.py`, `tests/test_harness_compat.py`) pass after the fix —
+  `test_pydantic_ai_compat.py` needed no change, since it only checks importability and every
+  symbol it pins still imports; `test_harness_compat.py` needed the rename/assertion update
+  described above, corrected once after CI caught the first attempt.
 
 ## 2026-11-14
 
