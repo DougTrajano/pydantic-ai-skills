@@ -12,6 +12,154 @@ for the next run.
 > dependency from 2026-09 onwards — see `.claude/commands/upstream-watch.md` for the
 > surface to check. Past entries are left as the record of what was known at the time.
 
+## 2026-11-21
+
+- **pydantic/pydantic-ai**: checked through `v2.71.0` (tagged 2026-11-19). Reviewed
+  `v2.69.0`–`v2.71.0` (no `v1.x` backport release appeared in this window; the
+  `clai2-bleeding` pre-release tag was not re-checked, consistent with prior entries
+  treating it as "Not a release"). Also checked `main` at commit `dee24df` (2026-11-20).
+- **pydantic-ai-harness**: checked through PyPI `0.71.0` (shipped alongside `pydantic-ai`
+  `v2.71.0`, confirmed by `pip show` in both test environments below).
+- **Verdict**: One real, confirmed break, fixed with a small, surgical change —
+  `doc_descriptions` gained a new required keyword-only parameter, `has_return_annotation`,
+  in `v2.70.0` (harness 0.70.0), breaking the `@skill` decorator's docstring-description
+  extraction. A second finding, a change to `Skills.for_run()`'s behavior when nothing is
+  selected, landed in the same release but needed only a test update, not a source change.
+  Everything else reviewed across `v2.69.0`–`v2.71.0` and `main` is either unrelated to this
+  package's surface or purely additive with a safe default.
+
+  **Confirmed break, fixed**: `pydantic_ai._griffe.doc_descriptions`'s signature changed
+  from `(func, *, docstring_format)` to `(func, *, docstring_format, has_return_annotation:
+  bool)` between `v2.69.0` and `v2.70.0` — confirmed by reading `_griffe.py` at both tags
+  directly (zero diff `v2.68.0`→`v2.69.0`; the 169-line diff lands entirely in `v2.70.0`, as
+  part of a larger rewrite of how Google-style Returns/Warnings sections are rendered into
+  the main description — read in full, unrelated to anything else this package touches).
+  `has_return_annotation` has no default, so `pydantic_ai_skills/types.py`'s call inside the
+  `@skill` decorator (`doc_descriptions(f, docstring_format='auto')`, the "no `sig`
+  parameter" branch of the `_DOC_DESCRIPTIONS_TAKES_SIG` feature-detection added for the
+  2026-11-06 break) raised `TypeError: doc_descriptions() missing 1 required keyword-only
+  argument: 'has_return_annotation'`. Reproduced directly: `pytest` against
+  `pydantic-ai-slim==2.71.0` failed 5 tests (`test_skill_decorator_derives_name_and_
+  description`, `test_skill_decorator_accepts_an_explicit_name`,
+  `test_skill_decorator_attaches_resources_and_scripts`,
+  `test_a_decorated_skill_reaches_the_capability` in `tests/test_programmatic_skills.py`,
+  plus `test_for_run_returns_skills_itself_when_nothing_is_selected` in
+  `tests/test_harness_compat.py`, the second finding below). Fixed with a second
+  feature-detection flag, `_DOC_DESCRIPTIONS_TAKES_RETURN_ANNOTATION`, computing
+  `has_return_annotation` the same way `_function_schema.function_schema` does at its own
+  call site — `'return' in get_type_hints(original_func, include_extras=True)` — read
+  directly from `_function_schema.py`'s `v2.71.0` source rather than guessed. The floor
+  (`pydantic-ai-slim==2.38.0`) takes neither new parameter, so the pre-existing
+  `_DOC_DESCRIPTIONS_TAKES_SIG` branch (oldest shape) and the plain two-argument call
+  (the 2.65–2.69 shape) are both still reachable and still pass there (see Verified
+  empirically below).
+
+  **Non-actionable finding, checked by diffing source, not release notes**:
+  `pydantic_ai_harness.skills._capability.Skills.for_run()` stopped returning `self`
+  unchanged when nothing is selected (`v2.68.0`: `return CombinedCapability(offered) if
+  offered else self`) and now always returns `CombinedCapability(offered)`, even when empty
+  (`v2.70.0`, part of the same PR that added `read_files=True`/`read_skill_file`, #13678).
+  `tests/test_harness_compat.py::test_for_run_returns_skills_itself_when_nothing_is_selected`
+  pinned the old identity and failed. Verified by direct repro (`python -c`, not just reading
+  the diff) that the practical effect is unchanged: both `self` (old) and
+  `CombinedCapability([])` (new) yield zero leaves from `.apply()`, which is the only thing
+  `SkillsCapability._harness_leaves` reads — `self` is a bare `AbstractCapability` whose
+  un-overridden `apply()` visits itself, filtered out by `_harness_leaves`'s
+  `isinstance(leaf, Skills)` check; `CombinedCapability([])` has no `defer_loading` set, so
+  its `apply()` visits nothing at all. No source change needed. The test was renamed to
+  `test_for_run_returns_no_leaves_when_nothing_is_selected`; it now asserts
+  `harness_leaves(library, include=[]) == []`, reusing `tests/_harness.py`'s existing
+  `harness_leaves` helper (which already filters out a bare `Skills` leaf the same way
+  `_harness_leaves` does), rather than asserting on the raw, harness-version-dependent
+  `for_run()`/`apply()` shape directly. The first version of this fix asserted on the raw
+  shape with a local `leaves_of()` helper that does *not* filter `Skills` leaves, which is
+  correct against latest (`harness==0.71.0`, where `for_run` returns an empty
+  `CombinedCapability`) but wrong against CI's `Test (Python 3.10, deps latest)` job, which
+  resolves `pydantic-ai-harness==0.54.0` / `pydantic-ai-slim==2.54.0` (the newest release
+  pair that still supports Python 3.10, since 2.55+ requires Python >=3.11) — pre-0.70
+  harness, where `for_run` still returns `self` directly and `leaves_of(self)` is `[self]`,
+  not `[]`. CI caught this; reproduced locally in a clean venv pinned to that exact pair
+  before fixing it, see Verified empirically below.
+
+  **The larger #13678 feature, checked for overlap with this package's own file tools**:
+  `Skills(read_files=True)` is new in `v2.70.0` and gives the model a `read_skill_file` tool
+  plus `${SKILL_DIR}`/`${CLAUDE_SKILL_DIR}` substitution in the body — exactly the kind of
+  change this routine's instructions flag as needing care, since it's the gap this package
+  fills. Confirmed non-conflicting: `SkillsCapability._build_harness_skills` never passes
+  `read_files=True` to `Skills(...)` (grepped every `Skills(` call site in `capability.py`,
+  zero matches for `read_files`), so no `read_skill_file` tool is added by harness today. The
+  placeholder substitution is also confirmed inert for this package's own usage: harness's
+  new substitution reads `source.workspace is None` to decide `in_run_workspace` (and
+  therefore whether to substitute), and `_build_harness_skills` always passes
+  `workspace=LocalWorkspaceBackend(Path.cwd())` when `_HARNESS_DISCOVERS_PER_RUN` (harness
+  >= 0.52, true for every harness release new enough to carry this feature) — so
+  `source.workspace is not None` always, `in_run_workspace` is always `False`, and harness
+  leaves `${SKILL_DIR}`/`${CLAUDE_SKILL_DIR}` untouched exactly as before, for this package.
+  `tests/test_harness_compat.py::test_skill_dir_placeholders_are_left_in_place` still passes
+  unchanged, confirming this empirically rather than just by reading the branch. Harness's
+  `read_skill_file` is strictly narrower than this package's own `read_skill_resource`/
+  `run_skill_script` (text files only, no scripts, no registries, no custom executors) and is
+  opt-in, so adopting it would not be a net improvement; no action taken, noted here so a
+  future run doesn't re-triage the same PR.
+
+  **Harness `skills/` surface otherwise**: `skills/README.md` also documents the new
+  (optional, non-default) `when_to_use` frontmatter field, appended to the catalog
+  description — `grep -rn when_to_use pydantic_ai_skills/ tests/ docs/` finds nothing in this
+  package, since neither `_parsing.py` nor `packages.py` parses or validates frontmatter
+  fields beyond `name`; harness owns this entirely. `skills/_capability.py` and
+  `skills/_loader.py` have zero diff between `v2.70.0` (where #13678 landed) and `v2.71.0`,
+  and zero diff again `v2.71.0`→`main` (confirmed by `git diff --stat`) — the feature is
+  fully settled in a tagged release, not still moving on `main`.
+
+  **Other private-symbol surface, checked by diffing source directly, not release notes**:
+  - `_function_schema.py`: the `function_schema()` call site that now passes
+    `has_return_annotation='return' in type_hints` to `doc_descriptions` is the only use of
+    the new parameter; `function_schema()`'s own signature (`function, schema_generator, *,
+    tool_name, takes_ctx, docstring_format, require_parameter_descriptions`) is unchanged
+    across `v2.69.0`–`v2.71.0`, matching every call site in `types.py`.
+  - `_utils.py`: `v2.68.0`→`v2.71.0` touches `get_function_type_hints` (new `include_keys`
+    parameter, additive with a default), `_mapped_json_subschemas` (renamed/moved to
+    `_json_schema_keywords.iter_subschemas`), and adds `has_yaml_structured_suffix` —
+    `grep`ping the full diff for `is_async_callable`/`run_in_executor`, this package's only
+    two imports from this module, finds zero matches; both still exist at `main` (confirmed
+    by reading their definitions directly).
+  - `_griffe.py`: see the confirmed break above; nothing further.
+  - `capabilities/abstract.py`: 117-line diff `v2.68.0`→`v2.71.0`, entirely in #13812's fix
+    ("the active-capability set is no longer rebuilt for every deferred capability on every
+    hook") — an internal performance fix to how `active_capability_ids` is cached, not to its
+    public shape; `_toolset.py`'s `require_loaded` gate still reads
+    `ctx.active_capability_ids` as a plain collection, confirmed unaffected by the full suite
+    passing.
+  - `toolsets/abstract.py`: zero diff, `v2.68.0` through `main`.
+  - `_run_context.py`: 95-line diff `v2.68.0`→`v2.71.0` (the `RunContext.dequeue()`/
+    `set_enqueue_priority()` addition already noted in the 2026-11-14 entry, plus a docstring
+    wording update); one further one-line change on `main` (a `# noqa: TID251` comment on an
+    unrelated `asyncio.Event` list). `active_capability_ids` does not appear in either diff.
+  - `tools.py`: 37-line diff, re-exporting a couple of new names (`DeferredToolKind` already
+    noted in a prior entry); `GenerateToolJsonSchema` itself has no diff anywhere in this
+    range.
+
+  **Version floor and Python support**: `requires-python` is still `>=3.11` in both
+  `pydantic_ai_slim/pyproject.toml` and `src/pydantic_ai_harness/pyproject.toml` on `main` —
+  unchanged from every prior entry. No floor-related concern; no floor bump needed.
+
+  **Verified empirically**: `pytest` — before the fix, 354 passed / 5 failed at latest
+  (`pydantic-ai-harness==0.71.0`, `pydantic-ai-slim==2.71.0`, via the session's normal `pip
+  install -e ".[test,git,s3,dev]"`), confirming the break; after the fix, 359 passed at
+  latest, 357 passed + 2 skipped at the declared floor (`pydantic-ai-harness[skills]==
+  0.28.1`, `pydantic-ai-slim==2.38.0`, installed fresh into a clean `venv` per this routine's
+  own warning against downgrading in place) — identical pass counts to every prior entry
+  back to 2026-10-16, confirming nothing regressed at either end of the supported range —
+  and 359 passed at `pydantic-ai-harness==0.54.0`/`pydantic-ai-slim==2.54.0` in a third clean
+  `venv`, matching exactly what CI's `Test (Python 3.10, deps latest)` job resolves, which is
+  what caught the first version of the `test_harness_compat.py` fix being wrong for that
+  older harness shape (see the finding above). `pre-commit run --all-files` (ruff,
+  ruff-format, mypy) is clean at latest. Both tripwire tests
+  (`tests/test_pydantic_ai_compat.py`, `tests/test_harness_compat.py`) pass after the fix —
+  `test_pydantic_ai_compat.py` needed no change, since it only checks importability and every
+  symbol it pins still imports; `test_harness_compat.py` needed the rename/assertion update
+  described above, corrected once after CI caught the first attempt.
+
 ## 2026-11-14
 
 - **pydantic/pydantic-ai**: checked through `v2.68.0` (published 2026-11-12). Reviewed

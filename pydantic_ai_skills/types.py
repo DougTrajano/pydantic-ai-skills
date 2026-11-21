@@ -15,7 +15,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from inspect import signature as get_signature
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, TypeVar, get_type_hints
 
 from pydantic.json_schema import GenerateJsonSchema
 from pydantic_ai import _function_schema
@@ -31,6 +31,12 @@ DepsT = TypeVar('DepsT')
 # `Signature`-as-`parent` workaround was no longer needed). Detect which shape is installed
 # rather than raising the floor past 2.38, where `sig` is still required.
 _DOC_DESCRIPTIONS_TAKES_SIG = 'sig' in get_signature(doc_descriptions).parameters
+
+# pydantic-ai 2.70 added a required `has_return_annotation` keyword-only parameter, used to
+# decide whether a Google-style Returns section's text is the whole return description or a
+# type to strip off. Feature-detect rather than raising the floor past 2.38, where it doesn't
+# exist; compute it the same way `_function_schema.function_schema` does.
+_DOC_DESCRIPTIONS_TAKES_RETURN_ANNOTATION = 'has_return_annotation' in get_signature(doc_descriptions).parameters
 
 
 def normalize_skill_name(func_name: str) -> str:
@@ -695,6 +701,11 @@ def skill(
         if skill_description is None:
             if _DOC_DESCRIPTIONS_TAKES_SIG:
                 skill_description, _ = doc_descriptions(f, get_signature(f), docstring_format='auto')
+            elif _DOC_DESCRIPTIONS_TAKES_RETURN_ANNOTATION:
+                has_return_annotation = 'return' in get_type_hints(f, include_extras=True)
+                skill_description, _ = doc_descriptions(
+                    f, docstring_format='auto', has_return_annotation=has_return_annotation
+                )
             else:
                 skill_description, _ = doc_descriptions(f, docstring_format='auto')
 
