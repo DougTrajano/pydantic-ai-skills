@@ -239,8 +239,13 @@ def leaves_of(capability: AbstractCapability[Any]) -> list[Any]:
 
 
 @pytest.mark.skipif(not HARNESS_DISCOVERS_PER_RUN, reason='harness <0.52 scans libraries during construction')
-async def test_for_run_returns_skills_itself_when_nothing_is_selected(library: Path) -> None:
-    """`SkillsCapability._harness_leaves` filters this out rather than re-emitting it as a skill."""
+async def test_for_run_returns_no_leaves_when_nothing_is_selected(library: Path) -> None:
+    """`SkillsCapability._harness_leaves` ends up with nothing to re-emit as a skill.
+
+    harness 0.70 stopped returning `Skills` itself here, in favor of an empty
+    `CombinedCapability` — but either way `.apply()` visits no leaves, which is the only
+    thing `_harness_leaves` actually relies on.
+    """
     skills = harness_skills(library, include=[])
 
-    assert await skills.for_run(run_context()) is skills
+    assert leaves_of(await skills.for_run(run_context())) == []
